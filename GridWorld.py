@@ -169,7 +169,7 @@ class GridWorldEnv:
 # --- Example Usage ---
 if __name__ == "__main__":
     # Initialize environment with p=0.8 (uncertainty) as described in Results 3.3
-    env = RobustGridWorldEnv(grid_size=3, p=0.8)
+    env = GridWorldEnv(grid_size=3, p=0.8)
     obs = env.reset()
     env.render()
     
