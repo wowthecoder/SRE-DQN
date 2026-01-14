@@ -1,5 +1,5 @@
 import numpy as np
-import random
+from juliacall import Main as jl
 
 class SRQAgent:
     """
@@ -10,7 +10,8 @@ class SRQAgent:
     """
     def __init__(self, agent_id, num_agents, num_actions, 
                  epsilon_robust=1.0, epsilon_explore=1.0, 
-                 alpha=0.1, gamma=0.9, decay_rate=0.999):
+                 alpha=0.1, gamma=0.9, decay_rate=0.999,
+                 julia_source_path="bimatrix_asym_solver.jl"):
         """
         Args:
             agent_id (int): Index of this agent (0 to n-1).
@@ -156,7 +157,10 @@ class SRQAgent:
         policies = self.solve_sre(state)
         my_policy = policies[self.agent_id]
         
-        # 2. Epsilon-greedy exploration
+        # 2. Normalize to ensure probabilities sum to 1 (numerical stability)
+        my_policy = my_policy / np.sum(my_policy)
+        
+        # 3. Epsilon-greedy exploration
         if np.random.rand() < self.epsilon_explore:
             return np.random.choice(self.num_actions)
         else:
