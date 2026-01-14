@@ -38,6 +38,29 @@ class SRQAgent:
         # We store Q-values for ALL agents (j=1...n) to calculate equilibrium.
         self.q_table = {}
 
+        # --- JULIA SETUP (juliacall) ---
+        print(f"Loading Julia solver from {julia_source_path}...")
+        
+        # 1. Include the source file
+        jl.include(julia_source_path)
+        
+        # 2. Bind the function. 
+        # Note: juliacall wraps functions as Python objects automatically.
+        self.julia_solve_func = jl.solve_strategically_robust_bimatrix_game
+        
+        # 3. Create a re-usable Symbol for dictionary access
+        # In Julia, keys are :p1, :p2. In PythonCall, we need the Symbol object.
+        self.sym_p1 = jl.Symbol("p1")
+        self.sym_p2 = jl.Symbol("p2")
+
+        # 4. JIT Warm-up
+        print("Warming up JIT compilation (this may take a few seconds)...")
+        dummy_u1 = np.random.rand(num_actions, num_actions)
+        dummy_u2 = np.random.rand(num_actions, num_actions)
+        # Call with dummy data
+        self.julia_solve_func(dummy_u1, dummy_u2, [1.0, 1.0], 1)
+        print("Julia Solver Ready.")
+
     def get_q_values(self, state):
         """Returns the Q-matrix for a given state, initializing if necessary."""
         state_key = str(state)
@@ -49,31 +72,59 @@ class SRQAgent:
 
     def solve_sre(self, state):
         """
-        Calculates the Strategically Robust Equilibrium (SRE) probabilities.
-        
-        Corresponds to the logic required for.
-        
-        Note: The paper uses the 'path' solver to solve the complementarity problem
-        defined by the SRE conditions[cite: 484]. This is a placeholder for that
-        optimization step.
+        Calculates the Strategically Robust Equilibrium using the Julia PATH solver.
         """
-        q_values = self.get_q_values(state)
+        q_tensor = self.get_q_values(state)
         
-        # --- SRE SOLVER LOGIC WOULD GO HERE ---
-        # The goal is to find strategies (pi_1, ..., pi_n) such that they are
-        # robust best responses to each other within a Wasserstein ball of radius self.epsilon_robust.
-        
-        # For this implementation snippet, we will approximate with a uniform 
-        # distribution if epsilon_robust is high, or standard Nash if 0.
-        # In a real implementation, you must use a QP/LCP solver here.
-        
-        # Placeholder: Returns uniform policies for all agents
-        policies = []
-        for _ in range(self.num_agents):
-            dist = np.ones(self.num_actions) / self.num_actions
-            policies.append(dist)
+        # Extract Payoff Matrices
+        U1 = q_tensor[:, :, 0]
+        U2 = q_tensor[:, :, 1]
+
+        # Call Julia Solver
+        # juliacall handles NumPy -> Julia Array conversion automatically.
+        try:
+            # Returns tuple: (solutions, utilities_sr, utilities_nominal)
+            results = self.julia_solve_func(
+                U1, U2, 
+                [self.epsilon_robust, self.epsilon_robust], 
+                3  # num_repeats
+            )
+            # Access the first element of the tuple (the solutions vector)
+            solutions_jl = results[0]
             
-        return policies
+        except Exception as e:
+            print(f"Julia Solver Error: {e}")
+            return [np.ones(self.num_actions)/self.num_actions] * 2
+
+        if len(solutions_jl) == 0:
+            # Fallback if solver fails to converge
+            uniform = np.ones(self.num_actions) / self.num_actions
+            return [uniform, uniform]
+
+        # Equilibrium Selection: Highest Joint Reward
+        best_sol = None
+        best_joint_reward = -float('inf')
+
+        # Iterate over the Julia Vector of Dictionaries
+        for sol_jl in solutions_jl:
+            # sol_jl is a Julia Dict. We access keys using the symbols we created.
+            # Then we convert the Julia Array to a NumPy array.
+            p1 = np.array(sol_jl[self.sym_p1])
+            p2 = np.array(sol_jl[self.sym_p2])
+            
+            # Calculate Expected Joint Reward
+            # R1 = p1 . U1 . p2
+            r1 = p1 @ U1 @ p2
+            # R2 = p1 . U2 . p2
+            r2 = p1 @ U2 @ p2
+            
+            current_reward = r1 + r2
+            
+            if current_reward > best_joint_reward:
+                best_joint_reward = current_reward
+                best_sol = [p1, p2]
+
+        return best_sol
 
     def calculate_srq_value(self, state):
         """

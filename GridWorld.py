@@ -167,15 +167,15 @@ class GridWorldEnv:
         print("-" * 10)
 
 # --- Example Usage ---
-if __name__ == "__main__":
-    # Initialize environment with p=0.8 (uncertainty) as described in Results 3.3
-    env = GridWorldEnv(grid_size=3, p=0.8)
-    obs = env.reset()
-    env.render()
+# if __name__ == "__main__":
+#     # Initialize environment with p=0.8 (uncertainty) as described in Results 3.3
+#     env = GridWorldEnv(grid_size=3, p=0.8)
+#     obs = env.reset()
+#     env.render()
     
-    # Example Step: Agent 1 moves Up (0), Agent 2 moves Left (3)
-    # Note: A2 starts at (2,2), Left is (2,1). A1 starts (2,0), Up is (1,0).
-    obs, rewards, done, info = env.step([0, 3]) 
+#     # Example Step: Agent 1 moves Up (0), Agent 2 moves Left (3)
+#     # Note: A2 starts at (2,2), Left is (2,1). A1 starts (2,0), Up is (1,0).
+#     obs, rewards, done, info = env.step([0, 3]) 
     
-    print(f"Rewards: {rewards}")
-    env.render()
+#     print(f"Rewards: {rewards}")
+#     env.render()
