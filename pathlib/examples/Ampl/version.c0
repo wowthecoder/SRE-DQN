@@ -1,0 +1,1 @@
+char xxxvers[] = "\n@(#) AMPL/%s, driver 20210611 (Machine_details)\n";
