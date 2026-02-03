@@ -224,3 +224,34 @@ class DeepSRQAgent:
     def decay_parameters(self):
         self.epsilon_robust *= self.decay_rate
         self.epsilon_explore *= self.decay_rate
+
+    def save_checkpoint(self, path):
+        checkpoint = {
+            "q_net": self.q_net.state_dict(),
+            "target_net": self.target_net.state_dict(),
+            "optimizer": self.optimizer.state_dict(),
+            "epsilon_robust": self.epsilon_robust,
+            "epsilon_explore": self.epsilon_explore,
+            "gamma": self.gamma,
+            "decay_rate": self.decay_rate,
+        }
+        torch.save(checkpoint, path)
+
+    def load_checkpoint(self, path, map_location=None):
+        if map_location is None:
+            map_location = self.device
+        checkpoint = torch.load(path, map_location=map_location)
+        if "q_net" in checkpoint:
+            self.q_net.load_state_dict(checkpoint["q_net"])
+        if "target_net" in checkpoint:
+            self.target_net.load_state_dict(checkpoint["target_net"])
+        if "optimizer" in checkpoint:
+            self.optimizer.load_state_dict(checkpoint["optimizer"])
+        if "epsilon_robust" in checkpoint:
+            self.epsilon_robust = checkpoint["epsilon_robust"]
+        if "epsilon_explore" in checkpoint:
+            self.epsilon_explore = checkpoint["epsilon_explore"]
+        if "gamma" in checkpoint:
+            self.gamma = checkpoint["gamma"]
+        if "decay_rate" in checkpoint:
+            self.decay_rate = checkpoint["decay_rate"]
