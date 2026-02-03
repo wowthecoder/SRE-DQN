@@ -1,4 +1,5 @@
 import numpy as np
+import pickle
 from path_solver import PathSolverWrapper, solve_strategically_robust_bimatrix_game_path
 
 class SRQAgent:
@@ -179,3 +180,11 @@ class SRQAgent:
         self.epsilon_robust *= self.decay_rate
         self.epsilon_explore *= self.decay_rate
         self.alpha *= self.decay_rate
+
+    def save_q_table(self, path):
+        with open(path, "wb") as f:
+            pickle.dump(self.q_table, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+    def load_q_table(self, path):
+        with open(path, "rb") as f:
+            self.q_table = pickle.load(f)
