@@ -1,6 +1,12 @@
 // pathwrap.c
 #include "Standalone_Path.h"
 
+typedef struct PathCtx PathCtx;
+PathCtx *path_create(int n, int nnz);
+int path_solve_ctx(PathCtx *ctx, int n, int nnz, int *status,
+                   double *z, double *f, double *lb, double *ub);
+void path_destroy(PathCtx *ctx);
+
 typedef int (*funcEval_t)(int, double*, double*);
 typedef int (*jacEval_t)(int, int, double*, int*, int*, int*, double*);
 
@@ -16,10 +22,10 @@ int jacEval(int n, int nnz, double *z, int *col_start, int *col_len,
   return g_jac ? g_jac(n, nnz, z, col_start, col_len, row, data) : -1;
 }
 
-int path_solve(int n, int nnz, double *z, double *f, double *lb, double *ub,
+int path_solve(PathCtx *ctx,
+               int n, int nnz, double *z, double *f, double *lb, double *ub,
                funcEval_t fe, jacEval_t je, int *status) {
   g_func = fe;
   g_jac = je;
-  pathMain(n, nnz, status, z, f, lb, ub);
-  return 0;
+  return path_solve_ctx(ctx, n, nnz, status, z, f, lb, ub);
 }

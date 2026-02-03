@@ -58,7 +58,7 @@ class GridWorldEnv:
             return self._get_obs(), [0, 0], True, {"reason": "max_steps"}
         
         self.current_step += 1
-        proposed_positions = [None, None]
+        proposed_positions = [(0, 0), (0, 0)]
         rewards = [0, 0]
         
         # 1. Calculate Proposed Movements (Stochasticity Handling)
