@@ -6,6 +6,6 @@ export PATH_LICENSE_STRING="1259252040&Courtesy&&&USR&GEN2035&5_1_2026&1000&PATH
 export LD_LIBRARY_PATH="$PWD/pathlib/lib_lnx:$LD_LIBRARY_PATH"
 
 gcc -shared -fPIC -Ipathlib/include -Ipathlib/examples/C -o pathwrap.so \
-    pathwrap.c pathlib/examples/C/Standalone_Path.c \
+    pathwrap.c pathlib/examples/C/Persistent_options.c \
     -Lpathlib/lib_lnx -lpath50 -lm -ldl \
     -Wl,-rpath,'$ORIGIN/pathlib/lib_lnx'

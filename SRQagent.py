@@ -1,11 +1,10 @@
 import ctypes as ct
 import os
-import sys
 import numpy as np
 
 
 class PathSolverWrapper:
-    def __init__(self, lib_path="pathwrap.so", lib_dir=None):
+    def __init__(self, lib_path="pathwrap.so"):
         lib_path = os.fspath(lib_path)
         if not os.path.isabs(lib_path):
             candidate = os.path.join(os.path.dirname(__file__), lib_path)
@@ -18,16 +17,8 @@ class PathSolverWrapper:
                 "Build pathwrap.so and/or pass an absolute path."
             )
 
-        self._preload_path_libs(lib_dir, lib_path)
         mode = getattr(ct, "RTLD_GLOBAL", 0) | getattr(ct, "RTLD_NOW", 0)
-        try:
-            self.lib = ct.CDLL(lib_path, mode=mode)
-        except OSError as e:
-            raise OSError(
-                f"Failed to load {lib_path}: {e}. "
-                "Check that libpath50 is accessible (pathlib/lib_lnx) "
-                "or preload it with ctypes.CDLL."
-            ) from e
+        self.lib = ct.CDLL(lib_path, mode=mode)
 
         self._func_type = ct.CFUNCTYPE(
             ct.c_int, ct.c_int, ct.POINTER(ct.c_double), ct.POINTER(ct.c_double)
@@ -38,21 +29,42 @@ class PathSolverWrapper:
             ct.POINTER(ct.c_int), ct.POINTER(ct.c_double)
         )
 
+        self.lib.path_create.argtypes = [ct.c_int, ct.c_int]
+        self.lib.path_create.restype = ct.c_void_p
+        self.lib.path_destroy.argtypes = [ct.c_void_p]
+        self.lib.path_destroy.restype = None
         self.lib.path_solve.argtypes = [
+            ct.c_void_p,
             ct.c_int, ct.c_int,
             ct.POINTER(ct.c_double), ct.POINTER(ct.c_double),
             ct.POINTER(ct.c_double), ct.POINTER(ct.c_double),
             self._func_type, self._jac_type,
             ct.POINTER(ct.c_int),
         ]
+        self.lib.path_solve.restype = ct.c_int
+
+        self._ctx = None
+        self._ctx_n = None
+        self._ctx_nnz = None
 
     def solve(self, n, nnz, z, f, lb, ub, func_eval, jac_eval):
         fe = self._func_type(func_eval)
         je = self._jac_type(jac_eval)
         self._last_fe = fe
         self._last_je = je
+
+        if self._ctx is None or n != self._ctx_n or nnz != self._ctx_nnz:
+            if self._ctx is not None:
+                self.lib.path_destroy(self._ctx)
+            self._ctx = self.lib.path_create(n, nnz)
+            if not self._ctx:
+                raise RuntimeError("PATH context creation failed.")
+            self._ctx_n = n
+            self._ctx_nnz = nnz
+
         status = ct.c_int()
         self.lib.path_solve(
+            self._ctx,
             n, nnz,
             z.ctypes.data_as(ct.POINTER(ct.c_double)),
             f.ctypes.data_as(ct.POINTER(ct.c_double)),
@@ -63,50 +75,18 @@ class PathSolverWrapper:
         )
         return status.value
 
-    def _preload_path_libs(self, lib_dir, lib_path):
-        base_dir = os.path.dirname(__file__)
-        wrap_dir = os.path.dirname(os.path.abspath(lib_path))
-        candidates = []
-        if lib_dir:
-            candidates.append(os.fspath(lib_dir))
+    def close(self):
+        if self._ctx is not None:
+            self.lib.path_destroy(self._ctx)
+            self._ctx = None
+            self._ctx_n = None
+            self._ctx_nnz = None
 
-        if sys.platform.startswith("linux"):
-            lib_name = "libpath50.so"
-            candidates.extend([
-                os.path.join(base_dir, "pathlib", "lib_lnx"),
-                os.path.join(wrap_dir, "pathlib", "lib_lnx"),
-                os.path.join(os.getcwd(), "pathlib", "lib_lnx"),
-            ])
-        elif sys.platform == "darwin":
-            lib_name = "libpath50.dylib"
-            candidates.extend([
-                os.path.join(base_dir, "pathlib", "lib_osx"),
-                os.path.join(wrap_dir, "pathlib", "lib_osx"),
-                os.path.join(os.getcwd(), "pathlib", "lib_osx"),
-            ])
-        elif sys.platform.startswith("win"):
-            lib_name = "libpath50.dll"
-            candidates.extend([
-                os.path.join(base_dir, "pathlib", "lib_win"),
-                os.path.join(wrap_dir, "pathlib", "lib_win"),
-                os.path.join(os.getcwd(), "pathlib", "lib_win"),
-            ])
-        else:
-            lib_name = "libpath50.so"
-            candidates.extend([
-                os.path.join(base_dir, "pathlib", "lib_lnx"),
-                os.path.join(wrap_dir, "pathlib", "lib_lnx"),
-                os.path.join(os.getcwd(), "pathlib", "lib_lnx"),
-            ])
-
-        mode = getattr(ct, "RTLD_GLOBAL", 0) | getattr(ct, "RTLD_NOW", 0)
-        for d in candidates:
-            dep = os.path.join(d, lib_name)
-            if os.path.exists(dep):
-                ct.CDLL(dep, mode=mode)
-                return
-
-        # If we got here, preload failed; fall through and let dlopen error out.
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:
+            pass
 
 
 def _build_index_map(nA, nB):
@@ -343,7 +323,7 @@ def solve_strategically_robust_bimatrix_game_path(
 
 class SRQAgent:
     """
-    Implements Algorithm 3: Strategically Robust Q-Learning (SRQ).
+    Implements Strategically Robust Q-Learning (SRQ).
     
     Each agent models the Q-functions of ALL agents to compute the 
     Strategically Robust Equilibrium (SRE) at each step.
@@ -376,7 +356,7 @@ class SRQAgent:
         self.decay_rate = decay_rate
 
         # Initialize Q-tables: Q_i^j(s, a1, ..., an) = 0
-        # Structure: Dictionary mapping state -> Tensor of shape (num_actions, ..., num_actions, num_agents)
+        # Structure: Dictionary mapping state -> Tensor of shape (num_actions_for agent 1, ..., num_actions for agent n, num_agents)
         # We store Q-values for ALL agents (j=1...n) to calculate equilibrium.
         self.q_table = {}
 
@@ -519,32 +499,3 @@ class SRQAgent:
         self.epsilon_robust *= self.decay_rate
         self.epsilon_explore *= self.decay_rate
         self.alpha *= self.decay_rate
-
-# --- Example Training Loop (Pseudocode for Context) ---
-# See
-def train_srq(env, num_episodes=3000):
-    # Initialize agents (assuming 2 agents, 4 actions each)
-    agents = [SRQAgent(i, 2, 4) for i in range(2)]
-    
-    for episode in range(num_episodes):
-        state = env.reset()
-        done = False
-        
-        while not done:
-            # 1. Choose actions
-            actions = [agent.act(state) for agent in agents]
-            
-            # 2. Step environment
-            next_state, rewards, done, _ = env.step(actions)
-            
-            # 3. Update Q-tables
-            # Note: Each agent acts independently but models the other.
-            # In a centralized training simulation, we can loop:
-            for agent in agents:
-                agent.update(state, actions, rewards, next_state)
-            
-            state = next_state
-        
-        # 4. Decay parameters
-        for agent in agents:
-            agent.decay_parameters()
