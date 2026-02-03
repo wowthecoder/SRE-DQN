@@ -11,7 +11,7 @@ class GridWorldEnv:
         p (float): Probability of successful action transition. 
                    (1-p)/3 probability of slipping to other directions.
     """
-    def __init__(self, grid_size=3, p=1.0, max_steps=500):
+    def __init__(self, grid_size=3, p=1.0, max_steps=100):
         self.grid_size = grid_size
         self.p = p
         self.max_steps = max_steps

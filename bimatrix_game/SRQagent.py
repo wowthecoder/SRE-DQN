@@ -11,7 +11,7 @@ class SRQAgent:
     """
     def __init__(self, agent_id, num_agents, num_actions,
                  epsilon_robust=1.0, epsilon_explore=1.0,
-                 alpha=0.1, gamma=0.9, decay_rate=0.999,
+                 alpha=0.1, gamma=0.9, decay_rate=0.998,
                  pathwrap_path="pathwrap.so"):
         """
         Args:
@@ -23,6 +23,9 @@ class SRQAgent:
             alpha (float): Learning rate.
             gamma (float): Discount factor.
             decay_rate (float): Decay rate for alpha, epsilon_robust, epsilon_explore.
+            epsilon_robust_min (float): Minimum value for epsilon_robust.
+            epsilon_explore_min (float): Minimum value for epsilon_explore.
+            alpha_min (float): Minimum value for alpha.
             pathwrap_path (str): Path to the compiled pathwrap shared library.
         """
         self.agent_id = agent_id
@@ -174,11 +177,11 @@ class SRQAgent:
 
     def decay_parameters(self):
         """
-        Linearly decay epsilon, epsilon_explore, and alpha.
+        Exponentially decay epsilon, epsilon_explore, and alpha to minimum values.
        
         """
         self.epsilon_robust *= self.decay_rate
-        self.epsilon_explore *= self.decay_rate
+        self.epsilon_explore *= self.decay_rate 
         self.alpha *= self.decay_rate
 
     def save_q_table(self, path):
