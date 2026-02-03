@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from collections import deque
-from juliacall import Main as jl
+from path_solver import PathSolverWrapper, solve_strategically_robust_bimatrix_game_path
 
 # --- 1. Q-Network Architecture ---
 class SRQNetwork(nn.Module):
@@ -56,9 +56,10 @@ class ReplayBuffer:
 # --- 3. Deep SRQ Agent ---
 class DeepSRQAgent:
     def __init__(self, agent_id, obs_dim, num_agents, num_actions, 
-                 julia_source_path,
+                 pathwrap_path="pathwrap.so",
                  epsilon_robust=1.0, epsilon_explore=1.0, 
-                 lr=1e-3, gamma=0.9, decay_rate=0.999, buffer_size=10000):
+                 lr=1e-3, gamma=0.9, decay_rate=0.999, buffer_size=10000,
+                 use_gpu=True):
         
         self.agent_id = agent_id
         self.num_agents = num_agents
@@ -67,7 +68,10 @@ class DeepSRQAgent:
         self.epsilon_explore = epsilon_explore
         self.gamma = gamma
         self.decay_rate = decay_rate
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        if use_gpu and torch.cuda.is_available():
+            self.device = torch.device("cuda")
+        else:
+            self.device = torch.device("cpu")
 
         # Neural Networks
         self.q_net = SRQNetwork(obs_dim, num_actions, num_agents).to(self.device)
@@ -77,16 +81,14 @@ class DeepSRQAgent:
         
         self.replay_buffer = ReplayBuffer(buffer_size)
 
-        # --- Julia Solver Setup (Same as tabular) ---
-        print(f"Loading Julia solver from {julia_source_path}...")
-        jl.include(julia_source_path)
-        self.julia_solve_func = jl.solve_strategically_robust_bimatrix_game
-        self.sym_p1 = jl.Symbol("p1")
-        self.sym_p2 = jl.Symbol("p2")
+        # --- PATH Solver Setup (Same as tabular) ---
+        print(f"Loading PATH wrapper from {pathwrap_path}...")
+        self.path_solver = PathSolverWrapper(pathwrap_path)
+        print("PATH Solver Ready.")
 
     def solve_sre_from_tensor(self, q_tensor_np):
         """
-        Extracts matrices from a numpy Q-tensor and solves for SRE using Julia.
+        Extracts matrices from a numpy Q-tensor and solves for SRE using PATH.
         Expects q_tensor_np shape: (A1, A2, Num_Agents)
         """
         # Extract Payoff Matrices for Agent 0 and Agent 1
@@ -94,18 +96,19 @@ class DeepSRQAgent:
         U2 = q_tensor_np[:, :, 1]
 
         try:
-            results = self.julia_solve_func(
-                U1, U2, 
-                [self.epsilon_robust, self.epsilon_robust], 
-                3 # num_repeats
+            results = solve_strategically_robust_bimatrix_game_path(
+                U1, U2,
+                [self.epsilon_robust, self.epsilon_robust],
+                3,
+                self.path_solver
             )
-            solutions_jl = results[0]
+            solutions = results[0]
         except Exception:
             # Fallback to uniform if solver fails
             uniform = np.ones(self.num_actions) / self.num_actions
             return [uniform, uniform]
 
-        if len(solutions_jl) == 0:
+        if len(solutions) == 0:
             uniform = np.ones(self.num_actions) / self.num_actions
             return [uniform, uniform]
 
@@ -113,9 +116,9 @@ class DeepSRQAgent:
         best_sol = None
         best_joint_reward = -float('inf')
 
-        for sol_jl in solutions_jl:
-            p1 = np.array(sol_jl[self.sym_p1])
-            p2 = np.array(sol_jl[self.sym_p2])
+        for sol in solutions:
+            p1 = np.array(sol["p1"])
+            p2 = np.array(sol["p2"])
             
             r1 = p1 @ U1 @ p2
             r2 = p1 @ U2 @ p2
