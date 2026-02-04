@@ -6,4 +6,5 @@ matplotlib
 numpy
 tqdm 
 ipykernel
-nashpy
+pettingzoo
+mpe2
