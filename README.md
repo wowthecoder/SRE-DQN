@@ -10,4 +10,3 @@ gcc -shared -fPIC -Ipathlib/include -Ipathlib/examples/C -o pathwrap.so \
     -Lpathlib/lib_lnx -lpath50 -lm -ldl \
     -Wl,-rpath,'$ORIGIN/pathlib/lib_lnx'
 
-Make it max 100 steps
