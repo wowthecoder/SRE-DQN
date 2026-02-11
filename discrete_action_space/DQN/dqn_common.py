@@ -112,7 +112,7 @@ class PrioritizedReplayBuffer:
         return len(self.buffer)
 
 
-class BaseDDqnSrqAgent:
+class BaseDDqnAgent:
     """
     Common DQN agent logic with SRQAgent-style API compatibility.
     Uses Double DQN bootstrap by default. Subclasses can override network type
@@ -125,7 +125,6 @@ class BaseDDqnSrqAgent:
         obs_dim,
         num_agents,
         num_actions,
-        pathwrap_path="pathwrap.so",
         epsilon_robust=1.0,
         epsilon_explore=1.0,
         lr=1e-3,
@@ -134,8 +133,6 @@ class BaseDDqnSrqAgent:
         buffer_size=10000,
         use_gpu=True,
     ):
-        # pathwrap_path is kept for constructor compatibility.
-        _ = pathwrap_path
 
         self.agent_id = agent_id
         self.obs_dim = obs_dim

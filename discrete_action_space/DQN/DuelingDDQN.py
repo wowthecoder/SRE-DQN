@@ -1,7 +1,7 @@
-from dqn_common import BaseDDqnSrqAgent, DuelingQNetwork
+from dqn_common import BaseDDqnAgent, DuelingQNetwork
 
 
-class DuelingDDqnSrqAgent(BaseDDqnSrqAgent):
+class DuelingDDqnAgent(BaseDDqnAgent):
     """Dueling Double DQN."""
 
     def _build_network(self) -> DuelingQNetwork:
