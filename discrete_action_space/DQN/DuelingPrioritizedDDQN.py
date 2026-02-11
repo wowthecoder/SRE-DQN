@@ -1,9 +1,9 @@
 import torch
 
-from dqn_common import BaseDDqnSrqAgent, DuelingQNetwork, PrioritizedReplayBuffer
+from dqn_common import BaseDDqnAgent, DuelingQNetwork, PrioritizedReplayBuffer
 
 
-class DuelingPrioritizedDDqnSrqAgent(BaseDDqnSrqAgent):
+class DuelingPrioritizedDDqnAgent(BaseDDqnAgent):
     """Dueling Double DQN with prioritized experience replay."""
 
     def __init__(
@@ -12,7 +12,6 @@ class DuelingPrioritizedDDqnSrqAgent(BaseDDqnSrqAgent):
         obs_dim,
         num_agents,
         num_actions,
-        pathwrap_path="pathwrap.so",
         epsilon_robust=1.0,
         epsilon_explore=1.0,
         lr=1e-3,
@@ -30,7 +29,6 @@ class DuelingPrioritizedDDqnSrqAgent(BaseDDqnSrqAgent):
             obs_dim=obs_dim,
             num_agents=num_agents,
             num_actions=num_actions,
-            pathwrap_path=pathwrap_path,
             epsilon_robust=epsilon_robust,
             epsilon_explore=epsilon_explore,
             lr=lr,

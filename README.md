@@ -10,3 +10,6 @@ gcc -shared -fPIC -Ipathlib/include -Ipathlib/examples/C -o pathwrap.so \
     -Lpathlib/lib_lnx -lpath50 -lm -ldl \
     -Wl,-rpath,'$ORIGIN/pathlib/lib_lnx'
 
+Virtual environment managed in conda, python version is 3.9 because marllib cannot go along with newer Python versions.
+Stored in /vol/bitbucket/jhl323/miniconda3/envs/fypenv
+Do `conda activate fypenv` to activate venv

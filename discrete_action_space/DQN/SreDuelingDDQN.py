@@ -5,7 +5,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from dqn_common import BaseDDqnSrqAgent
+from dqn_common import BaseDDqnAgent
 
 # Support importing path_solver.py when this module is imported from DQN folder.
 _THIS_DIR = Path(__file__).resolve().parent
@@ -57,7 +57,7 @@ class DuelingJointQNetwork(nn.Module):
         return q_joint.view(-1, self.num_actions, self.num_actions, self.num_agents)
 
 
-class DuelingSreDDqnSrqAgent(BaseDDqnSrqAgent):
+class SreDuelingDDqnAgent(BaseDDqnAgent):
     """
     Dueling DDQN variant that computes SRE at every step for Bellman targets.
 
@@ -83,7 +83,7 @@ class DuelingSreDDqnSrqAgent(BaseDDqnSrqAgent):
     ):
         if num_agents != 2:
             raise ValueError(
-                "DuelingSreDDqnSrqAgent currently supports only num_agents == 2."
+                "SreDuelingDDqnAgent currently supports only num_agents == 2."
             )
 
         self.sre_num_repeats = sre_num_repeats
@@ -94,7 +94,6 @@ class DuelingSreDDqnSrqAgent(BaseDDqnSrqAgent):
             obs_dim=obs_dim,
             num_agents=num_agents,
             num_actions=num_actions,
-            pathwrap_path=pathwrap_path,
             epsilon_robust=epsilon_robust,
             epsilon_explore=epsilon_explore,
             lr=lr,
@@ -166,12 +165,12 @@ class DuelingSreDDqnSrqAgent(BaseDDqnSrqAgent):
 
         if actions_arr.shape[0] != self.num_agents:
             raise ValueError(
-                "DuelingSreDDqnSrqAgent expects full joint actions with length "
+                "SreDuelingDDqnAgent expects full joint actions with length "
                 f"{self.num_agents}, got shape {actions_arr.shape}."
             )
         if rewards_arr.shape[0] != self.num_agents:
             raise ValueError(
-                "DuelingSreDDqnSrqAgent expects full reward vector with length "
+                "SreDuelingDDqnAgent expects full reward vector with length "
                 f"{self.num_agents}, got shape {rewards_arr.shape}."
             )
         return actions_arr, rewards_arr
@@ -262,3 +261,7 @@ class DuelingSreDDqnSrqAgent(BaseDDqnSrqAgent):
     def close(self):
         if getattr(self, "path_solver", None) is not None:
             self.path_solver.close()
+
+
+# Backward compatibility
+DuelingSreDDqnSrqAgent = SreDuelingDDqnAgent
