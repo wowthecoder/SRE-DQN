@@ -106,7 +106,7 @@ def _build_index_map(nA, nB):
 
 
 def solve_strategically_robust_bimatrix_game_path(
-    U1, U2, epsilon_values, num_repeats, path_solver, verbose=False
+    U1, U2, epsilon_values, num_repeats, path_solver, verbose=False, round_digits=4
 ):
     if U2.shape == U1.shape:
         U2 = U2.T
@@ -308,7 +308,13 @@ def solve_strategically_robust_bimatrix_game_path(
             lambda1 = float(z[s["lambda1"]])
             lambda2 = float(z[s["lambda2"]])
 
-            sol = {"p1": np.round(p1, 4).tolist(), "p2": np.round(p2, 4).tolist()}
+            if round_digits is None:
+                sol = {"p1": p1.tolist(), "p2": p2.tolist()}
+            else:
+                sol = {
+                    "p1": np.round(p1, round_digits).tolist(),
+                    "p2": np.round(p2, round_digits).tolist(),
+                }
             if sol not in solutions_p:
                 solutions_p.append(sol)
                 utility1_sr = np.sum(p2 * xi1) - lambda1 * epsilon_values[0]
