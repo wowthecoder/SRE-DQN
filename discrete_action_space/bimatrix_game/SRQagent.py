@@ -1,5 +1,12 @@
 import numpy as np
 import pickle
+import sys
+from pathlib import Path
+
+_THIS_DIR = Path(__file__).resolve().parent
+if str(_THIS_DIR) not in sys.path:
+    sys.path.insert(0, str(_THIS_DIR))
+
 from path_solver import PathSolverWrapper, solve_strategically_robust_bimatrix_game_path
 
 class SRQAgent:
