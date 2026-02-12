@@ -4,13 +4,9 @@ matplotlib
 numpy
 tqdm 
 ipykernel
-pettingzoo
+pettingzoo[mpe]
 pytest
-marllib
-pygame
+torchrl
+benchmarl
+vmas
 pandas
-ray==1.8.0
-ray[tune]==1.8.0
-ray[rllib]==1.8.0
-ipywidgets
-pydantic
