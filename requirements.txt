@@ -10,3 +10,4 @@ torchrl
 benchmarl
 vmas
 pandas
+scipy
