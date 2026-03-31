@@ -1,0 +1,9 @@
+venv/
+.codex
+
+# BenchMARL / notebook run artifacts
+**/benchmarl_runs/
+/iql_simple_tag_*/
+
+**/__pycache__/
+**/.ipynb_checkpoints/
