@@ -4,7 +4,7 @@ from copy import deepcopy as dc
 from tqdm import tqdm
 
 from SREAgent_lib import SreNN
-from NashRL import collect_parallel_rollouts
+from NashRL import collect_parallel_rollouts, save_resume_checkpoint
 
 import os
 
@@ -125,6 +125,7 @@ def run_SRE_Agent(
     sum_loss = np.zeros(num_sim)
     slow_update_every = 50
     loss_log_every = 200
+    best_checkpoint_dir = os.path.join(path, "best_checkpoint")
 
     # ---------------------------------------------------------------
     # Main training loop
@@ -218,26 +219,55 @@ def run_SRE_Agent(
             tqdm.write("Weights saved")
 
         # --- Early stopping ---
-        if early_stop:
-            if best_loss is None or total_loss_item < best_loss:
-                tqdm.write("New best loss: {:.4f}".format(total_loss_item))
-                best_loss = dc(total_loss_item)
-                best_action_net = dc(sre_agent.action_net.state_dict())
-                best_value_net = dc(sre_agent.value_net.state_dict())
-                best_idx = k
-                impv_counter = 0
+        if best_loss is None or total_loss_item < best_loss:
+            tqdm.write("New best loss: {:.4f}".format(total_loss_item))
+            best_loss = dc(total_loss_item)
+            best_action_net = dc(sre_agent.action_net.state_dict())
+            best_value_net = dc(sre_agent.value_net.state_dict())
+            best_idx = k
+            impv_counter = 0
 
-                if k > 1000:
-                    torch.save(best_action_net, AN_file_name + "_best.pt")
-                    torch.save(best_value_net, VN_file_name + "_best.pt")
-            else:
-                impv_counter += 1
-                if impv_counter > early_lim:
-                    tqdm.write("EARLY STOPPING at episode {}".format(k))
-                    torch.save(best_action_net, AN_file_name + "_best.pt")
-                    torch.save(best_value_net, VN_file_name + "_best.pt")
-                    progress_bar.close()
-                    return sre_agent, sum_loss
+            tqdm.write("Saving best checkpoint to disk")
+            save_resume_checkpoint(
+                agent=sre_agent,
+                checkpoint_dir=best_checkpoint_dir,
+                iteration=k,
+                total_loss=total_loss_item,
+                value_loss=vloss.item(),
+                action_loss=aloss.item(),
+                best_loss=best_loss,
+                best_idx=best_idx,
+                impv_counter=impv_counter,
+                sum_loss=sum_loss,
+                good_action_net_w=good_action_net_w,
+                good_value_net_w=good_value_net_w,
+                extra_state={
+                    'trainer': 'sre',
+                    'num_sim': int(num_sim),
+                    'max_steps': int(max_T),
+                    'mini_batch': int(mini_batch),
+                    'rv_min': float(rv_min),
+                    'rv_max': float(rv_max),
+                    'slow_update_every': int(slow_update_every),
+                    'loss_log_every': int(loss_log_every),
+                    'eps_0': float(eps_0),
+                    'eps_b': float(eps_b),
+                    'eps_decay_horizon': None if eps_decay_horizon is None else int(eps_decay_horizon),
+                    'eps_reg': float(eps_reg),
+                    'delta_min': float(delta_min),
+                    'gamma': float(gamma),
+                    'an_file_name': AN_file_name,
+                    'vn_file_name': VN_file_name,
+                },
+            )
+            tqdm.write("Best checkpoint saved")
+        else:
+            impv_counter += 1
+            if early_stop and impv_counter > early_lim:
+                tqdm.write("EARLY STOPPING at episode {}".format(k))
+                tqdm.write("Latest best checkpoint remains in {}".format(best_checkpoint_dir))
+                progress_bar.close()
+                return sre_agent, sum_loss
 
     progress_bar.close()
     tqdm.write("Saving final weights to disk")

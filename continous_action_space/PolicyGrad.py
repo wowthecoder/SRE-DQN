@@ -5,6 +5,9 @@ import numpy as np
 import timeit
 from copy import deepcopy as dc
 import matplotlib.pyplot as plt
+from tqdm import tqdm
+
+from NashRL import collect_parallel_rollouts
 
 class Policy(torch.nn.Module):
 
@@ -297,6 +300,46 @@ def sim_policy(sim, nm, ns, nm2 , ns2, pol, other_pol, it_lim=2000, nash_a0=Fals
             print("Finishing epoch: " + str(epoch))
 
     return state_arr, action_arr, reward_arr
+
+
+def collect_nash_like_rewards_batched(sim, norm_mean, norm_std, pol, other_pol, num_trials, it_lim, desc=None):
+    """
+    Batched GPU evaluation for Nash-like policies that expose predict_action(...)[..., 4].
+
+    Returns reward tensors with shape [num_trials, it_lim, n_steps, n_agents], matching
+    the notebook's existing post-processing code.
+    """
+    if not hasattr(pol, 'predict_action') or not hasattr(other_pol, 'predict_action'):
+        raise ValueError("Batched evaluation currently supports Nash/SRE-style agents with predict_action().")
+
+    n_steps = int(sim.T / sim.dt)
+    n_agents = sim.N
+    total_episodes = num_trials * it_lim
+    device = next(pol.action_net.parameters()).device
+
+    def action_fn(cur_s, cur_ivt):
+        pol_actions = pol.predict_action(cur_s, cur_ivt)[:, 4].view(total_episodes, n_agents)
+        other_actions = other_pol.predict_action(cur_s, cur_ivt)[:, 4].view(total_episodes, n_agents)
+        all_actions = other_actions.clone()
+        all_actions[:, 0] = pol_actions[:, 0]
+        return all_actions
+
+    if desc is not None:
+        tqdm.write(desc)
+
+    replay_sample = collect_parallel_rollouts(
+        sim_obj=sim,
+        max_steps=n_steps,
+        mini_batch=total_episodes,
+        norm_mean=norm_mean,
+        norm_std=norm_std,
+        action_fn=action_fn,
+        device=device,
+    )
+
+    rewards = replay_sample[5].view(n_steps, total_episodes, n_agents)
+    rewards = rewards.permute(1, 0, 2).contiguous()
+    return rewards.view(num_trials, it_lim, n_steps, n_agents)
 
 def fic_replay_bp_ddqn(sim, nm, ns, its=20, it_lim=2000, lr=0.001, weight_decay=1e-3, rand_inv=0, other_pol_init=None, starting_i=0, wdir='', start_itn=None, q0=True, tau=.5, minibatch=10):
     start = timeit.default_timer()

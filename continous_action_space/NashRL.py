@@ -77,10 +77,10 @@ def expand_batch_states(remaining_t, price, impact_state, inventory, init_invent
     norm_mean_t = torch.as_tensor(norm_mean, device=device, dtype=dtype).flatten()
     norm_std_t = torch.as_tensor(norm_std, device=device, dtype=dtype).flatten()
 
-    t_feat = (remaining_t.unsqueeze(1) - norm_mean_t[0]) / norm_std_t[0]
-    p_feat = ((price - impact_state).unsqueeze(1) - norm_mean_t[1]) / norm_std_t[1]
+    t_feat = ((remaining_t.unsqueeze(1) - norm_mean_t[0]) / norm_std_t[0]).expand(-1, num_players)
+    p_feat = (((price - impact_state).unsqueeze(1) - norm_mean_t[1]) / norm_std_t[1]).expand(-1, num_players)
     q_feat = (inventory - norm_mean_t[2]) / norm_std_t[2]
-    i_feat = (impact_state.unsqueeze(1) - norm_mean_t[3]) / norm_std_t[3]
+    i_feat = ((impact_state.unsqueeze(1) - norm_mean_t[3]) / norm_std_t[3]).expand(-1, num_players)
 
     if num_players > 1:
         dq = inventory - init_inventory
@@ -222,6 +222,61 @@ def collect_parallel_rollouts(sim_obj, max_steps, mini_batch, norm_mean, norm_st
     )
 
 
+def save_resume_checkpoint(
+    agent,
+    checkpoint_dir,
+    iteration,
+    total_loss,
+    value_loss,
+    action_loss,
+    best_loss,
+    best_idx,
+    impv_counter,
+    sum_loss,
+    good_action_net_w,
+    good_value_net_w,
+    extra_state=None,
+):
+    """
+    Save a resumable training checkpoint plus a lightweight human-readable summary.
+    """
+    os.makedirs(checkpoint_dir, exist_ok=True)
+
+    checkpoint = {
+        'iteration': int(iteration),
+        'total_loss': float(total_loss),
+        'value_loss': float(value_loss),
+        'action_loss': float(action_loss),
+        'best_loss': None if best_loss is None else float(best_loss),
+        'best_idx': None if best_idx is None else int(best_idx),
+        'improvement_counter': int(impv_counter),
+        'sum_loss': np.array(sum_loss, copy=True),
+        'action_net_state_dict': dc(agent.action_net.state_dict()),
+        'value_net_state_dict': dc(agent.value_net.state_dict()),
+        'slow_val_net_state_dict': dc(agent.slow_val_net.state_dict()),
+        'optimizer_dqn_state_dict': dc(agent.optimizer_DQN.state_dict()),
+        'optimizer_value_state_dict': dc(agent.optimizer_value.state_dict()),
+        'good_action_net_state_dict': dc(good_action_net_w),
+        'good_value_net_state_dict': dc(good_value_net_w),
+        'numpy_random_state': np.random.get_state(),
+        'torch_random_state': torch.get_rng_state(),
+        'extra_state': extra_state or {},
+    }
+    if torch.cuda.is_available():
+        checkpoint['torch_cuda_random_state_all'] = torch.cuda.get_rng_state_all()
+
+    torch.save(checkpoint, os.path.join(checkpoint_dir, 'checkpoint.pt'))
+
+    with open(os.path.join(checkpoint_dir, 'training_state.txt'), 'w', encoding='utf-8') as state_file:
+        state_file.write("iteration: {}\n".format(int(iteration)))
+        state_file.write("total_loss: {:.8f}\n".format(float(total_loss)))
+        state_file.write("value_loss: {:.8f}\n".format(float(value_loss)))
+        state_file.write("action_loss: {:.8f}\n".format(float(action_loss)))
+        state_file.write("best_loss: {}\n".format("None" if best_loss is None else "{:.8f}".format(float(best_loss))))
+        state_file.write("best_idx: {}\n".format("None" if best_idx is None else int(best_idx)))
+        state_file.write("improvement_counter: {}\n".format(int(impv_counter)))
+
+
 def run_Nash_Agent(sim_obj, sim_dict, max_steps, nash_agent=None, num_sim=15000, batch_update_size=100, buffersize=5000, AN_file_name="Action_Net", VN_file_name="Value_Net", norm_mean=np.zeros((4,1)), norm_std=np.ones((4,1)), rv_min=.01, rv_max=2.5, is_numpy=False, path='', early_stop=False, early_lim=1000, mini_batch=10):
     """
     Runs the nash RL algothrim and outputs two files that hold the network parameters
@@ -295,6 +350,7 @@ def run_Nash_Agent(sim_obj, sim_dict, max_steps, nash_agent=None, num_sim=15000,
 
     slow_update_every = 50
     loss_log_every = 200
+    best_checkpoint_dir = os.path.join(path, "best_checkpoint")
 
     # ---------- Main simulation Block -----------------
     progress_bar = tqdm(range(0, num_sim), desc="Nash-DQN", leave=True)
@@ -395,33 +451,51 @@ def run_Nash_Agent(sim_obj, sim_dict, max_steps, nash_agent=None, num_sim=15000,
             torch.save(nash_agent.value_net.state_dict(), VN_file_name + "_" + str(k) + ".pt")
             tqdm.write("Weights saved to disk")
             
-        if early_stop:
-            if best_loss is None or total_loss_item < best_loss:
-                tqdm.write("New best loss: " + str(total_loss_item))
-                best_loss = dc(total_loss_item)
-                best_action_net = dc(nash_agent.action_net.state_dict())
-                best_value_net = dc(nash_agent.value_net.state_dict())
-                best_idx = k
-                impv_counter = 0
+        if best_loss is None or total_loss_item < best_loss:
+            tqdm.write("New best loss: " + str(total_loss_item))
+            best_loss = dc(total_loss_item)
+            best_action_net = dc(nash_agent.action_net.state_dict())
+            best_value_net = dc(nash_agent.value_net.state_dict())
+            best_idx = k
+            impv_counter = 0
+
+            tqdm.write("Saving best checkpoint to disk")
+            save_resume_checkpoint(
+                agent=nash_agent,
+                checkpoint_dir=best_checkpoint_dir,
+                iteration=k,
+                total_loss=total_loss_item,
+                value_loss=vloss.item(),
+                action_loss=loss.item(),
+                best_loss=best_loss,
+                best_idx=best_idx,
+                impv_counter=impv_counter,
+                sum_loss=sum_loss,
+                good_action_net_w=good_action_net_w,
+                good_value_net_w=good_value_net_w,
+                extra_state={
+                    'trainer': 'nash',
+                    'num_sim': int(num_sim),
+                    'max_steps': int(max_T),
+                    'mini_batch': int(mini_batch),
+                    'rv_min': float(rv_min),
+                    'rv_max': float(rv_max),
+                    'slow_update_every': int(slow_update_every),
+                    'loss_log_every': int(loss_log_every),
+                    'an_file_name': AN_file_name,
+                    'vn_file_name': VN_file_name,
+                },
+            )
+            tqdm.write("Best checkpoint saved")
+        else:
+            impv_counter += 1
+
+            if early_stop and impv_counter > early_lim:
+                tqdm.write("EARLY STOPPING ON ITERATION " + str(k))
+                tqdm.write("Latest best checkpoint remains in {}".format(best_checkpoint_dir))
+                progress_bar.close()
                 
-                if k > 1000:
-                    tqdm.write("Saving temp weights to disk")
-                    torch.save(best_action_net, AN_file_name + "_best.pt")
-                    torch.save(best_value_net, VN_file_name + "_best.pt")
-                    tqdm.write("Weights saved to disk")
-                
-            else:
-                impv_counter += 1
-                
-                if impv_counter > early_lim:
-                    tqdm.write("EARLY STOPPING ON ITERATION " + str(k))
-                    tqdm.write("Saving final weights to disk")
-                    torch.save(best_action_net, AN_file_name + "_best.pt")
-                    torch.save(best_value_net, VN_file_name + "_best.pt")
-                    tqdm.write("Weights saved to disk")
-                    progress_bar.close()
-                    
-                    return nash_agent, sum_loss
+                return nash_agent, sum_loss
                 
                 
 
