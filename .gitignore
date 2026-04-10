@@ -1,5 +1,6 @@
 venv/
 .codex
+.vscode/
 
 # BenchMARL / notebook run artifacts
 **/benchmarl_runs/

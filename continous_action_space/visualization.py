@@ -5,6 +5,7 @@ import matplotlib
 from matplotlib.ticker import MaxNLocator
 import matplotlib.gridspec as gridspec
 import copy
+import os
 
 from NashRL import expand_list
 from textwrap import wrap
@@ -14,16 +15,9 @@ from simulation_lib import State
 
 font = {'size'   : 12}
 
-def to_State_mesh(t_list, q_list, p, net, nump, other_inv, i_val, norm_mean, norm_std, T=5, is_numpy=False, norm_input=False, uniq_agent=False, all_output=False):
+def _state_mesh_inputs(t_list, q_list, p, nump, other_inv, i_val, norm_mean, norm_std, T=5, is_numpy=False, norm_input=False):
     """
-    Creates a Mesh with Inventory on Y-axis, Time on X-axis at a specified price
-    :param t_list:      List of time values to be evaluated at
-    :param q_list:      List of inventory values to be evaluated at
-    :param p:           Price point to be evaluated at
-    :param net:         NashAgent class object containing the action/value nets
-    :param nump:        Number of total agents
-    :param other_inv:   Average Inventory level of all other agents
-    :return: 2D mesh of optimal action over the grid t by q
+    Builds batched state tensors for heatmap-style policy queries.
     """
     state_list = []
     for q in q_list:
@@ -59,22 +53,65 @@ def to_State_mesh(t_list, q_list, p, net, nump, other_inv, i_val, norm_mean, nor
         new_invt_state_list = torch.cat(new_invt_state_list,dim=0)
     else:
         new_invt_state_list = None
-    
+
+    return new_state_list, new_invt_state_list
+
+
+def _first_agent_action_mesh(action_list, q_list, t_list, nump):
+    return action_list.view(-1, nump)[:,0].view((len(q_list),len(t_list))).cpu().data.numpy()
+
+
+def to_State_mesh(t_list, q_list, p, net, nump, other_inv, i_val, norm_mean, norm_std, T=5, is_numpy=False, norm_input=False, uniq_agent=False, all_output=False):
+    """
+    Creates a Mesh with Inventory on Y-axis, Time on X-axis at a specified price
+    :param t_list:      List of time values to be evaluated at
+    :param q_list:      List of inventory values to be evaluated at
+    :param p:           Price point to be evaluated at
+    :param net:         NashAgent class object containing the action/value nets
+    :param nump:        Number of total agents
+    :param other_inv:   Average Inventory level of all other agents
+    :return: 2D mesh of optimal action over the grid t by q
+    """
+    new_state_list, new_invt_state_list = _state_mesh_inputs(
+        t_list, q_list, p, nump, other_inv, i_val, norm_mean, norm_std,
+        T=T, is_numpy=is_numpy, norm_input=norm_input,
+    )
+
     act_list = net.predict_action(new_state_list, new_invt_state_list)
-    
+
     if uniq_agent:
         mu_list = act_list[:,4*nump:]
     else:
         mu_list = act_list[:,4].view(-1, nump)
-        
+
     out = mu_list[:,0].view((len(q_list),len(t_list))).cpu().data.numpy()
-    
+
     if all_output:
         return act_list
     else:
         return out
-    
-    
+
+
+def to_State_mesh_sre(t_list, q_list, p, net, nump, other_inv, i_val, norm_mean, norm_std, eps=None, T=5, is_numpy=False, norm_input=False, uniq_agent=False, all_output=False):
+    """
+    Creates a Mesh of SRE-corrected actions μ_SR = μ + correction(ε).
+    """
+    if eps is None:
+        raise ValueError("to_State_mesh_sre requires eps")
+
+    new_state_list, new_invt_state_list = _state_mesh_inputs(
+        t_list, q_list, p, nump, other_inv, i_val, norm_mean, norm_std,
+        T=T, is_numpy=is_numpy, norm_input=norm_input,
+    )
+
+    mu_sr = net.compute_sre_action(new_state_list, new_invt_state_list, eps)
+
+    if all_output:
+        return mu_sr
+    else:
+        return _first_agent_action_mesh(mu_sr, q_list, t_list, nump)
+
+
 def to_State_mesh_simple(t_list, q_list, p, net, nump, other_inv, i_val, norm_mean, norm_std, T=5):
     """
     Creates a Mesh with Inventory on Y-axis, Time on X-axis at a specified price
@@ -99,7 +136,7 @@ def to_State_mesh_simple(t_list, q_list, p, net, nump, other_inv, i_val, norm_me
 
 #Creates a series of heatmaps of Inventory x Time, with each subplot
 # representing a separate price point
-def draw_heatmap(net, t_step, q_step, p_step, t_range, q_range, p_range, n_agents, other_agent_inv,i_val, norm_mean, norm_std, a_range=[-20,20],T=5, is_numpy=False, norm_input=False, uniq_agent=False):
+def draw_heatmap(net, t_step, q_step, p_step, t_range, q_range, p_range, n_agents, other_agent_inv,i_val, norm_mean, norm_std, a_range=[-20,20],T=5, is_numpy=False, norm_input=False, uniq_agent=False, file_path=None, mesh_fn=to_State_mesh, mesh_kwargs=None, figure_title=None, panel_title_fmt='p={p:.2f}'):
     """
     Creates a heatmap panel at a fixed average other agent inventory level, across
      different price levels with price and inventory axis within each price level
@@ -113,9 +150,17 @@ def draw_heatmap(net, t_step, q_step, p_step, t_range, q_range, p_range, n_agent
     :param i_range:             Range of impact state levels
     :param n_agents:                Number of total agents
     :param other_agent_inv:     Average Inventory level of all other agents
+    :param file_path:           Optional output path for the saved heatmap figure.
+                                When omitted, the figure is not written to disk.
+    :param mesh_fn:             Function used to evaluate the action mesh
+    :param mesh_kwargs:         Extra keyword args passed to mesh_fn
+    :param figure_title:        Optional figure-level title shown above the full heatmap panel
+    :param panel_title_fmt:     Title format string for each price subplot. Receives `p`
     """
     counter = 1
     default_inventory = other_agent_inv
+    if mesh_kwargs is None:
+        mesh_kwargs = {}
     matplotlib.rc('font', **font)
     
     # Create price levels
@@ -123,7 +168,9 @@ def draw_heatmap(net, t_step, q_step, p_step, t_range, q_range, p_range, n_agent
     print(p_list)
     levels = np.linspace(a_range[0], a_range[1], a_range[1] - a_range[0] + 1)
     
-    fig, axes = plt.subplots(nrows=1, ncols=5,sharex='col', sharey='row')
+    fig, axes = plt.subplots(nrows=1, ncols=p_step,sharex='col', sharey='row')
+    if p_step == 1:
+        axes = [axes]
         
     for i, p in enumerate(p_list):
         plt.subplot(1,p_step,counter)
@@ -132,16 +179,22 @@ def draw_heatmap(net, t_step, q_step, p_step, t_range, q_range, p_range, n_agent
         # Creates mesh over each individual price subplot and plot contours
         q_list = np.linspace(q_range[0], q_range[1], q_step)
         t_list = np.linspace(t_range[0], t_range[1], t_step)
-        im = plt.contourf(t_list, q_list, to_State_mesh(t_list,q_list,p,net,n_agents,default_inventory,i_val, norm_mean, norm_std, T=T, is_numpy=is_numpy, norm_input=norm_input, uniq_agent=uniq_agent), cmap='RdBu', vmin = a_range[0], vmax = a_range[1], levels = levels)
-        im2 = plt.contour(
-            t_list,
-            q_list,
-            to_State_mesh(t_list,q_list,p,net,n_agents,default_inventory,i_val, norm_mean, norm_std, T=T, is_numpy=is_numpy, norm_input=norm_input, uniq_agent=uniq_agent),
-            levels=[0],
-            colors='black',
-            linewidths=2,
-            linestyles='dashed',
+        action_mesh = mesh_fn(
+            t_list, q_list, p, net, n_agents, default_inventory, i_val,
+            norm_mean, norm_std, T=T, is_numpy=is_numpy,
+            norm_input=norm_input, uniq_agent=uniq_agent, **mesh_kwargs
         )
+        im = plt.contourf(t_list, q_list, action_mesh, cmap='RdBu', vmin = a_range[0], vmax = a_range[1], levels = levels)
+        if np.nanmin(action_mesh) <= 0 <= np.nanmax(action_mesh) and np.nanmin(action_mesh) != np.nanmax(action_mesh):
+            im2 = plt.contour(
+                t_list,
+                q_list,
+                action_mesh,
+                levels=[0],
+                colors='black',
+                linewidths=2,
+                linestyles='dashed',
+            )
 
         
         xtick_loc = [0, 3]
@@ -149,6 +202,7 @@ def draw_heatmap(net, t_step, q_step, p_step, t_range, q_range, p_range, n_agent
         
         ax = plt.gca()
         ax.tick_params(axis='both', which='major', labelsize=16)
+        ax.set_title(panel_title_fmt.format(p=p), fontsize=14)
         if counter > 2:
             ax.yaxis.set_visible(False)
             
@@ -157,9 +211,15 @@ def draw_heatmap(net, t_step, q_step, p_step, t_range, q_range, p_range, n_agent
     cbar_ax = fig.add_axes([0.85, 0.15, 0.05, 0.7])
     cb = fig.colorbar(im, cax=cbar_ax,ticks=np.linspace(a_range[0], a_range[1], 5))
     cb.ax.set_yticklabels(cb.ax.get_yticklabels(), fontsize=15)
+    if figure_title is not None:
+        fig.suptitle(figure_title, fontsize=16)
     fig.text(0.5, 0.01, 'Time', ha='center')
     fig.text(0.01, 0.5, 'Inventory', va='center', rotation='vertical')
-    plt.savefig('Heatmap_OA_' + str(default_inventory))   
+    if file_path is not None:
+        output_dir = os.path.dirname(file_path)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
+        plt.savefig(file_path)
     
 def draw_heatmap_simple(net, t_step, q_step, p_step, t_range, q_range, p_range, n_agents, other_agent_inv,i_val, norm_mean, norm_std, a_range=[-20,20],T=5):
     """
@@ -211,5 +271,3 @@ def draw_heatmap_simple(net, t_step, q_step, p_step, t_range, q_range, p_range, 
     cb.ax.set_yticklabels(cb.ax.get_yticklabels(), fontsize=15)
     fig.text(0.5, 0.01, 'Time', ha='center')
     fig.text(0.01, 0.5, 'Inventory', va='center', rotation='vertical')
-  
-    
