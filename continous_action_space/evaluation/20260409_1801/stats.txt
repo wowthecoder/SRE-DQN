@@ -1,0 +1,13 @@
+Scenario                                 Mean      Std   Median      Min      Max
+------------------------------------------------------------------------------------
+All Nash                              -1.3804   0.1653  -1.3618  -1.7375  -1.0904
+All SRE (eps=0.1)                     -1.3808   0.1653  -1.3621  -1.7371  -1.0907
+All SRE (eps=0.01)                    -1.3805   0.1653  -1.3618  -1.7375  -1.0905
+All SRE Mixed (0,0.01,0.1,0.5,1.0)    -1.3873   0.1656  -1.3693  -1.7452  -1.1080
+Nash vs SRE (agent 0 Nash)            -1.3794   0.1653  -1.3606  -1.7360  -1.0899
+SRE vs Nash (agent 0 SRE)             -1.3818   0.1654  -1.3633  -1.7386  -1.0912
+
+Welch t-test (All Nash vs All SRE eps=0.1): t=0.008, p=0.9935
+Welch t-test (All Nash vs All SRE eps=0.01): t=0.000, p=0.9998
+Welch t-test (SRE-vs-Nash vs Nash-vs-SRE): t=-0.055, p=0.9562
+Win rate: SRE agent 0 beats Nash agent 0 in 0.0% of trials
