@@ -1,0 +1,7 @@
+iteration: 6101
+total_loss: 35.90747833
+value_loss: 18.05431366
+action_loss: 17.85316467
+best_loss: 35.90747833
+best_idx: 6101
+improvement_counter: 0
