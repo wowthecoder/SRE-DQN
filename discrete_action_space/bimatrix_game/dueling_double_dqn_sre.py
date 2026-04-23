@@ -91,7 +91,7 @@ class DuelingDoubleDqnSreAgent:
         decay_rate=0.999,
         buffer_size=10000,
         use_gpu=True,
-        sre_num_repeats=3,
+        sre_num_repeats=20,
     ):
         if num_agents != 2:
             raise ValueError("This implementation currently supports only 2 agents.")

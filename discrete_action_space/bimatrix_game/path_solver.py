@@ -275,9 +275,52 @@ def solve_strategically_robust_bimatrix_game_path(
                 idx += 1
         return 0
 
+    def store_solution(z):
+        p1 = z[s["p1"]].copy()
+        p2 = z[s["p2"]].copy()
+        xi1 = z[s["xi1"]].copy()
+        xi2 = z[s["xi2"]].copy()
+        lambda1 = float(z[s["lambda1"]])
+        lambda2 = float(z[s["lambda2"]])
+
+        if round_digits is None:
+            sol = {"p1": p1.tolist(), "p2": p2.tolist()}
+        else:
+            sol = {
+                "p1": np.round(p1, round_digits).tolist(),
+                "p2": np.round(p2, round_digits).tolist(),
+            }
+        if sol not in solutions_p:
+            solutions_p.append(sol)
+            utility1_sr = np.sum(p2 * xi1) - lambda1 * epsilon_values[0]
+            utility2_sr = np.sum(p1 * xi2) - lambda2 * epsilon_values[1]
+            utilities_sr.append([utility1_sr, utility2_sr])
+
+            utility1_nominal = float(p1 @ U1 @ p2)
+            utility2_nominal = float(p2 @ U2 @ p1)
+            utilities_nominal.append([utility1_nominal, utility2_nominal])
+
+    def solve_from_start(z):
+        f = np.zeros(n_vars, dtype=np.float64)
+        status = path_solver.solve(n_vars, nnz, z, f, lb, ub, func_eval, jac_eval)
+
+        if verbose:
+            print(f"PATH status: {status}")
+
+        if status in (1, 2):
+            store_solution(z)
+
+    # First try all pure strategy profiles, mirroring Jack's MATLAB setup.
+    for i in range(nA):
+        for j in range(nB):
+            z = np.zeros(n_vars, dtype=np.float64)
+            z[s["p1"]][i] = 1.0
+            z[s["p2"]][j] = 1.0
+            solve_from_start(z)
+
+    # Then continue with random restarts to uncover mixed or harder-to-find equilibria.
     for _ in range(num_repeats):
         z = np.zeros(n_vars, dtype=np.float64)
-        f = np.zeros(n_vars, dtype=np.float64)
 
         starting_points_p = np.random.rand(nA + nB)
         starting_points_other = 100 * np.random.rand(total_other) - 50
@@ -295,34 +338,6 @@ def solve_strategically_robust_bimatrix_game_path(
         z[s["eta1"]] = starting_points_other[idx:idx + nB * nB]; idx += nB * nB
         z[s["eta2"]] = starting_points_other[idx:idx + nA * nA]
 
-        status = path_solver.solve(n_vars, nnz, z, f, lb, ub, func_eval, jac_eval)
-
-        if verbose:
-            print(f"PATH status: {status}")
-
-        if status in (1, 2):
-            p1 = z[s["p1"]].copy()
-            p2 = z[s["p2"]].copy()
-            xi1 = z[s["xi1"]].copy()
-            xi2 = z[s["xi2"]].copy()
-            lambda1 = float(z[s["lambda1"]])
-            lambda2 = float(z[s["lambda2"]])
-
-            if round_digits is None:
-                sol = {"p1": p1.tolist(), "p2": p2.tolist()}
-            else:
-                sol = {
-                    "p1": np.round(p1, round_digits).tolist(),
-                    "p2": np.round(p2, round_digits).tolist(),
-                }
-            if sol not in solutions_p:
-                solutions_p.append(sol)
-                utility1_sr = np.sum(p2 * xi1) - lambda1 * epsilon_values[0]
-                utility2_sr = np.sum(p1 * xi2) - lambda2 * epsilon_values[1]
-                utilities_sr.append([utility1_sr, utility2_sr])
-
-                utility1_nominal = float(p1 @ U1 @ p2)
-                utility2_nominal = float(p2 @ U2 @ p1)
-                utilities_nominal.append([utility1_nominal, utility2_nominal])
+        solve_from_start(z)
 
     return solutions_p, utilities_sr, utilities_nominal

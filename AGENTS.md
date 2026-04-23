@@ -127,6 +127,7 @@ All features are assumed non-label-invariant in this experiment.
 ## 2. Strategically Robust Game Theory via Optimal Transport
 **Authors:** Nicolas Lanzetti, Nicolas Fricker, Saverio Bolognani, Florian Dörfler, Dario Paccagnan (2025)
 **Core contribution:** Defines Strategically Robust Equilibria (SRE) using optimal transport ambiguity sets, proves existence and computational complexity results, and provides algorithms for finite and continuous action games.
+**Repository files:** The strategically-robust-game-theory folder at the project root contains the code implementation for this paper. 
 
 ### 2.1 Motivation
 Nash equilibria are fragile: they offer no protection against out-of-equilibrium play. Security strategies (maximin) are overly conservative. SRE interpolates between the two via a single parameter ε controlling the robustness level.
@@ -231,6 +232,7 @@ The paper conjectures that larger ε may facilitate computation (since ε → �
 ## 3. Strategically Robust Q-Learning (SRQ)
 **Author:** Jack Brand (2025, Imperial College London, supervised by Prof. Dario Paccagnan)
 **Core contribution:** A tabular MARL algorithm that extends Nash Q-learning by replacing the Nash operator with the SRE operator, providing tunable robustness in multi-agent environments.
+**Repository files:** The sre-sandbox folder at the project root contains the code implementation for this paper. 
 
 ### 3.1 Relationship to NashQ
 SRQ modifies the NashQ algorithm (Hu & Wellman, 2003) by changing the equilibrium computation:
