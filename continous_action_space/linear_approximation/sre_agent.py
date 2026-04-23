@@ -1,13 +1,14 @@
-import torch
-import torch.nn as nn
-import torch.optim as optim
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
 import numpy as np
-from copy import deepcopy as dc
+import torch
 
-from NashAgent_lib import PermInvariantQNN
+from NashAgent_lib import NashNN
 
 
-class SreNN:
+class SreNN(NashNN):
     """
     SRE-DQN Agent: augments Nash-DQN with Smooth Robustness Equilibrium (SRE) action selection.
 
@@ -44,126 +45,36 @@ class SreNN:
                  c_pen=True, layers=4, weighted_adam=False,
                  eps_reg=0.01, delta_min=1e-6, gamma=1.0):
         """
-        :param non_invar_dim:  Number of non-invariant (market-state) input features
-        :param output_dim:     Number of advantage-function parameters (typically 5)
-        :param n_players:      Number of agents
-        :param max_steps:      Episode length
-        :param terminal_cost:  Terminal cost (for reference, passed to base class)
-        :param num_moms:       Number of permutation-invariant moments
-        :param lr:             Learning rate
-        :param lat_dims:       Hidden layer width
-        :param c_cons:         L2 regularisation coefficient for ψ (β in the paper)
-        :param c2_cons:        Whether to also regularise P_{12} via the base penalty
-        :param c3_pos:         Whether to force P_{22} positive
-        :param c_pen:          Whether to apply the ψ / P_{12} regularisation penalty
-        :param layers:         Number of hidden layers
-        :param weighted_adam:  Use AdamW instead of Adam
-        :param eps_reg:        Additional P_{12} regularisation coefficient (ε_reg in the paper)
-        :param delta_min:      Minimum ‖ψ‖ threshold to avoid division by zero
-        :param gamma:          Discount factor
+        All parameters up to ``weighted_adam`` are forwarded to NashNN unchanged.
+
+        :param eps_reg:    Additional P_{12} regularisation coefficient (ε_reg in the paper)
+        :param delta_min:  Minimum ‖ψ‖ threshold to avoid division by zero
+        :param gamma:      Discount factor
         """
-        self.num_players = n_players
-        self.T = max_steps
-        self.terminal_cost = terminal_cost
-        self.non_invar_dim = non_invar_dim
-        self.lr = lr
-        self.c_pen = c_pen
-        self.c_cons = c_cons
-        self.c2_cons = c2_cons
-        self.c3_pos = c3_pos
+        super().__init__(
+            non_invar_dim=non_invar_dim,
+            output_dim=output_dim,
+            n_players=n_players,
+            max_steps=max_steps,
+            terminal_cost=terminal_cost,
+            num_moms=num_moms,
+            lr=lr,
+            lat_dims=lat_dims,
+            c_cons=c_cons,
+            c2_cons=c2_cons,
+            c3_pos=c3_pos,
+            c_pen=c_pen,
+            layers=layers,
+            weighted_adam=weighted_adam,
+        )
         self.eps_reg = eps_reg
         self.delta_min = delta_min
         self.gamma = gamma
-
-        self.use_cuda = torch.cuda.is_available()
-
-        def make_net(out_dim):
-            net = PermInvariantQNN(
-                in_invar_dim=self.num_players - 1,
-                non_invar_dim=self.non_invar_dim,
-                out_dim=out_dim,
-                num_moments=num_moms,
-                lat_dims=lat_dims,
-                layers=layers,
-            )
-            return net.cuda() if self.use_cuda else net
-
-        self.action_net = make_net(output_dim)
-        self.value_net = make_net(1)
-        self.slow_val_net = make_net(1)
-
-        if self.use_cuda:
-            print("CUDA IS AVAILABLE!")
-        else:
-            print("CUDA IS NOT AVAILABLE!")
-
-        opt_cls = optim.AdamW if weighted_adam else optim.Adam
-        self.optimizer_DQN = opt_cls(self.action_net.parameters(), lr=self.lr)
-        self.optimizer_value = opt_cls(self.value_net.parameters(), lr=self.lr)
-
-        self.criterion = nn.MSELoss()
 
     def __repr__(self):
         return "SRENN Object:\n# Players:{}\nT:{}\nNon Invariant Dim Size:{}".format(
             self.num_players, self.T, self.non_invar_dim
         )
-
-    def matrix_slice(self, X):
-        """
-        For a [batch, N] action matrix X, produces a [batch*N, N-1] matrix where
-        each row i of each batch block has agent i's own action removed.
-        Mirrors NashNN.matrix_slice exactly.
-        """
-        num_entries = len(X)
-        arr = X.repeat_interleave(self.num_players, dim=0)
-        if torch.cuda.is_available():
-            ids = torch.tensor(torch.arange(self.num_players)).tile(num_entries).cuda()
-        else:
-            ids = torch.tensor(torch.arange(self.num_players)).tile(num_entries)
-        mask = torch.ones_like(arr).scatter_(1, ids.unsqueeze(1), 0.)
-        return arr[mask.bool()].view(-1, self.num_players - 1)
-
-    def predict_action(self, states, invt_states):
-        """
-        Predict advantage-function parameters for a batch of states.
-        Returns a [batch*N, 5] tensor: [c1, c2, c3, c4, mu].
-        Mirrors NashNN.predict_action.
-        """
-        if self.use_cuda:
-            action_list = self.action_net.forward(invar_input=invt_states, non_invar_input=states.cuda())
-        else:
-            action_list = self.action_net.forward(invar_input=invt_states, non_invar_input=states)
-
-        # Force c1 and c3 positive
-        if self.c3_pos:
-            action_list = torch.hstack([
-                torch.abs(action_list[:, 0]).view(-1, 1),   # c1 >= 0
-                action_list[:, 1].view(-1, 1),              # c2 (free)
-                torch.abs(action_list[:, 2]).view(-1, 1),   # c3 >= 0
-                action_list[:, 3:]                          # c4, mu (free)
-            ])
-        else:
-            action_list = torch.hstack([
-                torch.abs(action_list[:, 0]).view(-1, 1),
-                action_list[:, 1:]
-            ])
-
-        action_list[:, 4:] = action_list[:, 4:] * 1.0
-        return action_list
-
-    def update_slow(self):
-        """Copy value_net weights into slow_val_net (target network update)."""
-        self.slow_val_net.load_state_dict(dc(self.value_net.state_dict()))
-
-    def predict_value(self, states, invt_states, slow=False):
-        """
-        Predict V̂(x) for a batch of states.
-        :param slow: If True, uses the slow (target) value network.
-        """
-        net = self.slow_val_net if slow else self.value_net
-        if self.use_cuda:
-            return net.forward(invar_input=invt_states, non_invar_input=states.cuda())
-        return net.forward(invar_input=invt_states, non_invar_input=states)
 
     # ------------------------------------------------------------------
     # SRE-specific methods
@@ -195,7 +106,6 @@ class SreNN:
         psi_norm = torch.abs(c4_list)
         valid = psi_norm > self.delta_min
 
-        # Avoid divide-by-zero: replace near-zero values with 1 (correction masked to 0 anyway)
         safe_c1 = torch.where(torch.abs(c1_list) > self.delta_min, c1_list, torch.ones_like(c1_list))
         safe_psi_norm = torch.where(valid, psi_norm, torch.ones_like(psi_norm))
 
@@ -260,15 +170,15 @@ class SreNN:
         mu = next_act_params[:, 4]
 
         correction = self.compute_sre_correction(c1, c2, c4, eps)
-        mu_sr = mu + correction  # [batch*N]
+        mu_sr = mu + correction
 
         return self._compute_advantage(next_act_params, mu_sr)
 
     # ------------------------------------------------------------------
-    # Loss functions
+    # Loss function overrides
     # ------------------------------------------------------------------
 
-    def compute_value_Loss(self, state_tuples, eps):
+    def compute_value_Loss(self, state_tuples, eps=0.0):
         """
         SRE-Bellman value loss (section 3.5):
             L̃ = ‖V̂(x) + A(x,u) − r − γ[V̂(x') + A(x';μ^SR(x',ε))]‖²
@@ -312,7 +222,7 @@ class SreNN:
 
         return bellman_loss + reg
 
-    def compute_action_Loss(self, state_tuples, eps):
+    def compute_action_Loss(self, state_tuples, eps=0.0):
         """
         SRE-Bellman action loss with additional P_{12} regularisation (section 3.5):
             L_total = L̃ + β‖ψ‖² + ε_reg‖P_{12}‖²_F
