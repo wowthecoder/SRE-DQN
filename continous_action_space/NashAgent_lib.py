@@ -207,7 +207,7 @@ class NashNN():
                     invar_input=invt_states, non_invar_input=states)
         return values
 
-    def compute_value_Loss(self, state_tuples):
+    def compute_value_Loss(self, state_tuples, eps=0.0):
         """
         Computes the loss function for the value network
         :param state_tuples:    List of a batch of transition tuples
@@ -260,7 +260,7 @@ class NashNN():
             raise Exception("NEED CUDA")
             return torch.sum(((torch.ones(len(isLastState))-isLastState) * nextVal + reward_list - curVal - A)**2) + torch.sum(c4_list**2)
 
-    def compute_action_Loss(self, state_tuples):
+    def compute_action_Loss(self, state_tuples, eps=0.0):
         """
         Computes the loss function for the action/advantage-function network
         :param state_tuples:    List of a batch of transition tuples
