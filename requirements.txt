@@ -11,3 +11,4 @@ benchmarl
 vmas
 pandas
 scipy
+pygambit

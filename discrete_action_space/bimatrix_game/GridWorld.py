@@ -11,25 +11,25 @@ class GridWorldEnv:
         p (float): Probability of successful action transition. 
                    (1-p)/3 probability of slipping to other directions.
     """
-    def __init__(self, grid_size=3, p=1.0, max_steps=100):
+    def __init__(self, grid_size=3, p=1.0, max_steps=100, start_positions=None, goal_positions=None):
         self.grid_size = grid_size
         self.p = p
         self.max_steps = max_steps
         self.current_step = 0
-        
+
         # Actions: 0: Up, 1: Right, 2: Down, 3: Left [cite: 450]
         self.action_space = [0, 1, 2, 3]
         self.n_agents = 2
-        
+
         # Define Start and Goal States (coordinates are (row, col))
         # Agent 1: Start Bottom Left (2, 0) -> Goal Top Right (0, 2) [cite: 454]
         # Agent 2: Start Bottom Right (2, 2) -> Goal Top Left (0, 0) [cite: 456]
         # Note: Adjusting for dynamic grid size, assuming corners.
-        self.start_positions = [
+        self.start_positions = start_positions if start_positions is not None else [
             (self.grid_size - 1, 0),                  # Agent 1 Start
             (self.grid_size - 1, self.grid_size - 1)  # Agent 2 Start
         ]
-        self.goal_positions = [
+        self.goal_positions = goal_positions if goal_positions is not None else [
             (0, self.grid_size - 1),                  # Agent 1 Goal
             (0, 0)                                    # Agent 2 Goal
         ]

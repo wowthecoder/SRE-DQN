@@ -232,7 +232,10 @@ class DuelingDoubleDqnSreAgent:
         )
         actions_t = torch.as_tensor(actions_arr, dtype=torch.long, device=self.device)
         rewards_t = torch.as_tensor(rewards_arr, dtype=torch.float32, device=self.device)
-        dones_t = torch.as_tensor(np.asarray(dones), dtype=torch.float32, device=self.device)
+        dones_arr = np.asarray(dones, dtype=np.float32)
+        dones_t = torch.as_tensor(dones_arr, dtype=torch.float32, device=self.device)
+        if dones_t.ndim == 1:
+            dones_t = dones_t.unsqueeze(1)
 
         q_tensor = self.q_net(states_t)  # [B, A1, A2, N]
         batch_idx = torch.arange(states_t.shape[0], device=self.device)
@@ -252,7 +255,7 @@ class DuelingDoubleDqnSreAgent:
             next_values_t = torch.as_tensor(
                 np.asarray(next_values, dtype=np.float32), device=self.device
             )
-            target_q = rewards_t + (1.0 - dones_t.unsqueeze(1)) * self.gamma * next_values_t
+            target_q = rewards_t + (1.0 - dones_t) * self.gamma * next_values_t
 
         loss = self.loss_fn(current_q, target_q)
         self.optimizer.zero_grad()
