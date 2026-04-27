@@ -107,9 +107,9 @@ The environment accepts custom `start_positions` and `goal_positions` so the sam
 
 In all scenarios the agents' paths cross, creating frequent collision opportunities that stress-test the equilibrium concepts.
 
-### Comparison harness (`comparison_harness.py`)
+### Comparison harness (`bimatrix_game.ipynb`)
 
-`comparison_harness.py` provides a unified training loop that runs all algorithm pairings across all scenarios:
+`bimatrix_game.ipynb` embeds the unified training loop that runs all algorithm pairings across all scenarios:
 
 | Pairing |
 |---|
@@ -120,24 +120,16 @@ In all scenarios the agents' paths cross, creating frequent collision opportunit
 | NashQ vs Deep SRQ |
 | SRQ vs Deep SRQ |
 
-Each run trains for 3,000 episodes and saves:
-- Periodic checkpoints every 200 episodes (`.pkl` for tabular, `.pt` for deep)
-- A final checkpoint at the end of training
-- A `training_stats.pkl` file with the full reward history, scenario config, and summary statistics
+Each run trains for 3,000 episodes and saves/displays:
+- Best and final checkpoints (`.pkl` for tabular, `.pt` for deep)
+- A `training_stats.txt` file with the full reward history, scenario config, timing, and summary statistics
+- A `training_plot.png` plot, also displayed in the notebook
 
-Results are organised under `comparison_runs/<scenario_key>/<algorithm_vs_algorithm>/`.
+Results are organised under `scenario_runs/<scenario_key>/<algorithm_vs_algorithm>/`.
 
 ### Training notebook (`bimatrix_game.ipynb`)
 
-Trains SRQ agents independently on each scenario for 1,000 episodes with `p = 0.8`. Checkpoints are saved to:
-
-- `checkpoints_scenario1/` — Scenario 1
-- `checkpoints_scenario2/` — Scenario 2
-- `checkpoints_scenario3/` — Scenario 3
-
-Within each directory:
-- `srq_agent{0,1}_ep{200,400,...}.pkl` — periodic snapshots every 200 episodes
-- `srq_agent{0,1}_best.pkl` — the single best checkpoint, overwritten whenever a new episode achieves a higher joint reward (`r1 + r2`) than all previous episodes
+The notebook is now the primary training/reporting surface for both the full comparison suite and the Deep SRQ epsilon sweep.
 
 ---
 

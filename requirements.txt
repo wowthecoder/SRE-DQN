@@ -11,4 +11,5 @@ benchmarl
 vmas
 pandas
 scipy
-pygambit
+pygambitlbforaging
+highway-env
