@@ -13,7 +13,7 @@ _THIS_DIR = Path(__file__).resolve().parent
 if str(_THIS_DIR) not in sys.path:
     sys.path.insert(0, str(_THIS_DIR))
 
-from path_solver import PathSolverWrapper, solve_strategically_robust_bimatrix_game_path_lcp
+from sre_solvers import PathCBimatrixSreSolver
 
 
 class ReplayBuffer:
@@ -93,6 +93,7 @@ class DuelingDoubleDqnSreAgent:
         sre_num_repeats=20,
         sre_cache_size=4096,
         train_every=1,
+        sre_solver=None,
     ):
         if num_agents != 2:
             raise ValueError("This implementation currently supports only 2 agents.")
@@ -135,7 +136,9 @@ class DuelingDoubleDqnSreAgent:
         self.sre_solve_time_min = None
         self.sre_solve_time_max = None
 
-        self.path_solver = PathSolverWrapper(pathwrap_path)
+        if sre_solver is None:
+            sre_solver = PathCBimatrixSreSolver(pathwrap_path=pathwrap_path)
+        self.sre_solver = sre_solver
 
     def _record_sre_solve_time(self, duration):
         self.sre_solve_time_count += 1
@@ -197,7 +200,13 @@ class DuelingDoubleDqnSreAgent:
 
     def _sre_cache_key(self, q_tensor):
         q_key = np.ascontiguousarray(np.round(q_tensor, 6), dtype=np.float32)
-        return (round(float(self.epsilon_robust), 6), int(self.sre_num_repeats), q_key.tobytes())
+        solver_name = getattr(self.sre_solver, "name", type(self.sre_solver).__name__)
+        return (
+            solver_name,
+            round(float(self.epsilon_robust), 6),
+            int(self.sre_num_repeats),
+            q_key.tobytes(),
+        )
 
     def _cache_sre_policies(self, key, policies):
         if self.sre_cache_size <= 0:
@@ -214,41 +223,29 @@ class DuelingDoubleDqnSreAgent:
             self._sre_cache.move_to_end(cache_key)
             return [policy.copy() for policy in cached]
 
-        u1 = q_tensor[:, :, 0]
-        u2 = q_tensor[:, :, 1]
-
         solve_start = time.perf_counter()
         try:
-            results = solve_strategically_robust_bimatrix_game_path_lcp(
-                u1,
-                u2,
-                [self.epsilon_robust, self.epsilon_robust],
-                self.sre_num_repeats,
-                self.path_solver,
+            result = self.sre_solver.solve(
+                q_tensor,
+                epsilon=self.epsilon_robust,
+                num_repeats=self.sre_num_repeats,
             )
-            solutions = results[0]
         except Exception:
             self._record_sre_solve_time(time.perf_counter() - solve_start)
             return self._uniform_policies()
         self._record_sre_solve_time(time.perf_counter() - solve_start)
 
-        if not solutions:
+        if not result.success or not result.policies:
             policies = self._uniform_policies()
             self._cache_sre_policies(cache_key, policies)
             return policies
 
-        best_joint_reward = -float("inf")
-        best = None
-        for sol in solutions:
-            p1 = self._normalize_policy(sol["p1"])
-            p2 = self._normalize_policy(sol["p2"])
-            r1 = float(p1 @ u1 @ p2)
-            r2 = float(p1 @ u2 @ p2)
-            if r1 + r2 > best_joint_reward:
-                best_joint_reward = r1 + r2
-                best = [p1, p2]
-
-        policies = best if best is not None else self._uniform_policies()
+        policies = [self._normalize_policy(policy) for policy in result.policies]
+        if (
+            len(policies) != self.num_agents
+            or any(policy.shape[0] != self.num_actions for policy in policies)
+        ):
+            policies = self._uniform_policies()
         self._cache_sre_policies(cache_key, policies)
         return policies
 
@@ -387,6 +384,9 @@ class DuelingDoubleDqnSreAgent:
             "sre_solve_time_sumsq": self.sre_solve_time_sumsq,
             "sre_solve_time_min": self.sre_solve_time_min,
             "sre_solve_time_max": self.sre_solve_time_max,
+            "sre_solver_name": getattr(
+                self.sre_solver, "name", type(self.sre_solver).__name__
+            ),
         }
         if include_replay_buffer:
             payload["replay_buffer"] = list(self.replay_buffer.buffer)
@@ -440,8 +440,8 @@ class DuelingDoubleDqnSreAgent:
             self.sre_solve_time_max = checkpoint["sre_solve_time_max"]
 
     def close(self):
-        if hasattr(self, "path_solver") and self.path_solver is not None:
-            self.path_solver.close()
+        if hasattr(self, "sre_solver") and self.sre_solver is not None:
+            self.sre_solver.close()
 
     def __del__(self):
         try:

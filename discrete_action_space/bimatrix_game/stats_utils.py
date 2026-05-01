@@ -74,9 +74,10 @@ def collect_timing_stats(
     agents,
     wall_clock_seconds=None,
     episode_durations=None,
+    include_episode_durations=True,
 ):
     sre_solve_summaries = []
-    path_solve_summaries = []
+    backend_solve_summaries = []
     update_times_by_agent = []
     seen_agent_objects = set()
 
@@ -90,35 +91,41 @@ def collect_timing_stats(
             agent_sre_solve_summary = agent.get_sre_solve_time_summary()
         else:
             agent_sre_solve_summary = summarize_durations([])
-        solver = getattr(agent, "path_solver", None)
+        solver = getattr(agent, "sre_solver", None) or getattr(agent, "path_solver", None)
         if solver is not None and hasattr(solver, "get_solve_time_summary"):
-            agent_path_solve_summary = solver.get_solve_time_summary()
+            agent_backend_solve_summary = solver.get_solve_time_summary()
         else:
-            agent_path_solve_summary = summarize_durations([])
+            agent_backend_solve_summary = summarize_durations([])
         agent_update_times = list(getattr(agent, "update_times", []) or [])
         sre_solve_summaries.append(agent_sre_solve_summary)
-        path_solve_summaries.append(agent_path_solve_summary)
+        backend_solve_summaries.append(agent_backend_solve_summary)
         update_times_by_agent.append(
             {
                 "agent_index": idx,
                 "algorithm": getattr(agent_wrapper, "algorithm", type(agent).__name__),
                 "sre_solve_time": agent_sre_solve_summary,
-                "path_solve_time": agent_path_solve_summary,
+                "backend_solve_time": agent_backend_solve_summary,
+                "path_solve_time": agent_backend_solve_summary,
                 "update_time": summarize_durations(agent_update_times),
             }
         )
 
     episode_durations = list(episode_durations or [])
-    return {
+    timing = {
         "wall_clock_seconds": (
             None if wall_clock_seconds is None else float(wall_clock_seconds)
         ),
         "episode_time": summarize_durations(episode_durations),
-        "episode_durations_seconds": [float(duration) for duration in episode_durations],
         "sre_solve_time": combine_duration_summaries(sre_solve_summaries),
-        "path_solve_time": combine_duration_summaries(path_solve_summaries),
+        "backend_solve_time": combine_duration_summaries(backend_solve_summaries),
+        "path_solve_time": combine_duration_summaries(backend_solve_summaries),
         "agents": update_times_by_agent,
     }
+    if include_episode_durations:
+        timing["episode_durations_seconds"] = [
+            float(duration) for duration in episode_durations
+        ]
+    return timing
 
 
 def _to_jsonable(value):
@@ -327,13 +334,15 @@ def print_timing_stats(stats):
 
     print(f"Episode time:   {_fmt_duration(timing.get('episode_time'))}")
     print(f"SRE solve time: {_fmt_duration(timing.get('sre_solve_time'))}")
-    print(f"PATH solve time:{_fmt_duration(timing.get('path_solve_time'))}")
+    backend_summary = timing.get("backend_solve_time") or timing.get("path_solve_time")
+    print(f"Backend solve:  {_fmt_duration(backend_summary)}")
 
     for agent in timing.get("agents", []):
         label = agent.get("algorithm") or agent.get("agent_type") or f"Agent {agent.get('agent_index')}"
         print(f"  Agent {agent.get('agent_index')} ({label})")
         print(f"    SRE solve:  {_fmt_duration(agent.get('sre_solve_time'))}")
-        print(f"    PATH solve: {_fmt_duration(agent.get('path_solve_time'))}")
+        agent_backend = agent.get("backend_solve_time") or agent.get("path_solve_time")
+        print(f"    Backend:    {_fmt_duration(agent_backend)}")
         print(f"    Update:     {_fmt_duration(agent.get('update_time'))}")
 
 

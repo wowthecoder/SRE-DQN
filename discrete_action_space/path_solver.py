@@ -331,6 +331,7 @@ def _build_robust_lcp(U1, U2, epsilon):
     col_start, col_len, row, data = _dense_to_csc_arrays(M)
 
     return {
+        "M": M.astype(np.float64, copy=False),
         "n1": n1,
         "K1": K1,
         "K2": K2,
@@ -344,6 +345,11 @@ def _build_robust_lcp(U1, U2, epsilon):
         "U1_original": U1_original,
         "U2_original": U2_original,
     }
+
+
+def build_robust_bimatrix_lcp(U1, U2, epsilon):
+    """Build the dense and sparse LCP data for a bimatrix SRE stage game."""
+    return _build_robust_lcp(U1, U2, epsilon)
 
 
 def solve_strategically_robust_bimatrix_game_path_lcp(

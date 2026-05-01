@@ -11,5 +11,6 @@ benchmarl
 vmas
 pandas
 scipy
+lemkelcp==0.1
 pygambitlbforaging
 highway-env
