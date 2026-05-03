@@ -28,6 +28,7 @@ from stats_utils import (
     plot_training_stats,
     print_stats_payload,
     print_summary_table,
+    print_timing_stats,
     save_training_stats,
     summarize_rewards,
 )
@@ -60,8 +61,12 @@ DEEP_SRQ_HYPERPARAMS = {
     "action_epsilon_decay_fraction": 0.5,
     "grad_clip_max_norm": 10.0,
     "sre_num_repeats": 20,
+    "sre_include_pure_starts": True,
     "sre_cache_size": 4096,
     "train_every": 4,
+    "network_type": "joint_output",
+    "sre_solver_workers": 4,
+    "sre_solver_start_method": None,
 }
 
 SCENARIO_CONFIGS = {
@@ -90,7 +95,14 @@ SCENARIO_CONFIGS = {
 
 
 def configure_path_runtime(root=None):
-    root = Path(root or _THIS_DIR).resolve()
+    root = Path(root or _DISCRETE_DIR).resolve()
+    if not (root / "pathwrap.so").exists() and (
+        root / "discrete_action_space" / "pathwrap.so"
+    ).exists():
+        root = root / "discrete_action_space"
+    if not (root / "pathwrap.so").exists() and (root.parent / "pathwrap.so").exists():
+        root = root.parent
+
     if sys.platform.startswith("linux"):
         lib_dir = root / "pathlib" / "lib_lnx"
         lib_name = "pathwrap.so"
@@ -129,6 +141,22 @@ def set_global_seed(seed=BASE_SEED):
             torch.cuda.manual_seed_all(seed)
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
+
+
+def deep_srq_hyperparams(overrides=None):
+    hp = DEEP_SRQ_HYPERPARAMS.copy()
+    if overrides:
+        hp.update(overrides)
+    return hp
+
+
+def _make_deep_srq_solver(solver_name, pathwrap_path, hp):
+    return make_sre_solver(
+        solver_name,
+        pathwrap_path=pathwrap_path,
+        max_workers=hp.get("sre_solver_workers", 4),
+        start_method=hp.get("sre_solver_start_method"),
+    )
 
 
 def linear_schedule(start, end, step, total_steps):
@@ -255,8 +283,11 @@ class _DeepSrqAgentAdapter:
         target_update_steps=100,
         target_tau=None,
         sre_num_repeats=20,
+        sre_include_pure_starts=True,
         sre_cache_size=4096,
         train_every=4,
+        network_type="joint_output",
+        solver_hyperparams=None,
         use_gpu=True,
         shared_agent=None,
         owns_training=True,
@@ -284,11 +315,15 @@ class _DeepSrqAgentAdapter:
                 learning_starts=learning_starts,
                 grad_clip_norm=grad_clip_norm,
                 sre_num_repeats=sre_num_repeats,
+                sre_include_pure_starts=sre_include_pure_starts,
                 sre_cache_size=sre_cache_size,
                 train_every=train_every,
                 use_gpu=use_gpu,
-                sre_solver=make_sre_solver(
-                    solver_name, pathwrap_path=pathwrap_path
+                network_type=network_type,
+                sre_solver=_make_deep_srq_solver(
+                    solver_name,
+                    pathwrap_path,
+                    solver_hyperparams or DEEP_SRQ_HYPERPARAMS,
                 ),
             )
         else:
@@ -340,11 +375,14 @@ def _build_agents(
     use_gpu=True,
     batch_size=16,
     target_update=100,
+    hyperparameter_overrides=None,
 ):
     num_agents = 2
     num_actions = len(env.action_space)
     obs_dim = len(np.asarray(env.reset(), dtype=np.float32).reshape(-1))
     agents = []
+
+    hp = deep_srq_hyperparams(hyperparameter_overrides)
 
     if tuple(pairing) == ("DeepSRQ", "DeepSRQ"):
         shared_agent = DuelingDoubleDqnSreAgent(
@@ -354,17 +392,19 @@ def _build_agents(
             num_actions=num_actions,
             pathwrap_path=pathwrap_path,
             epsilon_robust=1.0,
-            epsilon_explore=DEEP_SRQ_HYPERPARAMS["action_epsilon_start"],
-            lr=DEEP_SRQ_HYPERPARAMS["learning_rate"],
-            gamma=DEEP_SRQ_HYPERPARAMS["gamma"],
-            learning_starts=DEEP_SRQ_HYPERPARAMS["learning_starts"],
-            grad_clip_norm=DEEP_SRQ_HYPERPARAMS["grad_clip_max_norm"],
+            epsilon_explore=hp["action_epsilon_start"],
+            lr=hp["learning_rate"],
+            gamma=hp["gamma"],
+            learning_starts=hp["learning_starts"],
+            grad_clip_norm=hp["grad_clip_max_norm"],
             use_gpu=use_gpu,
-            buffer_size=DEEP_SRQ_HYPERPARAMS["replay_buffer_capacity"],
-            sre_num_repeats=DEEP_SRQ_HYPERPARAMS["sre_num_repeats"],
-            sre_cache_size=DEEP_SRQ_HYPERPARAMS["sre_cache_size"],
-            train_every=DEEP_SRQ_HYPERPARAMS["train_every"],
-            sre_solver=make_sre_solver(solver_name, pathwrap_path=pathwrap_path),
+            buffer_size=hp["replay_buffer_capacity"],
+            sre_num_repeats=hp["sre_num_repeats"],
+            sre_include_pure_starts=hp["sre_include_pure_starts"],
+            sre_cache_size=hp["sre_cache_size"],
+            train_every=hp["train_every"],
+            network_type=hp["network_type"],
+            sre_solver=_make_deep_srq_solver(solver_name, pathwrap_path, hp),
         )
         return [
             _DeepSrqAgentAdapter(
@@ -377,6 +417,8 @@ def _build_agents(
                 use_gpu=use_gpu,
                 batch_size=batch_size,
                 target_update_steps=target_update,
+                network_type=hp["network_type"],
+                solver_hyperparams=hp,
                 shared_agent=shared_agent,
                 owns_training=(agent_id == 0),
             )
@@ -406,6 +448,8 @@ def _build_agents(
                     use_gpu=use_gpu,
                     batch_size=batch_size,
                     target_update_steps=target_update,
+                    network_type=hp["network_type"],
+                    solver_hyperparams=hp,
                 )
             )
         else:
@@ -435,6 +479,7 @@ def build_training_stats(
     separator=10,
     last_n=1000,
     timing=None,
+    hyperparameters=None,
 ):
     stats = {
         "scenario_key": scenario_key,
@@ -460,6 +505,8 @@ def build_training_stats(
         stats["solver_name"] = solver_name
     if timing is not None:
         stats["timing"] = timing
+    if hyperparameters is not None:
+        stats["hyperparameters"] = hyperparameters.copy()
     return stats
 
 
@@ -475,6 +522,7 @@ def train_pairing(
     target_update=100,
     use_gpu=True,
     write_plots=True,
+    hyperparameter_overrides=None,
 ):
     scenario_config = SCENARIO_CONFIGS[scenario_key]
     env = GridWorldEnv(
@@ -498,7 +546,9 @@ def train_pairing(
         use_gpu=use_gpu,
         batch_size=batch_size,
         target_update=target_update,
+        hyperparameter_overrides=hyperparameter_overrides,
     )
+    hp = deep_srq_hyperparams(hyperparameter_overrides)
     rewards_history = [[], []]
     episode_durations = []
     best_joint_reward = -float("inf")
@@ -581,6 +631,7 @@ def train_pairing(
             wall_clock_seconds=wall_clock_seconds,
             episode_durations=episode_durations,
         ),
+        hyperparameters=hp if "DeepSRQ" in pairing else None,
     )
     plot_path = run_dir / "training_plot.png"
     stats_path = run_dir / "training_stats.txt"
@@ -609,6 +660,7 @@ def run_all_pairings(
     target_update=100,
     use_gpu=True,
     write_plots=True,
+    hyperparameter_overrides=None,
 ):
     scenarios = scenarios or list(SCENARIO_CONFIGS.keys())
     pairings = pairings or DEFAULT_PAIRINGS
@@ -628,6 +680,7 @@ def run_all_pairings(
                 target_update=target_update,
                 use_gpu=use_gpu,
                 write_plots=write_plots,
+                hyperparameter_overrides=hyperparameter_overrides,
             )
             scenario_results[pairing_slug(pairing)] = stats
         results[scenario_key] = scenario_results
@@ -649,9 +702,14 @@ def train_dueling_double_experiment(
     target_tau=None,
     write_plots=True,
     include_episode_durations=False,
+    hyperparameter_overrides=None,
+    run_name_suffix=None,
+    print_full_stats=True,
 ):
     pairing = ("DeepSRQ", "DeepSRQ")
     run_name = f"eps{epsilon_robust_initial:g}_{epsilon_schedule}"
+    if run_name_suffix:
+        run_name = f"{run_name}__{run_name_suffix}"
     run_dir = Path(output_root) / scenario_key / f"{pairing_slug(pairing)}__{run_name}"
     run_dir.mkdir(parents=True, exist_ok=True)
 
@@ -668,7 +726,7 @@ def train_dueling_double_experiment(
     num_agents = 2
     num_actions = len(env.action_space)
     obs_dim = len(_flatten_obs(env.reset()))
-    hp = DEEP_SRQ_HYPERPARAMS
+    hp = deep_srq_hyperparams(hyperparameter_overrides)
 
     shared_agent = DuelingDoubleDqnSreAgent(
         agent_id=0,
@@ -683,11 +741,13 @@ def train_dueling_double_experiment(
         learning_starts=hp["learning_starts"],
         grad_clip_norm=hp["grad_clip_max_norm"],
         sre_num_repeats=hp["sre_num_repeats"],
+        sre_include_pure_starts=hp["sre_include_pure_starts"],
         sre_cache_size=hp["sre_cache_size"],
         train_every=hp["train_every"],
+        network_type=hp["network_type"],
         pathwrap_path=pathwrap_path,
         use_gpu=use_gpu,
-        sre_solver=make_sre_solver(solver_name, pathwrap_path=pathwrap_path),
+        sre_solver=_make_deep_srq_solver(solver_name, pathwrap_path, hp),
     )
 
     history_rewards = [[], []]
@@ -811,10 +871,134 @@ def train_dueling_double_experiment(
         stats["plot_path"] = str(plot_path)
     save_training_stats(stats_path, stats)
     print(f"Saved stats to {stats_path}")
-    print_stats_payload(stats, f"{stats['scenario_name']} - {stats['pair_label']} - {run_name}")
+    title = f"{stats['scenario_name']} - {stats['pair_label']} - {run_name}"
+    if print_full_stats:
+        print_stats_payload(stats, title)
+    else:
+        print(title)
+        print("=" * len(title))
+        print_timing_stats(stats)
     print("\nReward Summary")
     print_summary_table(summarize_rewards(stats))
     return stats
+
+
+def run_deep_srq_ablation_variants(
+    *,
+    variants,
+    scenarios=tuple(SCENARIO_CONFIGS.keys()),
+    base_seed=BASE_SEED,
+    pathwrap_path=None,
+    output_root=SCENARIO_OUTPUT_ROOT,
+    use_gpu=None,
+    write_plots=True,
+    default_n_episodes=3000,
+    default_epsilon_robust_initial=0.5,
+    default_epsilon_schedule="constant",
+    default_solver_name=DEFAULT_DEEP_SRQ_SOLVER,
+    default_hyperparameter_overrides=None,
+    mode_trainers=None,
+):
+    """Run named DeepSRQ ablation variants for each scenario.
+
+    Variants are dictionaries. Common keys are `label`, `mode`, `solver_name`,
+    `epsilon_robust_initial`, `epsilon_schedule`, `n_episodes`,
+    `hyperparameter_overrides`, and `run_name_suffix`. The default `serial`
+    mode uses `train_dueling_double_experiment`; callers can provide additional
+    modes through `mode_trainers`, for example a `vectorized` trainer.
+    """
+    if use_gpu is None:
+        use_gpu = torch is not None and torch.cuda.is_available()
+
+    base_hp = dict(default_hyperparameter_overrides or {})
+    trainers = {"serial": train_dueling_double_experiment}
+    if mode_trainers:
+        trainers.update(mode_trainers)
+
+    results = {}
+    for scenario_index, scenario_key in enumerate(scenarios):
+        scenario_results = {}
+        for variant_index, variant in enumerate(variants):
+            label = variant["label"]
+            mode = variant.get("mode", "serial")
+            trainer = trainers.get(mode)
+            if trainer is None:
+                raise ValueError(f"No trainer configured for ablation mode: {mode}")
+
+            hp = base_hp.copy()
+            hp.update(variant.get("hyperparameter_overrides", {}))
+            seed = int(
+                variant.get("seed", base_seed + scenario_index * 1000 + variant_index)
+            )
+            run_name_suffix = variant.get("run_name_suffix", label)
+            variant_output_root = Path(output_root) / label
+
+            common_kwargs = {
+                "scenario_key": scenario_key,
+                "epsilon_robust_initial": variant.get(
+                    "epsilon_robust_initial", default_epsilon_robust_initial
+                ),
+                "epsilon_schedule": variant.get(
+                    "epsilon_schedule", default_epsilon_schedule
+                ),
+                "seed": seed,
+                "pathwrap_path": pathwrap_path,
+                "solver_name": variant.get("solver_name", default_solver_name),
+                "output_root": variant.get("output_root", variant_output_root),
+                "use_gpu": use_gpu,
+                "write_plots": variant.get("write_plots", write_plots),
+                "hyperparameter_overrides": hp,
+                "run_name_suffix": run_name_suffix,
+                "print_full_stats": variant.get("print_full_stats", False),
+            }
+
+            if mode == "serial":
+                stats = trainer(
+                    n_episodes=variant.get("n_episodes", default_n_episodes),
+                    include_episode_durations=variant.get(
+                        "include_episode_durations", False
+                    ),
+                    **common_kwargs,
+                )
+            else:
+                extra_kwargs = dict(variant.get("trainer_kwargs", {}))
+                stats = trainer(**common_kwargs, **extra_kwargs)
+
+            stats["ablation_variant"] = label
+            stats["ablation_mode"] = mode
+            stats["ablation_seed"] = seed
+            scenario_results[label] = stats
+        results[scenario_key] = scenario_results
+    return results
+
+
+def summarize_ablation_timing_rows(results):
+    rows = []
+    for scenario_key, scenario_results in results.items():
+        for label, stats in scenario_results.items():
+            timing = stats["timing"]
+            rewards = summarize_rewards(stats)
+            env_steps = stats.get("total_environment_steps") or stats.get(
+                "n_environment_steps"
+            )
+            row = {
+                "scenario": scenario_key,
+                "variant": label,
+                "mode": stats.get("ablation_mode"),
+                "wall_seconds": timing["wall_clock_seconds"],
+                "env_steps": env_steps,
+                "steps_per_second": env_steps / timing["wall_clock_seconds"],
+                "sre_count": timing["sre_solve_time"]["count"],
+                "mean_sre_ms": timing["sre_solve_time"]["mean_microseconds"] / 1000.0,
+                "backend_count": timing["backend_solve_time"]["count"],
+                "mean_backend_ms": (
+                    timing["backend_solve_time"]["mean_microseconds"] / 1000.0
+                ),
+            }
+            for agent_index, reward_summary in enumerate(rewards, start=1):
+                row[f"agent{agent_index}_mean_last"] = reward_summary["MeanLastN"]
+            rows.append(row)
+    return rows
 
 
 def run_deep_srq_epsilon_sweep(
@@ -829,6 +1013,7 @@ def run_deep_srq_epsilon_sweep(
     output_root=SCENARIO_OUTPUT_ROOT,
     use_gpu=None,
     write_plots=True,
+    hyperparameter_overrides=None,
 ):
     if use_gpu is None:
         use_gpu = torch is not None and torch.cuda.is_available()
@@ -860,6 +1045,7 @@ def run_deep_srq_epsilon_sweep(
                         use_gpu=use_gpu,
                         write_plots=write_plots,
                         include_episode_durations=False,
+                        hyperparameter_overrides=hyperparameter_overrides,
                     )
                     scenario_results[f"eps{epsilon_start:g}_{epsilon_schedule}"] = stats
             solver_results[scenario_key] = scenario_results

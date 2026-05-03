@@ -1,0 +1,245 @@
+{
+  "scenario_key": "scenario3",
+  "scenario_name": "Scenario 3",
+  "pairing": [
+    "DeepSRQ",
+    "DeepSRQ"
+  ],
+  "pair_label": "DeepSRQ vs DeepSRQ",
+  "pair_slug": "deepsrq_vs_deepsrq",
+  "training_mode": "vectorized",
+  "num_envs": 32,
+  "n_environment_steps": 5000,
+  "completed_episodes": 37,
+  "seed": 4028,
+  "solver_name": "path_c_pool",
+  "epsilon_robust_initial": 0.5,
+  "epsilon_schedule": "constant",
+  "hyperparameters": {
+    "learning_rate": 0.0003,
+    "batch_size": 64,
+    "replay_buffer_capacity": 10000,
+    "learning_starts": 256,
+    "target_tau": null,
+    "gamma": 0.9,
+    "action_epsilon_start": 1.0,
+    "action_epsilon_end": 0.05,
+    "action_epsilon_decay_fraction": 0.5,
+    "grad_clip_max_norm": 10.0,
+    "sre_num_repeats": 4,
+    "sre_include_pure_starts": true,
+    "sre_cache_size": 4096,
+    "train_every": 4,
+    "network_type": "joint_output",
+    "sre_solver_workers": 4,
+    "sre_solver_start_method": null
+  },
+  "p_env": 0.8,
+  "grid_size": 4,
+  "start_positions": [
+    [
+      3,
+      0
+    ],
+    [
+      3,
+      3
+    ]
+  ],
+  "goal_positions": [
+    [
+      0,
+      3
+    ],
+    [
+      0,
+      0
+    ]
+  ],
+  "target_update_steps": 100,
+  "target_tau": null,
+  "total_environment_steps": 5000,
+  "rewards": [
+    [
+      94.0,
+      -210.0,
+      -526.0,
+      -324.0,
+      -409.0,
+      -57.0,
+      -123.0,
+      -1090.0,
+      -397.0,
+      -422.0,
+      -793.0,
+      -298.0,
+      -199.0,
+      -397.0,
+      -595.0,
+      -30.0,
+      -23.0,
+      -100.0,
+      -100.0,
+      -114.0,
+      -199.0,
+      -100.0,
+      -397.0,
+      -199.0,
+      -528.0,
+      -213.0,
+      -199.0,
+      -420.0,
+      -298.0,
+      -199.0,
+      -199.0,
+      -100.0,
+      -397.0,
+      -397.0,
+      -298.0,
+      -199.0,
+      -100.0
+    ],
+    [
+      73.0,
+      -227.0,
+      -532.0,
+      -346.0,
+      -449.0,
+      -19.0,
+      -169.0,
+      -922.0,
+      -293.0,
+      -595.0,
+      -638.0,
+      -124.0,
+      -35.0,
+      -219.0,
+      -457.0,
+      -199.0,
+      -199.0,
+      5.0,
+      -100.0,
+      -298.0,
+      -199.0,
+      -100.0,
+      -226.0,
+      -27.0,
+      -694.0,
+      -397.0,
+      -34.0,
+      -595.0,
+      -124.0,
+      -49.0,
+      -50.0,
+      -100.0,
+      -397.0,
+      -397.0,
+      -174.0,
+      -199.0,
+      -100.0
+    ]
+  ],
+  "agent_labels": [
+    "Agent 1 (DeepSRQ)",
+    "Agent 2 (DeepSRQ)"
+  ],
+  "artifact_dir": "/home/wowthecoder/SRE-DQN/discrete_action_space/bimatrix_game/ablation_runs/vectorized_sre_batch/vectorized_env32_path_c_pool4/scenario3/vectorized_envs32_eps0.5_constant__vectorized_env32_path_c_pool4",
+  "stats_path": "/home/wowthecoder/SRE-DQN/discrete_action_space/bimatrix_game/ablation_runs/vectorized_sre_batch/vectorized_env32_path_c_pool4/scenario3/vectorized_envs32_eps0.5_constant__vectorized_env32_path_c_pool4/training_stats.txt",
+  "timing": {
+    "wall_clock_seconds": 43.46409723400211,
+    "episode_time": {
+      "count": 0,
+      "mean_seconds": null,
+      "min_seconds": null,
+      "max_seconds": null,
+      "std_seconds": null,
+      "mean_microseconds": null,
+      "min_microseconds": null,
+      "max_microseconds": null,
+      "std_microseconds": null
+    },
+    "sre_solve_time": {
+      "count": 8169,
+      "mean_seconds": 0.005031097010777401,
+      "min_seconds": 0.0029620641500514465,
+      "max_seconds": 0.024178957002732204,
+      "std_seconds": 0.0010243346928798009,
+      "mean_microseconds": 5031.097010777401,
+      "min_microseconds": 2962.0641500514466,
+      "max_microseconds": 24178.957002732204,
+      "std_microseconds": 1024.3346928798007
+    },
+    "backend_solve_time": {
+      "count": 8169,
+      "mean_seconds": 0.017472076135131596,
+      "min_seconds": 0.006557034997968003,
+      "max_seconds": 0.06554276300084894,
+      "std_seconds": 0.009392791362672993,
+      "mean_microseconds": 17472.076135131596,
+      "min_microseconds": 6557.034997968003,
+      "max_microseconds": 65542.76300084894,
+      "std_microseconds": 9392.791362672993
+    },
+    "path_solve_time": {
+      "count": 8169,
+      "mean_seconds": 0.017472076135131596,
+      "min_seconds": 0.006557034997968003,
+      "max_seconds": 0.06554276300084894,
+      "std_seconds": 0.009392791362672993,
+      "mean_microseconds": 17472.076135131596,
+      "min_microseconds": 6557.034997968003,
+      "max_microseconds": 65542.76300084894,
+      "std_microseconds": 9392.791362672993
+    },
+    "agents": [
+      {
+        "agent_index": 0,
+        "algorithm": "DuelingDoubleDqnSreAgent",
+        "sre_solve_time": {
+          "count": 8169,
+          "mean_seconds": 0.005031097010777401,
+          "min_seconds": 0.0029620641500514465,
+          "max_seconds": 0.024178957002732204,
+          "std_seconds": 0.0010243346928798009,
+          "mean_microseconds": 5031.097010777401,
+          "min_microseconds": 2962.0641500514466,
+          "max_microseconds": 24178.957002732204,
+          "std_microseconds": 1024.3346928798007
+        },
+        "backend_solve_time": {
+          "count": 8169,
+          "mean_seconds": 0.017472076135131596,
+          "min_seconds": 0.006557034997968003,
+          "max_seconds": 0.06554276300084894,
+          "std_seconds": 0.009392791362672993,
+          "mean_microseconds": 17472.076135131596,
+          "min_microseconds": 6557.034997968003,
+          "max_microseconds": 65542.76300084894,
+          "std_microseconds": 9392.791362672993
+        },
+        "path_solve_time": {
+          "count": 8169,
+          "mean_seconds": 0.017472076135131596,
+          "min_seconds": 0.006557034997968003,
+          "max_seconds": 0.06554276300084894,
+          "std_seconds": 0.009392791362672993,
+          "mean_microseconds": 17472.076135131596,
+          "min_microseconds": 6557.034997968003,
+          "max_microseconds": 65542.76300084894,
+          "std_microseconds": 9392.791362672993
+        },
+        "update_time": {
+          "count": 150,
+          "mean_seconds": 0.16156059533980927,
+          "min_seconds": 0.039366606000839965,
+          "max_seconds": 0.2480610410020745,
+          "std_seconds": 0.028708242394920477,
+          "mean_microseconds": 161560.59533980925,
+          "min_microseconds": 39366.606000839965,
+          "max_microseconds": 248061.0410020745,
+          "std_microseconds": 28708.242394920475
+        }
+      }
+    ]
+  }
+}

@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+import multiprocessing as mp
 import importlib
 import time
 
@@ -41,8 +42,36 @@ class SreStageGameSolver(ABC):
     name: str = "base"
 
     @abstractmethod
-    def solve(self, q_tensor, epsilon, *, num_repeats=20, round_digits=4):
+    def solve(
+        self,
+        q_tensor,
+        epsilon,
+        *,
+        num_repeats=20,
+        round_digits=4,
+        include_pure_starts=True,
+    ):
         raise NotImplementedError
+
+    def solve_batch(
+        self,
+        q_tensors,
+        epsilon,
+        *,
+        num_repeats=20,
+        round_digits=4,
+        include_pure_starts=True,
+    ):
+        return [
+            self.solve(
+                q_tensor,
+                epsilon,
+                num_repeats=num_repeats,
+                round_digits=round_digits,
+                include_pure_starts=include_pure_starts,
+            )
+            for q_tensor in q_tensors
+        ]
 
     def get_solve_time_summary(self):
         return _empty_duration_summary()
@@ -140,7 +169,15 @@ class PathCBimatrixSreSolver(SreStageGameSolver):
     def __init__(self, pathwrap_path="pathwrap.so"):
         self.path_solver = PathSolverWrapper(pathwrap_path)
 
-    def solve(self, q_tensor, epsilon, *, num_repeats=20, round_digits=4):
+    def solve(
+        self,
+        q_tensor,
+        epsilon,
+        *,
+        num_repeats=20,
+        round_digits=4,
+        include_pure_starts=True,
+    ):
         q_tensor = validate_bimatrix_q_tensor(q_tensor)
         u1 = q_tensor[:, :, 0]
         u2 = q_tensor[:, :, 1]
@@ -153,6 +190,7 @@ class PathCBimatrixSreSolver(SreStageGameSolver):
                     num_repeats,
                     self.path_solver,
                     round_digits=round_digits,
+                    include_pure_starts=include_pure_starts,
                 )
             )
         except Exception as exc:
@@ -184,7 +222,11 @@ class PathCBimatrixSreSolver(SreStageGameSolver):
             utilities_sr=utilities_sr,
             utilities_nominal=utilities_nominal,
             success=True,
-            metadata={"solver": self.name, "num_repeats": int(num_repeats)},
+            metadata={
+                "solver": self.name,
+                "num_repeats": int(num_repeats),
+                "include_pure_starts": bool(include_pure_starts),
+            },
         )
 
     def get_solve_time_summary(self):
@@ -192,6 +234,136 @@ class PathCBimatrixSreSolver(SreStageGameSolver):
 
     def close(self):
         self.path_solver.close()
+
+
+_POOL_SOLVER = None
+
+
+def _path_pool_initializer(pathwrap_path):
+    global _POOL_SOLVER
+    _POOL_SOLVER = PathCBimatrixSreSolver(pathwrap_path=pathwrap_path)
+
+
+def _path_pool_solve_task(payload):
+    q_tensor, epsilon, num_repeats, round_digits, include_pure_starts = payload
+    start = time.perf_counter()
+    result = _POOL_SOLVER.solve(
+        q_tensor,
+        epsilon,
+        num_repeats=num_repeats,
+        round_digits=round_digits,
+        include_pure_starts=include_pure_starts,
+    )
+    elapsed = time.perf_counter() - start
+    result.metadata = dict(result.metadata)
+    result.metadata["worker_sre_wall_seconds"] = float(elapsed)
+    return result
+
+
+class ProcessPoolPathCBimatrixSreSolver(SreStageGameSolver):
+    name = "path_c_pool"
+
+    def __init__(self, pathwrap_path="pathwrap.so", max_workers=4, start_method=None):
+        self.pathwrap_path = pathwrap_path
+        self.max_workers = int(max_workers)
+        self.start_method = start_method
+        self.solve_time_count = 0
+        self.solve_time_sum = 0.0
+        self.solve_time_sumsq = 0.0
+        self.solve_time_min = None
+        self.solve_time_max = None
+        if self.max_workers <= 0:
+            raise ValueError("max_workers must be positive for process-pool SRE.")
+        ctx = mp.get_context(start_method) if start_method else mp.get_context()
+        self._pool = ctx.Pool(
+            processes=self.max_workers,
+            initializer=_path_pool_initializer,
+            initargs=(self.pathwrap_path,),
+        )
+
+    def _record_solve_time(self, duration):
+        self.solve_time_count += 1
+        self.solve_time_sum += duration
+        self.solve_time_sumsq += duration * duration
+        if self.solve_time_min is None or duration < self.solve_time_min:
+            self.solve_time_min = duration
+        if self.solve_time_max is None or duration > self.solve_time_max:
+            self.solve_time_max = duration
+
+    def solve(
+        self,
+        q_tensor,
+        epsilon,
+        *,
+        num_repeats=20,
+        round_digits=4,
+        include_pure_starts=True,
+    ):
+        return self.solve_batch(
+            [q_tensor],
+            epsilon,
+            num_repeats=num_repeats,
+            round_digits=round_digits,
+            include_pure_starts=include_pure_starts,
+        )[0]
+
+    def solve_batch(
+        self,
+        q_tensors,
+        epsilon,
+        *,
+        num_repeats=20,
+        round_digits=4,
+        include_pure_starts=True,
+    ):
+        q_tensors = [validate_bimatrix_q_tensor(q_tensor) for q_tensor in q_tensors]
+        if not q_tensors:
+            return []
+
+        payloads = [
+            (
+                q_tensor,
+                float(epsilon),
+                int(num_repeats),
+                round_digits,
+                bool(include_pure_starts),
+            )
+            for q_tensor in q_tensors
+        ]
+        results = self._pool.map(_path_pool_solve_task, payloads)
+        for result in results:
+            duration = float(result.metadata.get("worker_sre_wall_seconds", 0.0))
+            self._record_solve_time(duration)
+            result.metadata["solver"] = self.name
+            result.metadata["max_workers"] = self.max_workers
+        return results
+
+    def get_solve_time_summary(self):
+        count = self.solve_time_count
+        if count == 0:
+            return _empty_duration_summary()
+
+        mean = self.solve_time_sum / count
+        variance = max(self.solve_time_sumsq / count - mean * mean, 0.0)
+        std = float(np.sqrt(variance))
+        return {
+            "count": int(count),
+            "mean_seconds": float(mean),
+            "min_seconds": float(self.solve_time_min),
+            "max_seconds": float(self.solve_time_max),
+            "std_seconds": std,
+            "mean_microseconds": float(mean * 1_000_000.0),
+            "min_microseconds": float(self.solve_time_min * 1_000_000.0),
+            "max_microseconds": float(self.solve_time_max * 1_000_000.0),
+            "std_microseconds": float(std * 1_000_000.0),
+        }
+
+    def close(self):
+        pool = getattr(self, "_pool", None)
+        if pool is not None:
+            pool.close()
+            pool.join()
+            self._pool = None
 
 
 class LemkeLcpBimatrixSreSolver(SreStageGameSolver):
@@ -290,7 +462,15 @@ class LemkeLcpBimatrixSreSolver(SreStageGameSolver):
             and float(np.max(np.abs(z * w))) <= tol
         )
 
-    def solve(self, q_tensor, epsilon, *, num_repeats=20, round_digits=4):
+    def solve(
+        self,
+        q_tensor,
+        epsilon,
+        *,
+        num_repeats=20,
+        round_digits=4,
+        include_pure_starts=True,
+    ):
         q_tensor = validate_bimatrix_q_tensor(q_tensor)
         lcp = build_robust_bimatrix_lcp(q_tensor[:, :, 0], q_tensor[:, :, 1], epsilon)
         M = np.asarray(lcp["M"], dtype=np.float64)
@@ -311,6 +491,7 @@ class LemkeLcpBimatrixSreSolver(SreStageGameSolver):
                 metadata={
                     "solver": self.name,
                     "num_repeats_ignored": int(num_repeats),
+                    "include_pure_starts_ignored": bool(include_pure_starts),
                 },
             )
         finally:
@@ -342,6 +523,7 @@ class LemkeLcpBimatrixSreSolver(SreStageGameSolver):
                     "solver": self.name,
                     "raw_status": status,
                     "num_repeats_ignored": int(num_repeats),
+                    "include_pure_starts_ignored": bool(include_pure_starts),
                 },
             )
 
@@ -358,6 +540,7 @@ class LemkeLcpBimatrixSreSolver(SreStageGameSolver):
                     "solver": self.name,
                     "raw_status": status,
                     "num_repeats_ignored": int(num_repeats),
+                    "include_pure_starts_ignored": bool(include_pure_starts),
                 },
             )
 
@@ -374,16 +557,28 @@ class LemkeLcpBimatrixSreSolver(SreStageGameSolver):
                 "raw_status": status,
                 "raw_message": str(message),
                 "num_repeats_ignored": int(num_repeats),
+                "include_pure_starts_ignored": bool(include_pure_starts),
             },
         )
 
 
-def make_sre_solver(solver_name="path_c", *, pathwrap_path=None):
+def make_sre_solver(
+    solver_name="path_c",
+    *,
+    pathwrap_path=None,
+    max_workers=4,
+    start_method=None,
+):
     if solver_name == "path_c":
         kwargs = {}
         if pathwrap_path is not None:
             kwargs["pathwrap_path"] = pathwrap_path
         return PathCBimatrixSreSolver(**kwargs)
+    if solver_name == "path_c_pool":
+        kwargs = {"max_workers": max_workers, "start_method": start_method}
+        if pathwrap_path is not None:
+            kwargs["pathwrap_path"] = pathwrap_path
+        return ProcessPoolPathCBimatrixSreSolver(**kwargs)
     if solver_name == "lemkelcp":
         return LemkeLcpBimatrixSreSolver()
     raise ValueError(f"Unknown SRE solver: {solver_name}")

@@ -69,6 +69,100 @@ class DuelingJointQNetwork(nn.Module):
         return q_joint.view(-1, self.num_actions, self.num_actions, self.num_agents)
 
 
+class _DuelingPayoffHead(nn.Module):
+    def __init__(self, feature_dim, joint_action_count):
+        super().__init__()
+        self.value_head = nn.Linear(feature_dim, 1)
+        self.adv_head = nn.Linear(feature_dim, joint_action_count)
+
+    def forward(self, features):
+        value = self.value_head(features)  # [B, 1]
+        advantage = self.adv_head(features)  # [B, |A_joint|]
+        return value + (advantage - advantage.mean(dim=1, keepdim=True))
+
+
+class DuelingPerAgentJointQNetwork(nn.Module):
+    """
+    Per-agent critics over joint actions.
+
+    Output shape is kept identical to DuelingJointQNetwork:
+    [batch, num_actions, num_actions, num_agents].
+    """
+
+    def __init__(self, obs_dim, num_actions, num_agents):
+        super().__init__()
+        if num_agents != 2:
+            raise ValueError("This network currently supports only num_agents == 2.")
+
+        self.num_actions = num_actions
+        self.num_agents = num_agents
+        self.joint_action_count = num_actions ** num_agents
+        self.critics = nn.ModuleList(
+            [
+                nn.Sequential(
+                    nn.Linear(obs_dim, 128),
+                    nn.ReLU(),
+                    nn.Linear(128, 128),
+                    nn.ReLU(),
+                    _DuelingPayoffHead(128, self.joint_action_count),
+                )
+                for _ in range(num_agents)
+            ]
+        )
+
+    def forward(self, state):
+        q_by_agent = [critic(state) for critic in self.critics]
+        q_joint = torch.stack(q_by_agent, dim=-1)  # [B, |A_joint|, N]
+        return q_joint.view(-1, self.num_actions, self.num_actions, self.num_agents)
+
+
+class DuelingSharedTrunkPerAgentJointQNetwork(nn.Module):
+    """
+    Shared state encoder with separate per-agent dueling payoff heads.
+
+    This shares feature extraction while retaining agent-specific payoff heads.
+    """
+
+    def __init__(self, obs_dim, num_actions, num_agents):
+        super().__init__()
+        if num_agents != 2:
+            raise ValueError("This network currently supports only num_agents == 2.")
+
+        self.num_actions = num_actions
+        self.num_agents = num_agents
+        self.joint_action_count = num_actions ** num_agents
+        self.feature = nn.Sequential(
+            nn.Linear(obs_dim, 128),
+            nn.ReLU(),
+            nn.Linear(128, 128),
+            nn.ReLU(),
+        )
+        self.heads = nn.ModuleList(
+            [
+                _DuelingPayoffHead(128, self.joint_action_count)
+                for _ in range(num_agents)
+            ]
+        )
+
+    def forward(self, state):
+        features = self.feature(state)
+        q_by_agent = [head(features) for head in self.heads]
+        q_joint = torch.stack(q_by_agent, dim=-1)  # [B, |A_joint|, N]
+        return q_joint.view(-1, self.num_actions, self.num_actions, self.num_agents)
+
+
+def make_q_network(obs_dim, num_actions, num_agents, network_type="joint_output"):
+    if network_type == "joint_output":
+        return DuelingJointQNetwork(obs_dim, num_actions, num_agents)
+    if network_type == "per_agent_independent":
+        return DuelingPerAgentJointQNetwork(obs_dim, num_actions, num_agents)
+    if network_type == "shared_trunk_separate_heads":
+        return DuelingSharedTrunkPerAgentJointQNetwork(
+            obs_dim, num_actions, num_agents
+        )
+    raise ValueError(f"Unknown network_type: {network_type}")
+
+
 class DuelingDoubleDqnSreAgent:
     """
     Dueling Double DQN agent that uses SRE policies for action selection and targets.
@@ -91,9 +185,11 @@ class DuelingDoubleDqnSreAgent:
         grad_clip_norm=10.0,
         use_gpu=True,
         sre_num_repeats=20,
+        sre_include_pure_starts=True,
         sre_cache_size=4096,
         train_every=1,
         sre_solver=None,
+        network_type="joint_output",
     ):
         if num_agents != 2:
             raise ValueError("This implementation currently supports only 2 agents.")
@@ -110,20 +206,24 @@ class DuelingDoubleDqnSreAgent:
         self.learning_starts = learning_starts
         self.grad_clip_norm = grad_clip_norm
         self.sre_num_repeats = sre_num_repeats
+        self.sre_include_pure_starts = bool(sre_include_pure_starts)
         self.sre_cache_size = sre_cache_size
         self._sre_cache = OrderedDict()
         self.train_every = max(1, int(train_every))
         self._update_calls = 0
+        self.network_type = network_type
 
         if use_gpu and torch.cuda.is_available():
             self.device = torch.device("cuda")
         else:
             self.device = torch.device("cpu")
 
-        self.q_net = DuelingJointQNetwork(obs_dim, num_actions, num_agents).to(self.device)
-        self.target_net = DuelingJointQNetwork(obs_dim, num_actions, num_agents).to(
-            self.device
-        )
+        self.q_net = make_q_network(
+            obs_dim, num_actions, num_agents, network_type=network_type
+        ).to(self.device)
+        self.target_net = make_q_network(
+            obs_dim, num_actions, num_agents, network_type=network_type
+        ).to(self.device)
         self.target_net.load_state_dict(self.q_net.state_dict())
 
         self.optimizer = optim.Adam(self.q_net.parameters(), lr=lr)
@@ -140,14 +240,22 @@ class DuelingDoubleDqnSreAgent:
             sre_solver = PathCBimatrixSreSolver(pathwrap_path=pathwrap_path)
         self.sre_solver = sre_solver
 
-    def _record_sre_solve_time(self, duration):
-        self.sre_solve_time_count += 1
+    def _record_sre_solve_time(self, duration, count=1):
+        count = max(1, int(count))
+        per_solve_duration = duration / count
+        self.sre_solve_time_count += count
         self.sre_solve_time_sum += duration
-        self.sre_solve_time_sumsq += duration * duration
-        if self.sre_solve_time_min is None or duration < self.sre_solve_time_min:
-            self.sre_solve_time_min = duration
-        if self.sre_solve_time_max is None or duration > self.sre_solve_time_max:
-            self.sre_solve_time_max = duration
+        self.sre_solve_time_sumsq += count * per_solve_duration * per_solve_duration
+        if (
+            self.sre_solve_time_min is None
+            or per_solve_duration < self.sre_solve_time_min
+        ):
+            self.sre_solve_time_min = per_solve_duration
+        if (
+            self.sre_solve_time_max is None
+            or per_solve_duration > self.sre_solve_time_max
+        ):
+            self.sre_solve_time_max = per_solve_duration
 
     def get_sre_solve_time_summary(self):
         count = self.sre_solve_time_count
@@ -205,6 +313,7 @@ class DuelingDoubleDqnSreAgent:
             solver_name,
             round(float(self.epsilon_robust), 6),
             int(self.sre_num_repeats),
+            bool(self.sre_include_pure_starts),
             q_key.tobytes(),
         )
 
@@ -229,6 +338,7 @@ class DuelingDoubleDqnSreAgent:
                 q_tensor,
                 epsilon=self.epsilon_robust,
                 num_repeats=self.sre_num_repeats,
+                include_pure_starts=self.sre_include_pure_starts,
             )
         except Exception:
             self._record_sre_solve_time(time.perf_counter() - solve_start)
@@ -249,11 +359,100 @@ class DuelingDoubleDqnSreAgent:
         self._cache_sre_policies(cache_key, policies)
         return policies
 
+    def _solve_sre_batch(self, q_tensors):
+        q_tensors = np.asarray(q_tensors, dtype=np.float32)
+        if q_tensors.ndim != 4:
+            raise ValueError(
+                "Expected q_tensors with shape [B, A1, A2, N], "
+                f"got {q_tensors.shape}."
+            )
+
+        policies_by_index = [None] * q_tensors.shape[0]
+        unique_q_tensors = []
+        unique_keys = []
+        key_to_unique_index = {}
+
+        for batch_index, q_tensor in enumerate(q_tensors):
+            cache_key = self._sre_cache_key(q_tensor)
+            cached = self._sre_cache.get(cache_key)
+            if cached is not None:
+                self._sre_cache.move_to_end(cache_key)
+                policies_by_index[batch_index] = [policy.copy() for policy in cached]
+                continue
+
+            unique_index = key_to_unique_index.get(cache_key)
+            if unique_index is None:
+                unique_index = len(unique_q_tensors)
+                key_to_unique_index[cache_key] = unique_index
+                unique_q_tensors.append(q_tensor)
+                unique_keys.append(cache_key)
+            policies_by_index[batch_index] = unique_index
+
+        if unique_q_tensors:
+            solve_start = time.perf_counter()
+            try:
+                if hasattr(self.sre_solver, "solve_batch"):
+                    results = self.sre_solver.solve_batch(
+                        unique_q_tensors,
+                        epsilon=self.epsilon_robust,
+                        num_repeats=self.sre_num_repeats,
+                        include_pure_starts=self.sre_include_pure_starts,
+                    )
+                else:
+                    results = [
+                        self.sre_solver.solve(
+                            q_tensor,
+                            epsilon=self.epsilon_robust,
+                            num_repeats=self.sre_num_repeats,
+                            include_pure_starts=self.sre_include_pure_starts,
+                        )
+                        for q_tensor in unique_q_tensors
+                    ]
+            except Exception:
+                elapsed = time.perf_counter() - solve_start
+                self._record_sre_solve_time(elapsed, count=len(unique_q_tensors))
+                results = [None] * len(unique_q_tensors)
+            else:
+                elapsed = time.perf_counter() - solve_start
+                self._record_sre_solve_time(elapsed, count=len(unique_q_tensors))
+
+            unique_policies = []
+            for q_tensor, cache_key, result in zip(unique_q_tensors, unique_keys, results):
+                if result is None or not result.success or not result.policies:
+                    policies = self._uniform_policies()
+                else:
+                    policies = [
+                        self._normalize_policy(policy) for policy in result.policies
+                    ]
+                    if (
+                        len(policies) != self.num_agents
+                        or any(
+                            policy.shape[0] != self.num_actions
+                            for policy in policies
+                        )
+                    ):
+                        policies = self._uniform_policies()
+                self._cache_sre_policies(cache_key, policies)
+                unique_policies.append(policies)
+
+            for batch_index, entry in enumerate(policies_by_index):
+                if isinstance(entry, int):
+                    policies_by_index[batch_index] = [
+                        policy.copy() for policy in unique_policies[entry]
+                    ]
+
+        return policies_by_index
+
     def _sre_expected_values(self, q_tensor, policies):
         expected = q_tensor
         for policy in policies:
             expected = np.tensordot(policy, expected, axes=([0], [0]))
         return np.asarray(expected, dtype=np.float32)
+
+    def _sre_expected_values_batch(self, q_tensors, policies_batch):
+        p1 = np.stack([policies[0] for policies in policies_batch], axis=0)
+        p2 = np.stack([policies[1] for policies in policies_batch], axis=0)
+        return np.einsum("bi,bijp,bj->bp", p1, q_tensors, p2).astype(np.float32)
 
     def act(self, state, agent_id=None):
         if agent_id is None:
@@ -328,14 +527,11 @@ class DuelingDoubleDqnSreAgent:
             next_online = self.q_net(next_states_t).detach().cpu().numpy()
             next_target = self.target_net(next_states_t).detach().cpu().numpy()
 
-            next_values = []
-            for i in range(states_t.shape[0]):
-                policies = self._solve_sre(next_online[i])
-                expected_next = self._sre_expected_values(next_target[i], policies)
-                next_values.append(expected_next)
+            policies_batch = self._solve_sre_batch(next_online)
+            next_values = self._sre_expected_values_batch(next_target, policies_batch)
 
             next_values_t = torch.as_tensor(
-                np.asarray(next_values, dtype=np.float32), device=self.device
+                next_values, device=self.device
             )
             target_q = rewards_t + (1.0 - dones_t) * self.gamma * next_values_t
 
@@ -374,8 +570,10 @@ class DuelingDoubleDqnSreAgent:
             "num_actions": self.num_actions,
             "agent_id": self.agent_id,
             "sre_num_repeats": self.sre_num_repeats,
+            "sre_include_pure_starts": self.sre_include_pure_starts,
             "sre_cache_size": self.sre_cache_size,
             "train_every": self.train_every,
+            "network_type": self.network_type,
             "update_calls": self._update_calls,
             "buffer_size": self.replay_buffer.buffer.maxlen,
             "update_times": list(self.update_times),
@@ -416,10 +614,14 @@ class DuelingDoubleDqnSreAgent:
             self.grad_clip_norm = checkpoint["grad_clip_norm"]
         if "sre_num_repeats" in checkpoint:
             self.sre_num_repeats = checkpoint["sre_num_repeats"]
+        if "sre_include_pure_starts" in checkpoint:
+            self.sre_include_pure_starts = bool(checkpoint["sre_include_pure_starts"])
         if "sre_cache_size" in checkpoint:
             self.sre_cache_size = checkpoint["sre_cache_size"]
         if "train_every" in checkpoint:
             self.train_every = max(1, int(checkpoint["train_every"]))
+        if "network_type" in checkpoint:
+            self.network_type = checkpoint["network_type"]
         if "update_calls" in checkpoint:
             self._update_calls = int(checkpoint["update_calls"])
         replay_buffer_items = checkpoint.get("replay_buffer")

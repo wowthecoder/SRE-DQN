@@ -353,7 +353,14 @@ def build_robust_bimatrix_lcp(U1, U2, epsilon):
 
 
 def solve_strategically_robust_bimatrix_game_path_lcp(
-    U1, U2, epsilon_values, num_repeats, path_solver, verbose=False, round_digits=4
+    U1,
+    U2,
+    epsilon_values,
+    num_repeats,
+    path_solver,
+    verbose=False,
+    round_digits=4,
+    include_pure_starts=True,
 ):
     if np.isscalar(epsilon_values):
         epsilon = float(epsilon_values)
@@ -427,12 +434,13 @@ def solve_strategically_robust_bimatrix_game_path_lcp(
         if status in (1, 2):
             store_solution(z_sol)
 
-    for i in range(K1):
-        for j in range(K2):
-            z = np.zeros(n_vars, dtype=np.float64)
-            z[i] = 1.0
-            z[n1 + j] = 1.0
-            solve_from_start(z)
+    if include_pure_starts:
+        for i in range(K1):
+            for j in range(K2):
+                z = np.zeros(n_vars, dtype=np.float64)
+                z[i] = 1.0
+                z[n1 + j] = 1.0
+                solve_from_start(z)
 
     for _ in range(num_repeats):
         solve_from_start(np.random.rand(n_vars).astype(np.float64))
