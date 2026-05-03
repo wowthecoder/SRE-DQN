@@ -1,7 +1,7 @@
 import random
 import sys
 import time
-from collections import OrderedDict, deque
+from collections import deque
 from pathlib import Path
 
 import numpy as np
@@ -13,7 +13,7 @@ _THIS_DIR = Path(__file__).resolve().parent
 if str(_THIS_DIR) not in sys.path:
     sys.path.insert(0, str(_THIS_DIR))
 
-from sre_solvers import PathCBimatrixSreSolver
+from sre_solvers import IterativeNPlayerSreSolver, PathCBimatrixSreSolver
 
 
 class ReplayBuffer:
@@ -34,18 +34,17 @@ class ReplayBuffer:
 
 class DuelingJointQNetwork(nn.Module):
     """
-    Dueling network over joint actions for 2-player games.
-    Output shape: [batch, num_actions, num_actions, num_agents].
+    Dueling network over joint actions for N-player games.
+    Output shape: [batch, num_actions, ..., num_actions, num_agents].
     """
 
     def __init__(self, obs_dim, num_actions, num_agents):
         super().__init__()
-        if num_agents != 2:
-            raise ValueError("This network currently supports only num_agents == 2.")
 
         self.num_actions = num_actions
         self.num_agents = num_agents
         self.joint_action_count = num_actions ** num_agents
+        self.output_shape = [num_actions] * num_agents + [num_agents]
 
         self.feature = nn.Sequential(
             nn.Linear(obs_dim, 128),
@@ -66,7 +65,7 @@ class DuelingJointQNetwork(nn.Module):
         q_joint = value.unsqueeze(1) + (
             advantage - advantage.mean(dim=1, keepdim=True)
         )
-        return q_joint.view(-1, self.num_actions, self.num_actions, self.num_agents)
+        return q_joint.view(-1, *self.output_shape)
 
 
 class _DuelingPayoffHead(nn.Module):
@@ -86,17 +85,16 @@ class DuelingPerAgentJointQNetwork(nn.Module):
     Per-agent critics over joint actions.
 
     Output shape is kept identical to DuelingJointQNetwork:
-    [batch, num_actions, num_actions, num_agents].
+    [batch, num_actions, ..., num_actions, num_agents].
     """
 
     def __init__(self, obs_dim, num_actions, num_agents):
         super().__init__()
-        if num_agents != 2:
-            raise ValueError("This network currently supports only num_agents == 2.")
 
         self.num_actions = num_actions
         self.num_agents = num_agents
         self.joint_action_count = num_actions ** num_agents
+        self.output_shape = [num_actions] * num_agents + [num_agents]
         self.critics = nn.ModuleList(
             [
                 nn.Sequential(
@@ -113,7 +111,7 @@ class DuelingPerAgentJointQNetwork(nn.Module):
     def forward(self, state):
         q_by_agent = [critic(state) for critic in self.critics]
         q_joint = torch.stack(q_by_agent, dim=-1)  # [B, |A_joint|, N]
-        return q_joint.view(-1, self.num_actions, self.num_actions, self.num_agents)
+        return q_joint.view(-1, *self.output_shape)
 
 
 class DuelingSharedTrunkPerAgentJointQNetwork(nn.Module):
@@ -125,12 +123,11 @@ class DuelingSharedTrunkPerAgentJointQNetwork(nn.Module):
 
     def __init__(self, obs_dim, num_actions, num_agents):
         super().__init__()
-        if num_agents != 2:
-            raise ValueError("This network currently supports only num_agents == 2.")
 
         self.num_actions = num_actions
         self.num_agents = num_agents
         self.joint_action_count = num_actions ** num_agents
+        self.output_shape = [num_actions] * num_agents + [num_agents]
         self.feature = nn.Sequential(
             nn.Linear(obs_dim, 128),
             nn.ReLU(),
@@ -148,7 +145,7 @@ class DuelingSharedTrunkPerAgentJointQNetwork(nn.Module):
         features = self.feature(state)
         q_by_agent = [head(features) for head in self.heads]
         q_joint = torch.stack(q_by_agent, dim=-1)  # [B, |A_joint|, N]
-        return q_joint.view(-1, self.num_actions, self.num_actions, self.num_agents)
+        return q_joint.view(-1, *self.output_shape)
 
 
 def make_q_network(obs_dim, num_actions, num_agents, network_type="joint_output"):
@@ -186,18 +183,16 @@ class DuelingDoubleDqnSreAgent:
         use_gpu=True,
         sre_num_repeats=20,
         sre_include_pure_starts=True,
-        sre_cache_size=4096,
+        sre_cache_size=0,
         train_every=1,
         sre_solver=None,
         network_type="joint_output",
     ):
-        if num_agents != 2:
-            raise ValueError("This implementation currently supports only 2 agents.")
-
         self.agent_id = agent_id
         self.obs_dim = obs_dim
         self.num_agents = num_agents
         self.num_actions = num_actions
+        self.q_tensor_shape = tuple([num_actions] * num_agents + [num_agents])
 
         self.epsilon_robust = epsilon_robust
         self.epsilon_explore = epsilon_explore
@@ -207,8 +202,8 @@ class DuelingDoubleDqnSreAgent:
         self.grad_clip_norm = grad_clip_norm
         self.sre_num_repeats = sre_num_repeats
         self.sre_include_pure_starts = bool(sre_include_pure_starts)
+        # Kept for checkpoint/config compatibility. Persistent SRE policy caching is disabled.
         self.sre_cache_size = sre_cache_size
-        self._sre_cache = OrderedDict()
         self.train_every = max(1, int(train_every))
         self._update_calls = 0
         self.network_type = network_type
@@ -237,7 +232,10 @@ class DuelingDoubleDqnSreAgent:
         self.sre_solve_time_max = None
 
         if sre_solver is None:
-            sre_solver = PathCBimatrixSreSolver(pathwrap_path=pathwrap_path)
+            if num_agents == 2:
+                sre_solver = PathCBimatrixSreSolver(pathwrap_path=pathwrap_path)
+            else:
+                sre_solver = IterativeNPlayerSreSolver()
         self.sre_solver = sre_solver
 
     def _record_sre_solve_time(self, duration, count=1):
@@ -304,9 +302,9 @@ class DuelingDoubleDqnSreAgent:
 
     def _uniform_policies(self):
         u = np.full(self.num_actions, 1.0 / self.num_actions, dtype=np.float32)
-        return [u.copy(), u.copy()]
+        return [u.copy() for _ in range(self.num_agents)]
 
-    def _sre_cache_key(self, q_tensor):
+    def _sre_batch_key(self, q_tensor):
         q_key = np.ascontiguousarray(np.round(q_tensor, 6), dtype=np.float32)
         solver_name = getattr(self.sre_solver, "name", type(self.sre_solver).__name__)
         return (
@@ -317,38 +315,35 @@ class DuelingDoubleDqnSreAgent:
             q_key.tobytes(),
         )
 
-    def _cache_sre_policies(self, key, policies):
-        if self.sre_cache_size <= 0:
-            return
-        self._sre_cache[key] = [policy.copy() for policy in policies]
-        self._sre_cache.move_to_end(key)
-        while len(self._sre_cache) > self.sre_cache_size:
-            self._sre_cache.popitem(last=False)
+    def _sre_cache_key(self, q_tensor):
+        # Backward-compatible alias retained for older tests/notebooks.
+        return self._sre_batch_key(q_tensor)
 
     def _solve_sre(self, q_tensor):
-        cache_key = self._sre_cache_key(q_tensor)
-        cached = self._sre_cache.get(cache_key)
-        if cached is not None:
-            self._sre_cache.move_to_end(cache_key)
-            return [policy.copy() for policy in cached]
-
         solve_start = time.perf_counter()
         try:
-            result = self.sre_solver.solve(
-                q_tensor,
-                epsilon=self.epsilon_robust,
-                num_repeats=self.sre_num_repeats,
-                include_pure_starts=self.sre_include_pure_starts,
-            )
+            try:
+                result = self.sre_solver.solve(
+                    q_tensor,
+                    epsilon=self.epsilon_robust,
+                    num_repeats=self.sre_num_repeats,
+                    include_pure_starts=self.sre_include_pure_starts,
+                )
+            except TypeError as exc:
+                if "include_pure_starts" not in str(exc):
+                    raise
+                result = self.sre_solver.solve(
+                    q_tensor,
+                    epsilon=self.epsilon_robust,
+                    num_repeats=self.sre_num_repeats,
+                )
         except Exception:
             self._record_sre_solve_time(time.perf_counter() - solve_start)
             return self._uniform_policies()
         self._record_sre_solve_time(time.perf_counter() - solve_start)
 
         if not result.success or not result.policies:
-            policies = self._uniform_policies()
-            self._cache_sre_policies(cache_key, policies)
-            return policies
+            return self._uniform_policies()
 
         policies = [self._normalize_policy(policy) for policy in result.policies]
         if (
@@ -356,15 +351,20 @@ class DuelingDoubleDqnSreAgent:
             or any(policy.shape[0] != self.num_actions for policy in policies)
         ):
             policies = self._uniform_policies()
-        self._cache_sre_policies(cache_key, policies)
         return policies
 
     def _solve_sre_batch(self, q_tensors):
         q_tensors = np.asarray(q_tensors, dtype=np.float32)
-        if q_tensors.ndim != 4:
+        expected_ndim = self.num_agents + 2
+        if q_tensors.ndim != expected_ndim:
             raise ValueError(
-                "Expected q_tensors with shape [B, A1, A2, N], "
+                "Expected q_tensors with shape [B, A1, ..., AN, N], "
                 f"got {q_tensors.shape}."
+            )
+        if tuple(q_tensors.shape[1:]) != self.q_tensor_shape:
+            raise ValueError(
+                f"Expected per-sample Q tensor shape {self.q_tensor_shape}, "
+                f"got {q_tensors.shape[1:]}."
             )
 
         policies_by_index = [None] * q_tensors.shape[0]
@@ -373,39 +373,37 @@ class DuelingDoubleDqnSreAgent:
         key_to_unique_index = {}
 
         for batch_index, q_tensor in enumerate(q_tensors):
-            cache_key = self._sre_cache_key(q_tensor)
-            cached = self._sre_cache.get(cache_key)
-            if cached is not None:
-                self._sre_cache.move_to_end(cache_key)
-                policies_by_index[batch_index] = [policy.copy() for policy in cached]
-                continue
-
-            unique_index = key_to_unique_index.get(cache_key)
+            batch_key = self._sre_batch_key(q_tensor)
+            unique_index = key_to_unique_index.get(batch_key)
             if unique_index is None:
                 unique_index = len(unique_q_tensors)
-                key_to_unique_index[cache_key] = unique_index
+                key_to_unique_index[batch_key] = unique_index
                 unique_q_tensors.append(q_tensor)
-                unique_keys.append(cache_key)
+                unique_keys.append(batch_key)
             policies_by_index[batch_index] = unique_index
 
         if unique_q_tensors:
             solve_start = time.perf_counter()
             try:
                 if hasattr(self.sre_solver, "solve_batch"):
-                    results = self.sre_solver.solve_batch(
-                        unique_q_tensors,
-                        epsilon=self.epsilon_robust,
-                        num_repeats=self.sre_num_repeats,
-                        include_pure_starts=self.sre_include_pure_starts,
-                    )
-                else:
-                    results = [
-                        self.sre_solver.solve(
-                            q_tensor,
+                    try:
+                        results = self.sre_solver.solve_batch(
+                            unique_q_tensors,
                             epsilon=self.epsilon_robust,
                             num_repeats=self.sre_num_repeats,
                             include_pure_starts=self.sre_include_pure_starts,
                         )
+                    except TypeError as exc:
+                        if "include_pure_starts" not in str(exc):
+                            raise
+                        results = self.sre_solver.solve_batch(
+                            unique_q_tensors,
+                            epsilon=self.epsilon_robust,
+                            num_repeats=self.sre_num_repeats,
+                        )
+                else:
+                    results = [
+                        self._solve_sre_result(q_tensor)
                         for q_tensor in unique_q_tensors
                     ]
             except Exception:
@@ -417,7 +415,7 @@ class DuelingDoubleDqnSreAgent:
                 self._record_sre_solve_time(elapsed, count=len(unique_q_tensors))
 
             unique_policies = []
-            for q_tensor, cache_key, result in zip(unique_q_tensors, unique_keys, results):
+            for q_tensor, batch_key, result in zip(unique_q_tensors, unique_keys, results):
                 if result is None or not result.success or not result.policies:
                     policies = self._uniform_policies()
                 else:
@@ -432,7 +430,6 @@ class DuelingDoubleDqnSreAgent:
                         )
                     ):
                         policies = self._uniform_policies()
-                self._cache_sre_policies(cache_key, policies)
                 unique_policies.append(policies)
 
             for batch_index, entry in enumerate(policies_by_index):
@@ -443,6 +440,23 @@ class DuelingDoubleDqnSreAgent:
 
         return policies_by_index
 
+    def _solve_sre_result(self, q_tensor):
+        try:
+            return self.sre_solver.solve(
+                q_tensor,
+                epsilon=self.epsilon_robust,
+                num_repeats=self.sre_num_repeats,
+                include_pure_starts=self.sre_include_pure_starts,
+            )
+        except TypeError as exc:
+            if "include_pure_starts" not in str(exc):
+                raise
+            return self.sre_solver.solve(
+                q_tensor,
+                epsilon=self.epsilon_robust,
+                num_repeats=self.sre_num_repeats,
+            )
+
     def _sre_expected_values(self, q_tensor, policies):
         expected = q_tensor
         for policy in policies:
@@ -450,9 +464,10 @@ class DuelingDoubleDqnSreAgent:
         return np.asarray(expected, dtype=np.float32)
 
     def _sre_expected_values_batch(self, q_tensors, policies_batch):
-        p1 = np.stack([policies[0] for policies in policies_batch], axis=0)
-        p2 = np.stack([policies[1] for policies in policies_batch], axis=0)
-        return np.einsum("bi,bijp,bj->bp", p1, q_tensors, p2).astype(np.float32)
+        values = []
+        for q_tensor, policies in zip(q_tensors, policies_batch):
+            values.append(self._sre_expected_values(q_tensor, policies))
+        return np.stack(values, axis=0).astype(np.float32)
 
     def act(self, state, agent_id=None):
         if agent_id is None:
@@ -518,9 +533,10 @@ class DuelingDoubleDqnSreAgent:
             dones_t = dones_t.unsqueeze(1)
 
         update_start = time.perf_counter()
-        q_tensor = self.q_net(states_t)  # [B, A1, A2, N]
+        q_tensor = self.q_net(states_t)  # [B, A1, ..., AN, N]
         batch_idx = torch.arange(states_t.shape[0], device=self.device)
-        current_q = q_tensor[batch_idx, actions_t[:, 0], actions_t[:, 1], :]  # [B, N]
+        action_indices = [actions_t[:, agent_id] for agent_id in range(self.num_agents)]
+        current_q = q_tensor[(batch_idx, *action_indices, slice(None))]  # [B, N]
 
         with torch.no_grad():
             # Double-DQN style: choose policy from online net, evaluate with target net.
@@ -568,6 +584,7 @@ class DuelingDoubleDqnSreAgent:
             "grad_clip_norm": self.grad_clip_norm,
             "obs_dim": self.obs_dim,
             "num_actions": self.num_actions,
+            "num_agents": self.num_agents,
             "agent_id": self.agent_id,
             "sre_num_repeats": self.sre_num_repeats,
             "sre_include_pure_starts": self.sre_include_pure_starts,
@@ -612,6 +629,9 @@ class DuelingDoubleDqnSreAgent:
             self.learning_starts = checkpoint["learning_starts"]
         if "grad_clip_norm" in checkpoint:
             self.grad_clip_norm = checkpoint["grad_clip_norm"]
+        if "num_agents" in checkpoint:
+            self.num_agents = int(checkpoint["num_agents"])
+            self.q_tensor_shape = tuple([self.num_actions] * self.num_agents + [self.num_agents])
         if "sre_num_repeats" in checkpoint:
             self.sre_num_repeats = checkpoint["sre_num_repeats"]
         if "sre_include_pure_starts" in checkpoint:

@@ -253,7 +253,10 @@ def plot_training_stats(stats, out_path=None):
     agent_labels = stats.get("agent_labels") or [
         f"Agent {agent_id}" for agent_id in range(1, len(rewards) + 1)
     ]
-    fig, axes = plt.subplots(2, 1, figsize=(15, 10), sharex=True)
+    num_agents = len(rewards)
+    fig_height = max(5, 4 * num_agents)
+    fig, axes = plt.subplots(num_agents, 1, figsize=(15, fig_height), sharex=True)
+    axes = np.atleast_1d(axes)
 
     title_parts = [stats.get("scenario_name", "Scenario")]
     if stats.get("pair_label"):

@@ -12,5 +12,8 @@ vmas
 pandas
 scipy
 lemkelcp==0.1
-pygambitlbforaging
+pygambit
+lbforaging
+pyomo
+gurobipy
 highway-env
