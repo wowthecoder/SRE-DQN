@@ -3,6 +3,7 @@ from .dca_bl import DcaBlNPlayerSreSolver
 from .lemkelcp import LemkeLcpBimatrixSreSolver
 from .path_mcp_nplayer import PathMcpNPlayerSreSolver
 from .path_c import PathCBimatrixSreSolver, ProcessPoolPathCBimatrixSreSolver
+from .smoothing_newton_nplayer import SmoothingNewtonNPlayerSreSolver
 from .spatial_branch_bound import SpatialBranchBoundNPlayerSreSolver
 from .warm_start import WarmStartNPlayerSreSolver
 
@@ -17,6 +18,10 @@ def make_sre_solver(
     tol=1e-5,
     damping=0.35,
     temperature=0.02,
+    t0=1e-2,
+    t_min=1e-8,
+    max_step_fraction=0.9,
+    line_search_decay=0.5,
     random_seed=None,
 ):
     if solver_name == "path_c":
@@ -45,6 +50,20 @@ def make_sre_solver(
         if pathwrap_path is not None:
             kwargs["pathwrap_path"] = pathwrap_path
         return PathMcpNPlayerSreSolver(**kwargs)
+    if solver_name in {
+        "smoothing_newton_nplayer",
+        "evlcp_smoothing_nplayer",
+        "smoothing_newton",
+    }:
+        return SmoothingNewtonNPlayerSreSolver(
+            max_iter=max_iter,
+            tol=tol,
+            t0=t0,
+            t_min=t_min,
+            max_step_fraction=max_step_fraction,
+            line_search_decay=line_search_decay,
+            random_seed=random_seed,
+        )
     if solver_name in {"dca_bl_nplayer", "dca_bl_only"}:
         return DcaBlNPlayerSreSolver(**nplayer_kwargs)
     if solver_name in {"sbb_nplayer", "spatial_branch_bound_nplayer", "sbb_only"}:

@@ -14,6 +14,7 @@ from .nplayer_common import (
 )
 from .path_c import PathCBimatrixSreSolver, ProcessPoolPathCBimatrixSreSolver
 from .path_mcp_nplayer import PathMcpNPlayerSreSolver
+from .smoothing_newton_nplayer import SmoothingNewtonNPlayerSreSolver
 from .spatial_branch_bound import SpatialBranchBoundNPlayerSreSolver
 from .warm_start import WarmStartNPlayerSreSolver
 
@@ -27,6 +28,7 @@ __all__ = [
     "PathCBimatrixSreSolver",
     "ProcessPoolPathCBimatrixSreSolver",
     "PathMcpNPlayerSreSolver",
+    "SmoothingNewtonNPlayerSreSolver",
     "LemkeLcpBimatrixSreSolver",
     "IterativeNPlayerSreSolver",
     "DcaBlNPlayerSreSolver",
