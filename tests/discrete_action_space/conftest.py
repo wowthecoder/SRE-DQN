@@ -15,7 +15,9 @@ from path_solver import PathSolverWrapper
 
 @pytest.fixture(scope="session")
 def path_runtime_available():
-    lib_path = MODULE_DIR / "pathwrap.so"
+    lib_path = MODULE_DIR / "sre_solvers" / "pathwrap.so"
+    if not lib_path.exists():
+        lib_path = MODULE_DIR / "pathwrap.so"
     if not lib_path.exists():
         pytest.skip(f"PATH wrapper library is missing: {lib_path}")
 

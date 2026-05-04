@@ -9,10 +9,7 @@ import numpy as np
 
 from SRQagent import SRQAgent
 
-try:
-    import pygambit as gambit
-except ImportError:  # pragma: no cover - depends on local environment
-    gambit = None
+import pygambit as gambit
 
 
 class NashQAgent(SRQAgent):

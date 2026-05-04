@@ -97,9 +97,17 @@ SCENARIO_CONFIGS = {
 def configure_path_runtime(root=None):
     root = Path(root or _DISCRETE_DIR).resolve()
     if not (root / "pathwrap.so").exists() and (
+        root / "sre_solvers" / "pathwrap.so"
+    ).exists():
+        root = root / "sre_solvers"
+    if not (root / "pathwrap.so").exists() and (
         root / "discrete_action_space" / "pathwrap.so"
     ).exists():
         root = root / "discrete_action_space"
+    if not (root / "pathwrap.so").exists() and (
+        root / "discrete_action_space" / "sre_solvers" / "pathwrap.so"
+    ).exists():
+        root = root / "discrete_action_space" / "sre_solvers"
     if not (root / "pathwrap.so").exists() and (root.parent / "pathwrap.so").exists():
         root = root.parent
 

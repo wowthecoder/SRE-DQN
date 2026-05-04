@@ -8,9 +8,15 @@ class PathSolverWrapper:
     def __init__(self, lib_path="pathwrap.so"):
         lib_path = os.fspath(lib_path)
         if not os.path.isabs(lib_path):
-            candidate = os.path.join(os.path.dirname(__file__), lib_path)
-            if os.path.exists(candidate):
-                lib_path = candidate
+            module_dir = os.path.dirname(__file__)
+            candidates = [
+                os.path.join(module_dir, lib_path),
+                os.path.join(module_dir, "sre_solvers", lib_path),
+            ]
+            for candidate in candidates:
+                if os.path.exists(candidate):
+                    lib_path = candidate
+                    break
 
         if not os.path.exists(lib_path):
             raise FileNotFoundError(
