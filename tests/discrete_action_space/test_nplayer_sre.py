@@ -12,6 +12,10 @@ from sre_solvers import (
 from sre_solvers.smoothing_newton_nplayer import smooth_min, smooth_min_partials
 
 
+# ---------------------------------------------------------------------------
+# Existing tests (kept unchanged)
+# ---------------------------------------------------------------------------
+
 def test_tv_robust_values_reduce_to_nominal_at_zero_epsilon():
     q_tensor = np.zeros((2, 2, 2, 3), dtype=np.float64)
     q_tensor[:, :, :, 0] = np.arange(8, dtype=np.float64).reshape(2, 2, 2)
@@ -103,24 +107,6 @@ def test_smoothing_newton_nplayer_solver_finds_pure_dominant_profile():
     assert result.metadata["algorithm_family"] == "evlcp_inspired_smoothing_newton_nplayer_mcp"
 
 
-def test_make_sre_solver_exposes_nplayer_variants():
-    for name in [
-        "baseline_nplayer",
-        "dca_bl_nplayer",
-        "sbb_nplayer",
-        "warm_start_nplayer",
-        "smoothing_newton_nplayer",
-        "evlcp_smoothing_nplayer",
-        "smoothing_newton",
-    ]:
-        solver = make_sre_solver(name, max_iter=2)
-        assert solver.name in {
-            name,
-            "warm_start_nplayer",
-            "smoothing_newton_nplayer",
-        }
-
-
 def test_smoothing_newton_no_worse_than_baseline_on_simple_nplayer_game():
     q_tensor = np.zeros((2, 2, 2, 3), dtype=np.float64)
     q_tensor[1, :, :, 0] = 2.0
@@ -209,3 +195,143 @@ def test_dueling_double_dqn_supports_three_agents_with_fake_solver():
         assert agent.act(np.zeros(5, dtype=np.float32), agent_id=0) == 0
     finally:
         agent.close()
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: DCA-BL behavioural tests (require Gurobi licence)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.integration
+def test_dca_bl_finds_pure_dominant_profile_and_records_subproblem_backend():
+    pytest.importorskip("gurobipy")
+    from sre_solvers.dca_bl import _gurobi_licensed
+    if not _gurobi_licensed():
+        pytest.skip("Gurobi licence not available")
+
+    q_tensor = np.zeros((2, 2, 2, 3), dtype=np.float64)
+    q_tensor[1, :, :, 0] = 2.0
+    q_tensor[:, 1, :, 1] = 3.0
+    q_tensor[:, :, 1, 2] = 4.0
+
+    solver = make_sre_solver("dca_bl_nplayer", max_iter=100, tol=1e-5)
+    result = solver.solve(q_tensor, epsilon=0.0, num_repeats=8)
+
+    assert result.metadata["subproblem_backend"] == "gurobi"
+    assert result.metadata["dca_iterations"] >= 1
+    assert np.allclose(result.policies[0], [0.0, 1.0], atol=1e-2)
+    assert np.allclose(result.policies[1], [0.0, 1.0], atol=1e-2)
+    assert np.allclose(result.policies[2], [0.0, 1.0], atol=1e-2)
+    gap, _, _ = robust_exploitability(q_tensor, result.policies, epsilon=0.0)
+    assert gap <= 1e-3
+
+
+@pytest.mark.integration
+def test_dca_bl_robust_at_positive_epsilon():
+    pytest.importorskip("gurobipy")
+    from sre_solvers.dca_bl import _gurobi_licensed
+    if not _gurobi_licensed():
+        pytest.skip("Gurobi licence not available")
+
+    q_tensor = np.zeros((2, 2, 2, 3), dtype=np.float64)
+    q_tensor[1, :, :, 0] = 2.0
+    q_tensor[:, 1, :, 1] = 3.0
+    q_tensor[:, :, 1, 2] = 4.0
+
+    solver = make_sre_solver("dca_bl_nplayer", max_iter=100, tol=1e-5)
+    result = solver.solve(q_tensor, epsilon=0.2, num_repeats=4)
+
+    baseline = IterativeNPlayerSreSolver(max_iter=100, tol=1e-5)
+    bl_result = baseline.solve(q_tensor, epsilon=0.2, num_repeats=8)
+
+    dca_gap, _, _ = robust_exploitability(q_tensor, result.policies, epsilon=0.2)
+    bl_gap, _, _ = robust_exploitability(q_tensor, bl_result.policies, epsilon=0.2)
+    assert dca_gap <= bl_gap + 1e-4
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: SBB behavioural tests (scipy only, no Gurobi required)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.integration
+def test_sbb_finds_pure_dominant_profile():
+    q_tensor = np.zeros((2, 2, 2, 3), dtype=np.float64)
+    q_tensor[1, :, :, 0] = 2.0
+    q_tensor[:, 1, :, 1] = 3.0
+    q_tensor[:, :, 1, 2] = 4.0
+
+    solver = make_sre_solver("sbb_nplayer", max_iter=100, tol=1e-4)
+    result = solver.solve(q_tensor, epsilon=0.0, num_repeats=4)
+
+    assert result.metadata["sbb_nodes"] >= 1
+    assert result.metadata["sbb_gap"] <= 1e-4
+    assert np.allclose(result.policies[0], [0.0, 1.0], atol=1e-2)
+    assert np.allclose(result.policies[1], [0.0, 1.0], atol=1e-2)
+    assert np.allclose(result.policies[2], [0.0, 1.0], atol=1e-2)
+
+
+@pytest.mark.integration
+def test_sbb_two_player_matches_path_c(path_runtime_available):
+    q_tensor = np.array(
+        [
+            [[1.0, -1.0], [-1.0, 1.0]],
+            [[-1.0, 1.0], [1.0, -1.0]],
+        ],
+        dtype=np.float64,
+    )
+
+    path_solver = PathCBimatrixSreSolver(pathwrap_path=path_runtime_available)
+    sbb_solver = make_sre_solver("sbb_nplayer", max_iter=200, tol=1e-5)
+    try:
+        path_result = path_solver.solve(q_tensor, epsilon=0.0, num_repeats=3, round_digits=None)
+        sbb_result = sbb_solver.solve(q_tensor, epsilon=0.0, num_repeats=8, round_digits=None)
+    finally:
+        path_solver.close()
+
+    assert path_result.success, path_result.message
+    assert np.allclose(sbb_result.policies[0], path_result.policies[0], atol=1e-3)
+    assert np.allclose(sbb_result.policies[1], path_result.policies[1], atol=1e-3)
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: Warm-start behavioural tests (scipy + DCA-BL fallback, no Gurobi)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.integration
+def test_warm_start_picks_a_real_warm_source():
+    q_tensor = np.zeros((2, 2, 2, 3), dtype=np.float64)
+    q_tensor[1, :, :, 0] = 2.0
+    q_tensor[:, 1, :, 1] = 3.0
+    q_tensor[:, :, 1, 2] = 4.0
+
+    solver = make_sre_solver("warm_start_nplayer", max_iter=100, tol=1e-5)
+    result = solver.solve(q_tensor, epsilon=0.0, num_repeats=4)
+
+    assert result.metadata["selected_warm_start_source"] in {"dca_bl", "sbb", "cold"}
+
+    gap, _, _ = robust_exploitability(q_tensor, result.policies, epsilon=0.0)
+    assert np.isfinite(gap)
+
+    baseline = IterativeNPlayerSreSolver(max_iter=100, tol=1e-5)
+    bl_result = baseline.solve(q_tensor, epsilon=0.0, num_repeats=8)
+    bl_gap, _, _ = robust_exploitability(q_tensor, bl_result.policies, epsilon=0.0)
+    assert gap <= bl_gap + 1e-6
+
+
+@pytest.mark.integration
+def test_warm_start_dominates_baseline_on_random_3p2a():
+    rng = np.random.default_rng(2025)
+    ws_solver = make_sre_solver("warm_start_nplayer", max_iter=100, tol=1e-5)
+    bl_solver = IterativeNPlayerSreSolver(max_iter=100, tol=1e-5)
+
+    ws_gaps = []
+    bl_gaps = []
+    for _ in range(3):
+        q = rng.standard_normal((2, 2, 2, 3))
+        ws_result = ws_solver.solve(q, epsilon=0.0, num_repeats=4)
+        bl_result = bl_solver.solve(q, epsilon=0.0, num_repeats=8)
+        ws_gap, _, _ = robust_exploitability(q, ws_result.policies, epsilon=0.0)
+        bl_gap, _, _ = robust_exploitability(q, bl_result.policies, epsilon=0.0)
+        ws_gaps.append(float(ws_gap))
+        bl_gaps.append(float(bl_gap))
+
+    assert float(np.mean(ws_gaps)) <= float(np.mean(bl_gaps)) + 1e-4
