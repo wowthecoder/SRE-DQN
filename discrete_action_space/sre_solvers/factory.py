@@ -1,6 +1,6 @@
 from .baseline_nplayer import IterativeNPlayerSreSolver
 from .dca_bl import DcaBlNPlayerSreSolver
-from .lemkelcp import LemkeLcpBimatrixSreSolver
+from .lemkelcp import LemkeLcpBimatrixSreSolver, ProcessPoolLemkeLcpBimatrixSreSolver
 from .path_mcp_nplayer import PathMcpNPlayerSreSolver
 from .path_c import PathCBimatrixSreSolver, ProcessPoolPathCBimatrixSreSolver
 from .smoothing_newton_nplayer import SmoothingNewtonNPlayerSreSolver
@@ -36,6 +36,11 @@ def make_sre_solver(
         return ProcessPoolPathCBimatrixSreSolver(**kwargs)
     if solver_name == "lemkelcp":
         return LemkeLcpBimatrixSreSolver()
+    if solver_name == "lemkelcp_pool":
+        return ProcessPoolLemkeLcpBimatrixSreSolver(
+            max_workers=max_workers,
+            start_method=start_method,
+        )
     nplayer_kwargs = {
         "max_iter": max_iter,
         "tol": tol,

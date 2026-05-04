@@ -6,7 +6,7 @@ from .base import (
 from .baseline_nplayer import IterativeNPlayerSreSolver
 from .dca_bl import DcaBlNPlayerSreSolver
 from .factory import make_sre_solver
-from .lemkelcp import LemkeLcpBimatrixSreSolver
+from .lemkelcp import LemkeLcpBimatrixSreSolver, ProcessPoolLemkeLcpBimatrixSreSolver
 from .nplayer_common import (
     robust_action_values,
     robust_exploitability,
@@ -30,6 +30,7 @@ __all__ = [
     "PathMcpNPlayerSreSolver",
     "SmoothingNewtonNPlayerSreSolver",
     "LemkeLcpBimatrixSreSolver",
+    "ProcessPoolLemkeLcpBimatrixSreSolver",
     "IterativeNPlayerSreSolver",
     "DcaBlNPlayerSreSolver",
     "SpatialBranchBoundNPlayerSreSolver",

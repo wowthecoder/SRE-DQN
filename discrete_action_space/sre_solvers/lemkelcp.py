@@ -1,4 +1,5 @@
 import importlib
+import multiprocessing as mp
 import time
 
 import numpy as np
@@ -30,6 +31,24 @@ class LemkeLcpBimatrixSreSolver(SreStageGameSolver):
         self.solve_time_max = None
 
     @staticmethod
+    def _patch_python3_tableau(submodule):
+        tableau_cls = getattr(submodule, "lemketableau", None)
+        if tableau_cls is None or getattr(tableau_cls, "_sre_dqn_py3_patch", False):
+            return
+
+        original_init = tableau_cls.__init__
+
+        def patched_init(self, *args, **kwargs):
+            original_init(self, *args, **kwargs)
+            if isinstance(self.wPos, range):
+                self.wPos = list(self.wPos)
+            if isinstance(self.zPos, range):
+                self.zPos = list(self.zPos)
+
+        tableau_cls.__init__ = patched_init
+        tableau_cls._sre_dqn_py3_patch = True
+
+    @staticmethod
     def _load_solver():
         try:
             module = importlib.import_module("lemkelcp")
@@ -39,19 +58,23 @@ class LemkeLcpBimatrixSreSolver(SreStageGameSolver):
                 "Install it with `pip install lemkelcp==0.1`."
             ) from exc
 
+        try:
+            submodule = importlib.import_module("lemkelcp.lemkelcp")
+        except ImportError:
+            submodule = None
+        if submodule is not None:
+            LemkeLcpBimatrixSreSolver._patch_python3_tableau(submodule)
+
         candidate = getattr(module, "lemkelcp", None)
         if callable(candidate):
             return candidate
         if candidate is not None and callable(getattr(candidate, "lemkelcp", None)):
             return candidate.lemkelcp
 
-        try:
-            submodule = importlib.import_module("lemkelcp.lemkelcp")
+        if submodule is not None:
             candidate = getattr(submodule, "lemkelcp", None)
-        except ImportError:
-            candidate = None
-        if callable(candidate):
-            return candidate
+            if callable(candidate):
+                return candidate
 
         raise ImportError(
             "Installed lemkelcp package does not expose a callable lemkelcp solver."
@@ -152,14 +175,21 @@ class LemkeLcpBimatrixSreSolver(SreStageGameSolver):
 
         z, status, message = self._parse_result(result)
         if z is None:
+            detail = str(message or status or "unknown status")
             return SreSolveResult(
                 policies=[],
                 solutions=[],
                 utilities_sr=[],
                 utilities_nominal=[],
                 success=False,
-                message="lemkelcp did not return a solution vector.",
-                metadata={"solver": self.name, "raw_status": status},
+                message=f"lemkelcp did not return a solution vector: {detail}",
+                metadata={
+                    "solver": self.name,
+                    "raw_status": status,
+                    "raw_message": str(message),
+                    "num_repeats_ignored": int(num_repeats),
+                    "include_pure_starts_ignored": bool(include_pure_starts),
+                },
             )
 
         z = np.asarray(z, dtype=np.float64).reshape(-1)
@@ -212,3 +242,131 @@ class LemkeLcpBimatrixSreSolver(SreStageGameSolver):
                 "include_pure_starts_ignored": bool(include_pure_starts),
             },
         )
+
+
+_LEMKE_POOL_SOLVER = None
+
+
+def _lemke_pool_initializer():
+    global _LEMKE_POOL_SOLVER
+    _LEMKE_POOL_SOLVER = LemkeLcpBimatrixSreSolver()
+
+
+def _lemke_pool_solve_task(payload):
+    q_tensor, epsilon, num_repeats, round_digits, include_pure_starts = payload
+    start = time.perf_counter()
+    result = _LEMKE_POOL_SOLVER.solve(
+        q_tensor,
+        epsilon,
+        num_repeats=num_repeats,
+        round_digits=round_digits,
+        include_pure_starts=include_pure_starts,
+    )
+    elapsed = time.perf_counter() - start
+    result.metadata = dict(result.metadata)
+    result.metadata["worker_sre_wall_seconds"] = float(elapsed)
+    return result
+
+
+class ProcessPoolLemkeLcpBimatrixSreSolver(SreStageGameSolver):
+    name = "lemkelcp_pool"
+
+    def __init__(self, max_workers=4, start_method=None):
+        self.max_workers = int(max_workers)
+        self.start_method = start_method
+        self.solve_time_count = 0
+        self.solve_time_sum = 0.0
+        self.solve_time_sumsq = 0.0
+        self.solve_time_min = None
+        self.solve_time_max = None
+        if self.max_workers <= 0:
+            raise ValueError("max_workers must be positive for process-pool SRE.")
+        ctx = mp.get_context(start_method) if start_method else mp.get_context()
+        self._pool = ctx.Pool(
+            processes=self.max_workers,
+            initializer=_lemke_pool_initializer,
+        )
+
+    def _record_solve_time(self, duration):
+        self.solve_time_count += 1
+        self.solve_time_sum += duration
+        self.solve_time_sumsq += duration * duration
+        if self.solve_time_min is None or duration < self.solve_time_min:
+            self.solve_time_min = duration
+        if self.solve_time_max is None or duration > self.solve_time_max:
+            self.solve_time_max = duration
+
+    def solve(
+        self,
+        q_tensor,
+        epsilon,
+        *,
+        num_repeats=20,
+        round_digits=4,
+        include_pure_starts=True,
+    ):
+        return self.solve_batch(
+            [q_tensor],
+            epsilon,
+            num_repeats=num_repeats,
+            round_digits=round_digits,
+            include_pure_starts=include_pure_starts,
+        )[0]
+
+    def solve_batch(
+        self,
+        q_tensors,
+        epsilon,
+        *,
+        num_repeats=20,
+        round_digits=4,
+        include_pure_starts=True,
+    ):
+        q_tensors = [validate_bimatrix_q_tensor(q_tensor) for q_tensor in q_tensors]
+        if not q_tensors:
+            return []
+
+        payloads = [
+            (
+                q_tensor,
+                float(epsilon),
+                int(num_repeats),
+                round_digits,
+                bool(include_pure_starts),
+            )
+            for q_tensor in q_tensors
+        ]
+        results = self._pool.map(_lemke_pool_solve_task, payloads)
+        for result in results:
+            duration = float(result.metadata.get("worker_sre_wall_seconds", 0.0))
+            self._record_solve_time(duration)
+            result.metadata["solver"] = self.name
+            result.metadata["max_workers"] = self.max_workers
+        return results
+
+    def get_solve_time_summary(self):
+        count = self.solve_time_count
+        if count == 0:
+            return _empty_duration_summary()
+
+        mean = self.solve_time_sum / count
+        variance = max(self.solve_time_sumsq / count - mean * mean, 0.0)
+        std = float(np.sqrt(variance))
+        return {
+            "count": int(count),
+            "mean_seconds": float(mean),
+            "min_seconds": float(self.solve_time_min),
+            "max_seconds": float(self.solve_time_max),
+            "std_seconds": std,
+            "mean_microseconds": float(mean * 1_000_000.0),
+            "min_microseconds": float(self.solve_time_min * 1_000_000.0),
+            "max_microseconds": float(self.solve_time_max * 1_000_000.0),
+            "std_microseconds": float(std * 1_000_000.0),
+        }
+
+    def close(self):
+        pool = getattr(self, "_pool", None)
+        if pool is not None:
+            pool.close()
+            pool.join()
+            self._pool = None
