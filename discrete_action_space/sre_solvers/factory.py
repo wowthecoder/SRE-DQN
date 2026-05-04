@@ -1,6 +1,7 @@
 from .baseline_nplayer import IterativeNPlayerSreSolver
 from .dca_bl import DcaBlNPlayerSreSolver
 from .lemkelcp import LemkeLcpBimatrixSreSolver
+from .path_mcp_nplayer import PathMcpNPlayerSreSolver
 from .path_c import PathCBimatrixSreSolver, ProcessPoolPathCBimatrixSreSolver
 from .spatial_branch_bound import SpatialBranchBoundNPlayerSreSolver
 from .warm_start import WarmStartNPlayerSreSolver
@@ -39,6 +40,11 @@ def make_sre_solver(
     }
     if solver_name in {"baseline_nplayer", "nplayer_sre"}:
         return IterativeNPlayerSreSolver(**nplayer_kwargs)
+    if solver_name in {"path_mcp_nplayer", "path_nplayer", "path_mcp"}:
+        kwargs = {}
+        if pathwrap_path is not None:
+            kwargs["pathwrap_path"] = pathwrap_path
+        return PathMcpNPlayerSreSolver(**kwargs)
     if solver_name in {"dca_bl_nplayer", "dca_bl_only"}:
         return DcaBlNPlayerSreSolver(**nplayer_kwargs)
     if solver_name in {"sbb_nplayer", "spatial_branch_bound_nplayer", "sbb_only"}:

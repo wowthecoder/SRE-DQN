@@ -13,6 +13,7 @@ from .nplayer_common import (
     validate_nplayer_q_tensor,
 )
 from .path_c import PathCBimatrixSreSolver, ProcessPoolPathCBimatrixSreSolver
+from .path_mcp_nplayer import PathMcpNPlayerSreSolver
 from .spatial_branch_bound import SpatialBranchBoundNPlayerSreSolver
 from .warm_start import WarmStartNPlayerSreSolver
 
@@ -25,6 +26,7 @@ __all__ = [
     "robust_exploitability",
     "PathCBimatrixSreSolver",
     "ProcessPoolPathCBimatrixSreSolver",
+    "PathMcpNPlayerSreSolver",
     "LemkeLcpBimatrixSreSolver",
     "IterativeNPlayerSreSolver",
     "DcaBlNPlayerSreSolver",
