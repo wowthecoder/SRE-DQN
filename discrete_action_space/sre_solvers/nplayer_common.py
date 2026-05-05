@@ -53,12 +53,17 @@ def _expected_nominal_values(q_tensor, policies):
     return np.asarray(expected, dtype=np.float64)
 
 
-def _tv_worst_case_value(nominal_distribution, values, epsilon):
+def _tv_worst_case_value(nominal_distribution, values, epsilon, return_q_star=False):
     """Minimum expected value over a finite total-variation ball.
 
     The SRQ paper uses TV cost, so a Wasserstein-1 ball is
     0.5 * ||q - p||_1 <= epsilon. Moving delta mass from a high-value
     outcome to a low-value outcome spends delta TV budget.
+
+    Args:
+        return_q_star: when True, return (value, q_star) where q_star is the
+            worst-case distribution (1-D ndarray matching nominal_distribution).
+            Default False keeps the original scalar-only interface.
     """
     p = np.asarray(nominal_distribution, dtype=np.float64).reshape(-1)
     v = np.asarray(values, dtype=np.float64).reshape(-1)
@@ -70,7 +75,8 @@ def _tv_worst_case_value(nominal_distribution, values, epsilon):
 
     budget = float(np.clip(epsilon, 0.0, 1.0))
     if budget <= 0.0 or p.size <= 1:
-        return float(p @ v)
+        val = float(p @ v)
+        return (val, p.copy()) if return_q_star else val
 
     q = p.copy()
     high_order = np.argsort(-v)
@@ -98,7 +104,8 @@ def _tv_worst_case_value(nominal_distribution, values, epsilon):
         if q[lo] >= 1.0 - 1e-12:
             low_pos += 1
 
-    return float(q @ v)
+    val = float(q @ v)
+    return (val, q) if return_q_star else val
 
 
 def _opponent_payoff_values(q_tensor, player_id, action_id):
