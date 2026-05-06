@@ -1,0 +1,50 @@
+# MF-DSRQ config for MAgent2 battle_v4
+env_name: battle_v4
+map_size: 45
+max_cycles: 400
+
+# Two teams; agents named "red_N" and "blue_N".
+type_prefixes:
+  red: "red_"
+  blue: "blue_"
+
+# Neighbor action space equals own action space (symmetric env).
+# Omitting n_nbr_actions_override uses n_own per type by default.
+
+# TV robustness
+epsilon_tv_start: 0.10
+epsilon_tv_end: 0.02
+epsilon_tv_decay_frac: 1.0   # decay over full training
+
+# Boltzmann temperature
+beta_start: 1.0
+beta_end: 5.0
+beta_anneal_frac: 0.5        # anneal over first 50% of training
+
+# Exploration
+epsilon_explore_start: 1.0
+epsilon_explore_end: 0.05
+epsilon_explore_decay_frac: 0.2
+
+# RL
+gamma: 0.95
+lr: 1.0e-4
+batch_size: 256
+buffer_capacity: 1000000
+learning_starts: 5000
+train_every: 4
+target_tau: 0.005
+grad_clip: 10.0
+ema_momentum: 0.5
+
+# Training budget
+total_steps: 1000000
+num_envs: 16
+seed: 42
+
+# Logging
+output_dir: runs
+log_interval: 5000
+save_interval: 100000
+
+use_gpu: true
