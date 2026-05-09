@@ -59,6 +59,12 @@ class DsrFpAgent:
         *,
         epsilon_robust=0.5,
         epsilon_explore=1.0,
+        epsilon_robust_initial=None,
+        epsilon_schedule="linear",
+        decay_rate=0.999,
+        action_epsilon_start=1.0,
+        action_epsilon_end=0.05,
+        action_epsilon_decay_fraction=0.5,
         eta=0.1,
         lr_q=3e-4,
         lr_pi=3e-4,
@@ -81,6 +87,14 @@ class DsrFpAgent:
 
         self.epsilon_robust = float(epsilon_robust)
         self.epsilon_explore = float(epsilon_explore)
+        self.epsilon_robust_initial = float(
+            epsilon_robust if epsilon_robust_initial is None else epsilon_robust_initial
+        )
+        self.epsilon_schedule = str(epsilon_schedule)
+        self.decay_rate = float(decay_rate)
+        self.action_epsilon_start = float(action_epsilon_start)
+        self.action_epsilon_end = float(action_epsilon_end)
+        self.action_epsilon_decay_fraction = float(action_epsilon_decay_fraction)
         self.eta = float(eta)
         self.gamma = float(gamma)
         self.learning_starts = int(learning_starts)
@@ -114,6 +128,33 @@ class DsrFpAgent:
         self.reservoir = ReservoirBuffer(reservoir_size)
 
         self.update_times: list[float] = []
+
+    # ------------------------------------------------------------------
+    # Epsilon scheduling
+    # ------------------------------------------------------------------
+
+    def decay_parameters(self, episode_idx, n_episodes):
+        if self.epsilon_schedule == "constant":
+            self.epsilon_robust = self.epsilon_robust_initial
+        elif self.epsilon_schedule == "linear":
+            if n_episodes <= 1:
+                self.epsilon_robust = 0.0
+            else:
+                fraction = min(max(int(episode_idx), 0) / float(n_episodes - 1), 1.0)
+                self.epsilon_robust = self.epsilon_robust_initial * (1.0 - fraction)
+        elif self.epsilon_schedule == "exponential":
+            self.epsilon_robust = self.epsilon_robust_initial * (
+                self.decay_rate ** int(episode_idx)
+            )
+        else:
+            raise ValueError(f"Unsupported epsilon schedule: {self.epsilon_schedule}")
+
+        decay_episodes = max(1, int(n_episodes * self.action_epsilon_decay_fraction))
+        step = min(int(episode_idx), decay_episodes - 1)
+        fraction = min(max(step, 0) / float(max(decay_episodes - 1, 1)), 1.0)
+        self.epsilon_explore = self.action_epsilon_start + fraction * (
+            self.action_epsilon_end - self.action_epsilon_start
+        )
 
     # ------------------------------------------------------------------
     # Action selection (NFSP: explore / anticipatory-BR / avg-policy)

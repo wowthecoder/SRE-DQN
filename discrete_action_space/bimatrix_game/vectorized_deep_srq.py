@@ -1,3 +1,4 @@
+import dataclasses
 import sys
 import time
 from pathlib import Path
@@ -13,19 +14,13 @@ for _path in (str(_THIS_DIR), str(_DISCRETE_DIR)):
         sys.path.insert(0, _path)
 
 from batched_gridworld import BatchedGridWorldEnv
-from dueling_double_dqn_sre import DuelingDoubleDqnSreAgent
 from experiment_harness import (
+    ALGORITHM_LABELS,
     BASE_SEED,
-    DEFAULT_DEEP_SRQ_SOLVER,
-    SCENARIO_CONFIGS,
-    action_epsilon_value,
-    configure_path_runtime,
-    deep_srq_hyperparams,
-    pairing_label,
-    pairing_slug,
-    robust_epsilon_value,
+    PATHWRAP,
+    DuelingDoubleDqnSreAgentConfig,
+    _make_deep_srq_agent,
     set_global_seed,
-    _make_deep_srq_solver,
 )
 from stats_utils import (
     collect_timing_stats,
@@ -65,8 +60,8 @@ def _act_batch(agent, obs_batch):
     policy_batch = agent._solve_sre_batch(q_batch)
     return _sample_policy_actions(
         policy_batch,
-        epsilon_explore=agent.epsilon_explore,
-        num_actions=agent.num_actions,
+        epsilon_explore=agent.config.epsilon_explore,
+        num_actions=agent.config.num_actions,
     )
 
 
@@ -84,13 +79,13 @@ def _push_transitions(agent, states, actions, rewards, next_states, done_masks):
 
 def _num_train_steps_due(agent, previous_update_calls):
     """Match the serial trainer's `train_every` cadence after a batched collect."""
-    train_every = max(int(agent.train_every), 1)
+    train_every = max(int(agent.config.train_every), 1)
     first_bucket = int(previous_update_calls) // train_every
     last_bucket = int(agent._update_calls) // train_every
     due = 0
     for bucket in range(first_bucket + 1, last_bucket + 1):
         transition_count = bucket * train_every
-        if transition_count >= int(agent.learning_starts):
+        if transition_count >= int(agent.config.learning_starts):
             due += 1
     return due
 
@@ -98,27 +93,26 @@ def _num_train_steps_due(agent, previous_update_calls):
 def train_vectorized_deep_srq_experiment(
     *,
     scenario_key,
+    scenario_config,
     n_environment_steps=50_000,
     n_episodes=None,
     num_envs=16,
-    epsilon_robust_initial=0.5,
-    epsilon_schedule="constant",
     seed=BASE_SEED,
-    pathwrap_path=None,
-    solver_name=DEFAULT_DEEP_SRQ_SOLVER,
     output_root="vectorized_runs",
     use_gpu=True,
-    target_update_steps=100,
-    target_tau=None,
     write_plots=True,
-    hyperparameter_overrides=None,
+    hyperparameters: DuelingDoubleDqnSreAgentConfig,
     run_name_suffix=None,
     print_full_stats=True,
 ):
     set_global_seed(seed)
-    scenario = SCENARIO_CONFIGS[scenario_key]
-    hp = deep_srq_hyperparams(hyperparameter_overrides)
-    pathwrap_path = pathwrap_path or str(configure_path_runtime())
+    scenario = scenario_config
+    hp = hyperparameters
+    epsilon_robust_initial = hp.epsilon_robust_initial
+    epsilon_schedule = hp.epsilon_schedule
+    solver_name = hp.sre_solver_name
+    target_update_steps = hp.target_update_steps
+    target_tau = hp.target_tau
 
     env = BatchedGridWorldEnv(
         num_envs=num_envs,
@@ -129,7 +123,7 @@ def train_vectorized_deep_srq_experiment(
     )
     obs_dim = env.reset().shape[1]
     num_actions = len(env.action_space)
-    pairing = ("DeepSRQ", "DeepSRQ")
+    pairing = ("deep_srq", "deep_srq")
     run_name = (
         f"vectorized_envs{num_envs}_eps{epsilon_robust_initial:g}_{epsilon_schedule}"
     )
@@ -138,26 +132,15 @@ def train_vectorized_deep_srq_experiment(
     run_dir = Path(output_root) / scenario_key / run_name
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    agent = DuelingDoubleDqnSreAgent(
+    agent = _make_deep_srq_agent(
         agent_id=0,
         obs_dim=obs_dim,
         num_agents=2,
         num_actions=num_actions,
+        pathwrap_path=PATHWRAP,
+        deep_srq_hyperparameters=hp,
         epsilon_robust=epsilon_robust_initial,
-        epsilon_explore=hp["action_epsilon_start"],
-        lr=hp["learning_rate"],
-        gamma=hp["gamma"],
-        buffer_size=hp["replay_buffer_capacity"],
-        learning_starts=hp["learning_starts"],
-        grad_clip_norm=hp["grad_clip_max_norm"],
-        sre_num_repeats=hp["sre_num_repeats"],
-        sre_include_pure_starts=hp["sre_include_pure_starts"],
-        sre_cache_size=hp["sre_cache_size"],
-        train_every=hp["train_every"],
-        network_type=hp["network_type"],
-        pathwrap_path=pathwrap_path,
         use_gpu=use_gpu,
-        sre_solver=_make_deep_srq_solver(solver_name, pathwrap_path, hp),
     )
 
     obs = env.reset()
@@ -185,19 +168,7 @@ def train_vectorized_deep_srq_experiment(
                     1.0,
                 )
                 schedule_index = int(progress_fraction * max(target_progress, 1))
-                agent.epsilon_robust = robust_epsilon_value(
-                    epsilon_robust_initial,
-                    epsilon_schedule,
-                    schedule_index,
-                    max(target_progress, 1),
-                )
-                agent.epsilon_explore = action_epsilon_value(
-                    schedule_index,
-                    max(target_progress, 1),
-                    start=hp["action_epsilon_start"],
-                    end=hp["action_epsilon_end"],
-                    decay_fraction=hp["action_epsilon_decay_fraction"],
-                )
+                agent.decay_parameters(schedule_index, max(target_progress, 1))
 
                 actions = _act_batch(agent, obs)
                 next_obs, rewards, done, info = env.step(actions)
@@ -207,7 +178,7 @@ def train_vectorized_deep_srq_experiment(
                 _push_transitions(agent, obs, actions, rewards, next_obs, done_masks)
 
                 for _ in range(_num_train_steps_due(agent, previous_update_calls)):
-                    loss = agent.train_step(batch_size=hp["batch_size"])
+                    loss = agent.train_step(batch_size=hp.batch_size)
                     if loss is not None:
                         gradient_step += 1
                         if target_tau is not None:
@@ -259,8 +230,11 @@ def train_vectorized_deep_srq_experiment(
         "scenario_key": scenario_key,
         "scenario_name": scenario["scenario_name"],
         "pairing": list(pairing),
-        "pair_label": pairing_label(pairing),
-        "pair_slug": pairing_slug(pairing),
+        "pair_label": (
+            f"{ALGORITHM_LABELS.get(pairing[0], pairing[0])} vs "
+            f"{ALGORITHM_LABELS.get(pairing[1], pairing[1])}"
+        ),
+        "pair_slug": f"{pairing[0]}_vs_{pairing[1]}",
         "training_mode": "vectorized",
         "num_envs": int(num_envs),
         "stopping_criterion": "episodes" if use_episode_budget else "environment_steps",
@@ -271,7 +245,7 @@ def train_vectorized_deep_srq_experiment(
         "solver_name": solver_name,
         "epsilon_robust_initial": float(epsilon_robust_initial),
         "epsilon_schedule": epsilon_schedule,
-        "hyperparameters": hp.copy(),
+        "hyperparameters": dataclasses.asdict(hp),
         "p_env": scenario["p_env"],
         "grid_size": scenario["grid_size"],
         "start_positions": scenario["start_positions"],

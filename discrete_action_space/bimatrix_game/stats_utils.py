@@ -195,10 +195,6 @@ def summarize_rewards(stats):
 
 
 def print_summary_table(rows):
-    if not rows:
-        print("No rows to display.")
-        return
-
     last_n = rows[0]["LastN"]
     headers = ["Scenario"]
     if "Pair" in rows[0]:

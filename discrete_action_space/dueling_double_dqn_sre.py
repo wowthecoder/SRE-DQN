@@ -2,7 +2,9 @@ import random
 import sys
 import time
 from collections import deque
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Optional
 
 import numpy as np
 import torch
@@ -14,6 +16,13 @@ if str(_THIS_DIR) not in sys.path:
     sys.path.insert(0, str(_THIS_DIR))
 
 from sre_solvers import IterativeNPlayerSreSolver, PathCBimatrixSreSolver
+
+
+def _linear_schedule(start, end, step, total_steps):
+    if total_steps <= 1:
+        return float(end)
+    fraction = min(max(step, 0) / float(total_steps - 1), 1.0)
+    return float(start + fraction * (end - start))
 
 
 class ReplayBuffer:
@@ -30,6 +39,40 @@ class ReplayBuffer:
 
     def __len__(self):
         return len(self.buffer)
+
+
+@dataclass
+class DuelingDoubleDqnSreAgentConfig:
+    agent_id: int = 0
+    obs_dim: int = 4 # 2 agents, 2 coordinates each
+    num_agents: int = 2
+    num_actions: int = 4
+    pathwrap_path: str = "pathwrap.so"
+    epsilon_robust: float = 1.0
+    epsilon_explore: float = 1.0
+    lr: float = 3e-4
+    gamma: float = 0.9
+    decay_rate: float = 0.999
+    buffer_size: int = 10000
+    batch_size: int = 16
+    learning_starts: int = 1000
+    grad_clip_norm: float = 10.0
+    use_gpu: bool = True
+    sre_num_repeats: int = 20
+    sre_include_pure_starts: bool = True
+    train_every: int = 1
+    sre_solver: Any = None
+    network_type: str = "joint_output"
+    target_tau: Optional[float] = None
+    target_update_steps: int = 100
+    action_epsilon_start: float = 1.0
+    action_epsilon_end: float = 0.05
+    action_epsilon_decay_fraction: float = 0.5
+    sre_solver_name: str = "path_c_pool"
+    sre_solver_workers: int = 8
+    sre_solver_start_method: Optional[str] = None
+    epsilon_robust_initial: float = 1.0
+    epsilon_schedule: str = "exponential"
 
 
 class DuelingJointQNetwork(nn.Module):
@@ -165,65 +208,40 @@ class DuelingDoubleDqnSreAgent:
     Dueling Double DQN agent that uses SRE policies for action selection and targets.
     """
 
-    def __init__(
-        self,
-        agent_id,
-        obs_dim,
-        num_agents,
-        num_actions,
-        pathwrap_path="pathwrap.so",
-        epsilon_robust=1.0,
-        epsilon_explore=1.0,
-        lr=3e-4,
-        gamma=0.9,
-        decay_rate=0.999,
-        buffer_size=10000,
-        learning_starts=1000,
-        grad_clip_norm=10.0,
-        use_gpu=True,
-        sre_num_repeats=20,
-        sre_include_pure_starts=True,
-        sre_cache_size=0,
-        train_every=1,
-        sre_solver=None,
-        network_type="joint_output",
-    ):
-        self.agent_id = agent_id
-        self.obs_dim = obs_dim
-        self.num_agents = num_agents
-        self.num_actions = num_actions
-        self.q_tensor_shape = tuple([num_actions] * num_agents + [num_agents])
+    def __init__(self, config: DuelingDoubleDqnSreAgentConfig):
+        self.config = config
+        self.q_tensor_shape = tuple(
+            [config.num_actions] * config.num_agents + [config.num_agents]
+        )
 
-        self.epsilon_robust = epsilon_robust
-        self.epsilon_explore = epsilon_explore
-        self.gamma = gamma
-        self.decay_rate = decay_rate
-        self.learning_starts = learning_starts
-        self.grad_clip_norm = grad_clip_norm
-        self.sre_num_repeats = sre_num_repeats
-        self.sre_include_pure_starts = bool(sre_include_pure_starts)
-        # Kept for checkpoint/config compatibility. Persistent SRE policy caching is disabled.
-        self.sre_cache_size = sre_cache_size
-        self.train_every = max(1, int(train_every))
+        self.initial_epsilon_robust = float(config.epsilon_robust)
+        self.initial_epsilon_explore = float(config.epsilon_explore)
+        self.config.sre_include_pure_starts = bool(config.sre_include_pure_starts)
+        self.config.train_every = max(1, int(config.train_every))
         self._update_calls = 0
-        self.network_type = network_type
 
-        if use_gpu and torch.cuda.is_available():
+        if config.use_gpu and torch.cuda.is_available():
             self.device = torch.device("cuda")
         else:
             self.device = torch.device("cpu")
 
         self.q_net = make_q_network(
-            obs_dim, num_actions, num_agents, network_type=network_type
+            config.obs_dim,
+            config.num_actions,
+            config.num_agents,
+            network_type=config.network_type,
         ).to(self.device)
         self.target_net = make_q_network(
-            obs_dim, num_actions, num_agents, network_type=network_type
+            config.obs_dim,
+            config.num_actions,
+            config.num_agents,
+            network_type=config.network_type,
         ).to(self.device)
         self.target_net.load_state_dict(self.q_net.state_dict())
 
-        self.optimizer = optim.Adam(self.q_net.parameters(), lr=lr)
+        self.optimizer = optim.Adam(self.q_net.parameters(), lr=config.lr)
         self.loss_fn = nn.MSELoss()
-        self.replay_buffer = ReplayBuffer(buffer_size)
+        self.replay_buffer = ReplayBuffer(config.buffer_size)
         self.update_times = []
         self.sre_solve_time_count = 0
         self.sre_solve_time_sum = 0.0
@@ -231,12 +249,14 @@ class DuelingDoubleDqnSreAgent:
         self.sre_solve_time_min = None
         self.sre_solve_time_max = None
 
-        if sre_solver is None:
-            if num_agents == 2:
-                sre_solver = PathCBimatrixSreSolver(pathwrap_path=pathwrap_path)
+        if config.sre_solver is None:
+            if config.num_agents == 2:
+                sre_solver = PathCBimatrixSreSolver(pathwrap_path=config.pathwrap_path)
             else:
                 sre_solver = IterativeNPlayerSreSolver()
-        self.sre_solver = sre_solver
+            self.sre_solver = sre_solver
+        else:
+            self.sre_solver = config.sre_solver
 
     def _record_sre_solve_time(self, duration, count=1):
         count = max(1, int(count))
@@ -286,9 +306,9 @@ class DuelingDoubleDqnSreAgent:
 
     def _state_to_vector(self, state):
         vector = np.asarray(state, dtype=np.float32).reshape(-1)
-        if vector.shape[0] != self.obs_dim:
+        if vector.shape[0] != self.config.obs_dim:
             raise ValueError(
-                f"Expected state vector length {self.obs_dim}, got {vector.shape[0]}."
+                f"Expected state vector length {self.config.obs_dim}, got {vector.shape[0]}."
             )
         return vector
 
@@ -297,21 +317,21 @@ class DuelingDoubleDqnSreAgent:
         p = np.clip(p, 0.0, None)
         s = float(p.sum())
         if s <= 0.0:
-            return np.full(self.num_actions, 1.0 / self.num_actions, dtype=np.float32)
+            return np.full(self.config.num_actions, 1.0 / self.config.num_actions, dtype=np.float32)
         return p / s
 
     def _uniform_policies(self):
-        u = np.full(self.num_actions, 1.0 / self.num_actions, dtype=np.float32)
-        return [u.copy() for _ in range(self.num_agents)]
+        u = np.full(self.config.num_actions, 1.0 / self.config.num_actions, dtype=np.float32)
+        return [u.copy() for _ in range(self.config.num_agents)]
 
     def _sre_batch_key(self, q_tensor):
         q_key = np.ascontiguousarray(np.round(q_tensor, 6), dtype=np.float32)
         solver_name = getattr(self.sre_solver, "name", type(self.sre_solver).__name__)
         return (
             solver_name,
-            round(float(self.epsilon_robust), 6),
-            int(self.sre_num_repeats),
-            bool(self.sre_include_pure_starts),
+            round(float(self.config.epsilon_robust), 6),
+            int(self.config.sre_num_repeats),
+            bool(self.config.sre_include_pure_starts),
             q_key.tobytes(),
         )
 
@@ -325,17 +345,17 @@ class DuelingDoubleDqnSreAgent:
             try:
                 result = self.sre_solver.solve(
                     q_tensor,
-                    epsilon=self.epsilon_robust,
-                    num_repeats=self.sre_num_repeats,
-                    include_pure_starts=self.sre_include_pure_starts,
+                    epsilon=self.config.epsilon_robust,
+                    num_repeats=self.config.sre_num_repeats,
+                    include_pure_starts=self.config.sre_include_pure_starts,
                 )
             except TypeError as exc:
                 if "include_pure_starts" not in str(exc):
                     raise
                 result = self.sre_solver.solve(
                     q_tensor,
-                    epsilon=self.epsilon_robust,
-                    num_repeats=self.sre_num_repeats,
+                    epsilon=self.config.epsilon_robust,
+                    num_repeats=self.config.sre_num_repeats,
                 )
         except Exception:
             self._record_sre_solve_time(time.perf_counter() - solve_start)
@@ -347,15 +367,15 @@ class DuelingDoubleDqnSreAgent:
 
         policies = [self._normalize_policy(policy) for policy in result.policies]
         if (
-            len(policies) != self.num_agents
-            or any(policy.shape[0] != self.num_actions for policy in policies)
+            len(policies) != self.config.num_agents
+            or any(policy.shape[0] != self.config.num_actions for policy in policies)
         ):
             policies = self._uniform_policies()
         return policies
 
     def _solve_sre_batch(self, q_tensors):
         q_tensors = np.asarray(q_tensors, dtype=np.float32)
-        expected_ndim = self.num_agents + 2
+        expected_ndim = self.config.num_agents + 2
         if q_tensors.ndim != expected_ndim:
             raise ValueError(
                 "Expected q_tensors with shape [B, A1, ..., AN, N], "
@@ -389,17 +409,17 @@ class DuelingDoubleDqnSreAgent:
                     try:
                         results = self.sre_solver.solve_batch(
                             unique_q_tensors,
-                            epsilon=self.epsilon_robust,
-                            num_repeats=self.sre_num_repeats,
-                            include_pure_starts=self.sre_include_pure_starts,
+                            epsilon=self.config.epsilon_robust,
+                            num_repeats=self.config.sre_num_repeats,
+                            include_pure_starts=self.config.sre_include_pure_starts,
                         )
                     except TypeError as exc:
                         if "include_pure_starts" not in str(exc):
                             raise
                         results = self.sre_solver.solve_batch(
                             unique_q_tensors,
-                            epsilon=self.epsilon_robust,
-                            num_repeats=self.sre_num_repeats,
+                            epsilon=self.config.epsilon_robust,
+                            num_repeats=self.config.sre_num_repeats,
                         )
                 else:
                     results = [
@@ -423,9 +443,9 @@ class DuelingDoubleDqnSreAgent:
                         self._normalize_policy(policy) for policy in result.policies
                     ]
                     if (
-                        len(policies) != self.num_agents
+                        len(policies) != self.config.num_agents
                         or any(
-                            policy.shape[0] != self.num_actions
+                            policy.shape[0] != self.config.num_actions
                             for policy in policies
                         )
                     ):
@@ -444,17 +464,17 @@ class DuelingDoubleDqnSreAgent:
         try:
             return self.sre_solver.solve(
                 q_tensor,
-                epsilon=self.epsilon_robust,
-                num_repeats=self.sre_num_repeats,
-                include_pure_starts=self.sre_include_pure_starts,
+                epsilon=self.config.epsilon_robust,
+                num_repeats=self.config.sre_num_repeats,
+                include_pure_starts=self.config.sre_include_pure_starts,
             )
         except TypeError as exc:
             if "include_pure_starts" not in str(exc):
                 raise
             return self.sre_solver.solve(
                 q_tensor,
-                epsilon=self.epsilon_robust,
-                num_repeats=self.sre_num_repeats,
+                epsilon=self.config.epsilon_robust,
+                num_repeats=self.config.sre_num_repeats,
             )
 
     def _sre_expected_values(self, q_tensor, policies):
@@ -471,12 +491,12 @@ class DuelingDoubleDqnSreAgent:
 
     def act(self, state, agent_id=None):
         if agent_id is None:
-            agent_id = self.agent_id
-        if not 0 <= agent_id < self.num_agents:
-            raise ValueError(f"Expected agent_id in [0, {self.num_agents}), got {agent_id}.")
+            agent_id = self.config.agent_id
+        if not 0 <= agent_id < self.config.num_agents:
+            raise ValueError(f"Expected agent_id in [0, {self.config.num_agents}), got {agent_id}.")
 
-        if np.random.rand() < self.epsilon_explore:
-            return int(np.random.choice(self.num_actions))
+        if np.random.rand() < self.config.epsilon_explore:
+            return int(np.random.choice(self.config.num_actions))
 
         state_vec = self._state_to_vector(state)
         state_t = torch.as_tensor(
@@ -488,7 +508,7 @@ class DuelingDoubleDqnSreAgent:
 
         policies = self._solve_sre(q_tensor)
         my_policy = self._normalize_policy(policies[agent_id])
-        return int(np.random.choice(self.num_actions, p=my_policy))
+        return int(np.random.choice(self.config.num_actions, p=my_policy))
 
     def update(self, state, joint_actions, joint_rewards, next_state, done=False, batch_size=64):
         state_vec = self._state_to_vector(state)
@@ -496,23 +516,23 @@ class DuelingDoubleDqnSreAgent:
         actions_arr = np.asarray(joint_actions, dtype=np.int64).reshape(-1)
         rewards_arr = np.asarray(joint_rewards, dtype=np.float32).reshape(-1)
 
-        if actions_arr.shape[0] != self.num_agents:
+        if actions_arr.shape[0] != self.config.num_agents:
             raise ValueError(
-                f"Expected joint action length {self.num_agents}, got {actions_arr.shape[0]}."
+                f"Expected joint action length {self.config.num_agents}, got {actions_arr.shape[0]}."
             )
-        if rewards_arr.shape[0] != self.num_agents:
+        if rewards_arr.shape[0] != self.config.num_agents:
             raise ValueError(
-                f"Expected joint reward length {self.num_agents}, got {rewards_arr.shape[0]}."
+                f"Expected joint reward length {self.config.num_agents}, got {rewards_arr.shape[0]}."
             )
 
         self._update_calls += 1
         self.replay_buffer.push(state_vec, actions_arr, rewards_arr, next_state_vec, done)
-        if self._update_calls % self.train_every != 0:
+        if self._update_calls % self.config.train_every != 0:
             return None
         return self.train_step(batch_size=batch_size)
 
     def train_step(self, batch_size=64):
-        if len(self.replay_buffer) < max(batch_size, self.learning_starts):
+        if len(self.replay_buffer) < max(batch_size, self.config.learning_starts):
             return None
 
         states, actions, rewards, next_states, dones = self.replay_buffer.sample(batch_size)
@@ -535,7 +555,7 @@ class DuelingDoubleDqnSreAgent:
         update_start = time.perf_counter()
         q_tensor = self.q_net(states_t)  # [B, A1, ..., AN, N]
         batch_idx = torch.arange(states_t.shape[0], device=self.device)
-        action_indices = [actions_t[:, agent_id] for agent_id in range(self.num_agents)]
+        action_indices = [actions_t[:, agent_id] for agent_id in range(self.config.num_agents)]
         current_q = q_tensor[(batch_idx, *action_indices, slice(None))]  # [B, N]
 
         with torch.no_grad():
@@ -549,13 +569,13 @@ class DuelingDoubleDqnSreAgent:
             next_values_t = torch.as_tensor(
                 next_values, device=self.device
             )
-            target_q = rewards_t + (1.0 - dones_t) * self.gamma * next_values_t
+            target_q = rewards_t + (1.0 - dones_t) * self.config.gamma * next_values_t
 
         loss = self.loss_fn(current_q, target_q)
         self.optimizer.zero_grad()
         loss.backward()
-        if self.grad_clip_norm is not None:
-            nn.utils.clip_grad_norm_(self.q_net.parameters(), self.grad_clip_norm)
+        if self.config.grad_clip_norm is not None:
+            nn.utils.clip_grad_norm_(self.q_net.parameters(), self.config.grad_clip_norm)
         self.optimizer.step()
         self.update_times.append(time.perf_counter() - update_start)
         return float(loss.item())
@@ -567,30 +587,46 @@ class DuelingDoubleDqnSreAgent:
         for target_param, param in zip(self.target_net.parameters(), self.q_net.parameters()):
             target_param.data.mul_(1.0 - tau).add_(param.data, alpha=tau)
 
-    def decay_parameters(self):
-        self.epsilon_robust *= self.decay_rate
-        self.epsilon_explore *= self.decay_rate
+    def decay_parameters(self, episode_idx, n_episodes):
+        cfg = self.config
+        if cfg.epsilon_schedule == "constant":
+            cfg.epsilon_robust = float(cfg.epsilon_robust_initial)
+        elif cfg.epsilon_schedule == "linear":
+            cfg.epsilon_robust = _linear_schedule(
+                cfg.epsilon_robust_initial, 0.0, episode_idx, n_episodes
+            )
+        elif cfg.epsilon_schedule == "exponential":
+            cfg.epsilon_robust = float(cfg.epsilon_robust_initial) * (cfg.decay_rate ** int(episode_idx))
+        else:
+            raise ValueError(f"Unsupported epsilon schedule: {cfg.epsilon_schedule}")
+
+        decay_episodes = max(1, int(n_episodes * cfg.action_epsilon_decay_fraction))
+        cfg.epsilon_explore = _linear_schedule(
+            cfg.action_epsilon_start,
+            cfg.action_epsilon_end,
+            min(int(episode_idx), decay_episodes - 1),
+            decay_episodes,
+        )
 
     def save_checkpoint(self, path, include_replay_buffer=False):
         payload = {
             "q_net": self.q_net.state_dict(),
             "target_net": self.target_net.state_dict(),
             "optimizer": self.optimizer.state_dict(),
-            "epsilon_robust": self.epsilon_robust,
-            "epsilon_explore": self.epsilon_explore,
-            "gamma": self.gamma,
-            "decay_rate": self.decay_rate,
-            "learning_starts": self.learning_starts,
-            "grad_clip_norm": self.grad_clip_norm,
-            "obs_dim": self.obs_dim,
-            "num_actions": self.num_actions,
-            "num_agents": self.num_agents,
-            "agent_id": self.agent_id,
-            "sre_num_repeats": self.sre_num_repeats,
-            "sre_include_pure_starts": self.sre_include_pure_starts,
-            "sre_cache_size": self.sre_cache_size,
-            "train_every": self.train_every,
-            "network_type": self.network_type,
+            "epsilon_robust": self.config.epsilon_robust,
+            "epsilon_explore": self.config.epsilon_explore,
+            "gamma": self.config.gamma,
+            "decay_rate": self.config.decay_rate,
+            "learning_starts": self.config.learning_starts,
+            "grad_clip_norm": self.config.grad_clip_norm,
+            "obs_dim": self.config.obs_dim,
+            "num_actions": self.config.num_actions,
+            "num_agents": self.config.num_agents,
+            "agent_id": self.config.agent_id,
+            "sre_num_repeats": self.config.sre_num_repeats,
+            "sre_include_pure_starts": self.config.sre_include_pure_starts,
+            "train_every": self.config.train_every,
+            "network_type": self.config.network_type,
             "update_calls": self._update_calls,
             "buffer_size": self.replay_buffer.buffer.maxlen,
             "update_times": list(self.update_times),
@@ -611,55 +647,40 @@ class DuelingDoubleDqnSreAgent:
         if map_location is None:
             map_location = self.device
         checkpoint = torch.load(path, map_location=map_location)
-        if "q_net" in checkpoint:
-            self.q_net.load_state_dict(checkpoint["q_net"])
-        if "target_net" in checkpoint:
-            self.target_net.load_state_dict(checkpoint["target_net"])
-        if "optimizer" in checkpoint:
-            self.optimizer.load_state_dict(checkpoint["optimizer"])
-        if "epsilon_robust" in checkpoint:
-            self.epsilon_robust = checkpoint["epsilon_robust"]
-        if "epsilon_explore" in checkpoint:
-            self.epsilon_explore = checkpoint["epsilon_explore"]
-        if "gamma" in checkpoint:
-            self.gamma = checkpoint["gamma"]
-        if "decay_rate" in checkpoint:
-            self.decay_rate = checkpoint["decay_rate"]
-        if "learning_starts" in checkpoint:
-            self.learning_starts = checkpoint["learning_starts"]
-        if "grad_clip_norm" in checkpoint:
-            self.grad_clip_norm = checkpoint["grad_clip_norm"]
-        if "num_agents" in checkpoint:
-            self.num_agents = int(checkpoint["num_agents"])
-            self.q_tensor_shape = tuple([self.num_actions] * self.num_agents + [self.num_agents])
-        if "sre_num_repeats" in checkpoint:
-            self.sre_num_repeats = checkpoint["sre_num_repeats"]
-        if "sre_include_pure_starts" in checkpoint:
-            self.sre_include_pure_starts = bool(checkpoint["sre_include_pure_starts"])
-        if "sre_cache_size" in checkpoint:
-            self.sre_cache_size = checkpoint["sre_cache_size"]
-        if "train_every" in checkpoint:
-            self.train_every = max(1, int(checkpoint["train_every"]))
-        if "network_type" in checkpoint:
-            self.network_type = checkpoint["network_type"]
-        if "update_calls" in checkpoint:
-            self._update_calls = int(checkpoint["update_calls"])
+
+        if (s := checkpoint.get("q_net")) is not None:
+            self.q_net.load_state_dict(s)
+        if (s := checkpoint.get("target_net")) is not None:
+            self.target_net.load_state_dict(s)
+        if (s := checkpoint.get("optimizer")) is not None:
+            self.optimizer.load_state_dict(s)
+
+        cfg = self.config
+        cfg.epsilon_robust = checkpoint.get("epsilon_robust", cfg.epsilon_robust)
+        cfg.epsilon_explore = checkpoint.get("epsilon_explore", cfg.epsilon_explore)
+        cfg.gamma = checkpoint.get("gamma", cfg.gamma)
+        cfg.decay_rate = checkpoint.get("decay_rate", cfg.decay_rate)
+        cfg.learning_starts = checkpoint.get("learning_starts", cfg.learning_starts)
+        cfg.grad_clip_norm = checkpoint.get("grad_clip_norm", cfg.grad_clip_norm)
+        cfg.num_agents = int(checkpoint.get("num_agents", cfg.num_agents))
+        cfg.sre_num_repeats = checkpoint.get("sre_num_repeats", cfg.sre_num_repeats)
+        cfg.sre_include_pure_starts = bool(checkpoint.get("sre_include_pure_starts", cfg.sre_include_pure_starts))
+        cfg.train_every = max(1, int(checkpoint.get("train_every", cfg.train_every)))
+        cfg.network_type = checkpoint.get("network_type", cfg.network_type)
+        self.q_tensor_shape = tuple([cfg.num_actions] * cfg.num_agents + [cfg.num_agents])
+        self._update_calls = int(checkpoint.get("update_calls", self._update_calls))
+
         replay_buffer_items = checkpoint.get("replay_buffer")
         if replay_buffer_items is not None:
             self.replay_buffer = ReplayBuffer(checkpoint.get("buffer_size", len(replay_buffer_items)))
             self.replay_buffer.buffer.extend(replay_buffer_items)
-        if "update_times" in checkpoint:
-            self.update_times = list(checkpoint["update_times"])
-        if "sre_solve_time_count" in checkpoint:
-            self.sre_solve_time_count = checkpoint["sre_solve_time_count"]
-        if "sre_solve_time_sum" in checkpoint:
-            self.sre_solve_time_sum = checkpoint["sre_solve_time_sum"]
-        if "sre_solve_time_sumsq" in checkpoint:
-            self.sre_solve_time_sumsq = checkpoint["sre_solve_time_sumsq"]
-        if "sre_solve_time_min" in checkpoint:
-            self.sre_solve_time_min = checkpoint["sre_solve_time_min"]
-        if "sre_solve_time_max" in checkpoint:
-            self.sre_solve_time_max = checkpoint["sre_solve_time_max"]
+
+        self.update_times = list(checkpoint.get("update_times", self.update_times))
+        self.sre_solve_time_count = checkpoint.get("sre_solve_time_count", self.sre_solve_time_count)
+        self.sre_solve_time_sum = checkpoint.get("sre_solve_time_sum", self.sre_solve_time_sum)
+        self.sre_solve_time_sumsq = checkpoint.get("sre_solve_time_sumsq", self.sre_solve_time_sumsq)
+        self.sre_solve_time_min = checkpoint.get("sre_solve_time_min", self.sre_solve_time_min)
+        self.sre_solve_time_max = checkpoint.get("sre_solve_time_max", self.sre_solve_time_max)
 
     def close(self):
         if hasattr(self, "sre_solver") and self.sre_solver is not None:

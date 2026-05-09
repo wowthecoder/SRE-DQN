@@ -1,4 +1,5 @@
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 _THIS_DIR = Path(__file__).resolve().parent
@@ -7,9 +8,13 @@ if str(_THIS_DIR) not in sys.path:
 
 import numpy as np
 
-from SRQagent import SRQAgent
+from SRQagent import SRQAgent, SRQAgentConfig
 
 import pygambit as gambit
+
+@dataclass
+class NashQAgentConfig(SRQAgentConfig):
+    """Configuration for NashQAgent."""
 
 
 class NashQAgent(SRQAgent):
@@ -24,34 +29,11 @@ class NashQAgent(SRQAgent):
     Nash equilibria are computed with pygambit, matching Jack's notebook.
     """
 
-    def __init__(
-        self,
-        agent_id,
-        num_agents,
-        num_actions,
-        epsilon_robust=1.0,
-        epsilon_explore=1.0,
-        alpha=0.1,
-        gamma=0.9,
-        decay_rate=0.998,
-        epsilon_robust_min=0.01,
-        epsilon_explore_min=0.01,
-        alpha_min=1 / 3000,
-        pathwrap_path="pathwrap.so",
-    ):
-        del pathwrap_path
-        self.agent_id = agent_id
-        self.num_agents = num_agents
-        self.num_actions = num_actions
+    algorithm = "nashq"
 
-        self.epsilon_robust = epsilon_robust
-        self.epsilon_explore = epsilon_explore
-        self.alpha = alpha
-        self.gamma = gamma
-        self.decay_rate = decay_rate
-        self.epsilon_robust_min = epsilon_robust_min
-        self.epsilon_explore_min = epsilon_explore_min
-        self.alpha_min = alpha_min
+    def __init__(self, config: NashQAgentConfig):
+        self.config = config
+        self.initial_epsilon_robust = float(config.epsilon_robust)
         self.q_table = {}
         self.update_times = []
         self.path_solver = None
@@ -75,7 +57,7 @@ class NashQAgent(SRQAgent):
             return None
 
         num_players = 2
-        num_strategies = self.num_actions
+        num_strategies = self.config.num_actions
         num_equilibria = len(equilibria)
 
         float_equilibria = [

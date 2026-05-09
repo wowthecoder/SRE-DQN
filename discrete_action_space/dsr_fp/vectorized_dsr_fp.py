@@ -23,10 +23,6 @@ from batched_gridworld import BatchedGridWorldEnv
 from experiment_harness import (
     BASE_SEED,
     SCENARIO_CONFIGS,
-    action_epsilon_value,
-    pairing_label,
-    pairing_slug,
-    robust_epsilon_value,
     set_global_seed,
 )
 from stats_utils import (
@@ -130,6 +126,11 @@ def train_vectorized_dsr_fp_experiment(
         num_actions=num_actions,
         epsilon_robust=epsilon_robust_initial,
         epsilon_explore=hp["action_epsilon_start"],
+        epsilon_robust_initial=epsilon_robust_initial,
+        epsilon_schedule=epsilon_schedule,
+        action_epsilon_start=hp["action_epsilon_start"],
+        action_epsilon_end=hp["action_epsilon_end"],
+        action_epsilon_decay_fraction=hp["action_epsilon_decay_fraction"],
         eta=hp["eta"],
         lr_q=hp["learning_rate"],
         lr_pi=hp["learning_rate"],
@@ -167,16 +168,7 @@ def train_vectorized_dsr_fp_experiment(
                 progress_fraction = min(progress_count / max(target_progress - 1, 1), 1.0)
                 schedule_index = int(progress_fraction * max(target_progress, 1))
 
-                agent.epsilon_robust = robust_epsilon_value(
-                    epsilon_robust_initial, epsilon_schedule, schedule_index, max(target_progress, 1)
-                )
-                agent.epsilon_explore = action_epsilon_value(
-                    schedule_index,
-                    max(target_progress, 1),
-                    start=hp["action_epsilon_start"],
-                    end=hp["action_epsilon_end"],
-                    decay_fraction=hp["action_epsilon_decay_fraction"],
-                )
+                agent.decay_parameters(schedule_index, max(target_progress, 1))
 
                 actions, reservoir_pushes = agent.act_batch(obs)
                 for obs_vec, ag_id, act in reservoir_pushes:
@@ -229,8 +221,8 @@ def train_vectorized_dsr_fp_experiment(
         "scenario_key": scenario_key,
         "scenario_name": scenario["scenario_name"],
         "pairing": list(pairing),
-        "pair_label": pairing_label(pairing),
-        "pair_slug": pairing_slug(pairing),
+        "pair_label": f"{pairing[0]} vs {pairing[1]}",
+        "pair_slug": "_vs_".join(pairing),
         "training_mode": "vectorized",
         "algorithm": "DSR-FP",
         "num_envs": int(num_envs),

@@ -20,7 +20,10 @@ for _path in (str(_DISCRETE_DIR), str(_BIMATRIX_DIR)):
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-from dueling_double_dqn_sre import DuelingDoubleDqnSreAgent
+from dueling_double_dqn_sre import (
+    DuelingDoubleDqnSreAgent,
+    DuelingDoubleDqnSreAgentConfig,
+)
 from sre_solvers import make_sre_solver
 from stats_utils import (
     collect_timing_stats,
@@ -53,7 +56,6 @@ DEEP_SRQ_LBF_HYPERPARAMS = {
     "grad_clip_max_norm": 10.0,
     "sre_num_repeats": 16,
     "sre_include_pure_starts": True,
-    "sre_cache_size": 0,
     "train_every": 4,
     "network_type": "shared_trunk_separate_heads",
     "target_update_steps": 250,
@@ -179,24 +181,25 @@ def train_lbf_deep_srq_experiment(
     run_dir.mkdir(parents=True, exist_ok=True)
 
     agent = DuelingDoubleDqnSreAgent(
-        agent_id=0,
-        obs_dim=obs_dim,
-        num_agents=num_agents,
-        num_actions=num_actions,
-        epsilon_robust=epsilon_robust_initial,
-        epsilon_explore=hp["action_epsilon_start"],
-        lr=hp["learning_rate"],
-        gamma=hp["gamma"],
-        buffer_size=hp["replay_buffer_capacity"],
-        learning_starts=hp["learning_starts"],
-        grad_clip_norm=hp["grad_clip_max_norm"],
-        sre_num_repeats=hp["sre_num_repeats"],
-        sre_include_pure_starts=hp["sre_include_pure_starts"],
-        sre_cache_size=hp["sre_cache_size"],
-        train_every=hp["train_every"],
-        network_type=hp["network_type"],
-        use_gpu=use_gpu,
-        sre_solver=_make_solver(solver_name, hp, seed),
+        DuelingDoubleDqnSreAgentConfig(
+            agent_id=0,
+            obs_dim=obs_dim,
+            num_agents=num_agents,
+            num_actions=num_actions,
+            epsilon_robust=epsilon_robust_initial,
+            epsilon_explore=hp["action_epsilon_start"],
+            lr=hp["learning_rate"],
+            gamma=hp["gamma"],
+            buffer_size=hp["replay_buffer_capacity"],
+            learning_starts=hp["learning_starts"],
+            grad_clip_norm=hp["grad_clip_max_norm"],
+            sre_num_repeats=hp["sre_num_repeats"],
+            sre_include_pure_starts=hp["sre_include_pure_starts"],
+            train_every=hp["train_every"],
+            network_type=hp["network_type"],
+            use_gpu=use_gpu,
+            sre_solver=_make_solver(solver_name, hp, seed),
+        )
     )
 
     rewards_history = [[] for _ in range(num_agents)]
@@ -213,10 +216,10 @@ def train_lbf_deep_srq_experiment(
 
     try:
         for episode in tqdm(range(n_episodes), desc=f"lbf:{run_name}"):
-            agent.epsilon_robust = robust_epsilon_value(
+            agent.config.epsilon_robust = robust_epsilon_value(
                 epsilon_robust_initial, epsilon_schedule, episode, n_episodes
             )
-            agent.epsilon_explore = action_epsilon_value(
+            agent.config.epsilon_explore = action_epsilon_value(
                 episode,
                 n_episodes,
                 start=hp["action_epsilon_start"],

@@ -2,6 +2,7 @@ import numpy as np
 import pickle
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 _THIS_DIR = Path(__file__).resolve().parent
@@ -10,6 +11,24 @@ if str(_THIS_DIR) not in sys.path:
 
 from path_solver import PathSolverWrapper, solve_strategically_robust_bimatrix_game_path_lcp
 
+
+@dataclass
+class SRQAgentConfig:
+    agent_id: int
+    num_agents: int
+    num_actions: int
+    epsilon_robust: float = 1.0
+    epsilon_explore: float = 1.0
+    alpha: float = 0.1
+    gamma: float = 0.9
+    decay_rate: float = 0.998
+    epsilon_robust_min: float = 0.01
+    epsilon_explore_min: float = 0.01
+    alpha_min: float = 1 / 3000
+    pathwrap_path: str = "pathwrap.so"
+    epsilon_schedule: str = "exponential"
+
+
 class SRQAgent:
     """
     Implements Strategically Robust Q-Learning (SRQ).
@@ -17,40 +36,12 @@ class SRQAgent:
     Each agent models the Q-functions of ALL agents to compute the
     Strategically Robust Equilibrium (SRE) at each step.
     """
-    def __init__(self, agent_id, num_agents, num_actions,
-                 epsilon_robust=1.0, epsilon_explore=1.0,
-                 alpha=0.1, gamma=0.9, decay_rate=0.998,
-                 epsilon_robust_min=0.01, epsilon_explore_min=0.01,
-                 alpha_min=1 / 3000,
-                 pathwrap_path="pathwrap.so"):
-        """
-        Args:
-            agent_id (int): Index of this agent (0 to n-1).
-            num_agents (int): Total number of agents (n).
-            num_actions (int): Number of actions available to each agent.
-            epsilon_robust (float): Robustness parameter (epsilon in paper).
-            epsilon_explore (float): Exploration parameter (e-greedy).
-            alpha (float): Learning rate.
-            gamma (float): Discount factor.
-            decay_rate (float): Decay rate for alpha, epsilon_robust, epsilon_explore.
-            epsilon_robust_min (float): Minimum value for epsilon_robust.
-            epsilon_explore_min (float): Minimum value for epsilon_explore.
-            alpha_min (float): Minimum value for alpha.
-            pathwrap_path (str): Path to the compiled pathwrap shared library.
-        """
-        self.agent_id = agent_id
-        self.num_agents = num_agents
-        self.num_actions = num_actions
 
-        # Parameters
-        self.epsilon_robust = epsilon_robust
-        self.epsilon_explore = epsilon_explore
-        self.alpha = alpha
-        self.gamma = gamma
-        self.decay_rate = decay_rate
-        self.epsilon_robust_min = epsilon_robust_min
-        self.epsilon_explore_min = epsilon_explore_min
-        self.alpha_min = alpha_min
+    algorithm = "srq"
+
+    def __init__(self, config: SRQAgentConfig):
+        self.config = config
+        self.initial_epsilon_robust = float(config.epsilon_robust)
 
         # Initialize Q-tables: Q_i^j(s, a1, ..., an) = 0
         # Structure: Dictionary mapping state -> Tensor of shape (num_actions_for agent 1, ..., num_actions for agent n, num_agents)
@@ -64,8 +55,8 @@ class SRQAgent:
         self.sre_solve_time_max = None
 
         # --- PATH SETUP (ctypes wrapper) ---
-        print(f"Loading PATH wrapper from {pathwrap_path}...")
-        self.path_solver = PathSolverWrapper(pathwrap_path)
+        print(f"Loading PATH wrapper from {config.pathwrap_path}...")
+        self.path_solver = PathSolverWrapper(config.pathwrap_path)
         print("PATH Solver Ready.")
 
     def _record_sre_solve_time(self, duration):
@@ -107,15 +98,15 @@ class SRQAgent:
         }
 
     def _uniform_policies(self):
-        uniform = np.ones(self.num_actions) / self.num_actions
-        return [uniform.copy() for _ in range(self.num_agents)]
+        uniform = np.ones(self.config.num_actions) / self.config.num_actions
+        return [uniform.copy() for _ in range(self.config.num_agents)]
 
     def _normalize_policy(self, policy):
         p = np.asarray(policy, dtype=np.float64)
         p = np.clip(p, 0.0, None)
         total = float(np.sum(p))
         if total <= 0.0:
-            return np.ones(self.num_actions, dtype=np.float64) / self.num_actions
+            return np.ones(self.config.num_actions, dtype=np.float64) / self.config.num_actions
         return p / total
 
     def solve_sre_from_q_values(self, q_tensor):
@@ -129,7 +120,7 @@ class SRQAgent:
             results = solve_strategically_robust_bimatrix_game_path_lcp(
                 U1,
                 U2,
-                [self.epsilon_robust, self.epsilon_robust],
+                [self.config.epsilon_robust, self.config.epsilon_robust],
                 20,
                 self.path_solver,
             )
@@ -169,7 +160,7 @@ class SRQAgent:
         state_key = str(state)
         if state_key not in self.q_table:
             # Shape: (A_1, A_2, ..., A_n, num_agents)
-            shape = [self.num_actions] * self.num_agents + [self.num_agents]
+            shape = [self.config.num_actions] * self.config.num_agents + [self.config.num_agents]
             self.q_table[state_key] = np.zeros(shape)
         return self.q_table[state_key]
 
@@ -221,14 +212,14 @@ class SRQAgent:
         # 1. Calculate SRE policies
         if policies is None:
             policies = self.solve_sre(state)
-        my_policy = self._normalize_policy(policies[self.agent_id])
+        my_policy = self._normalize_policy(policies[self.config.agent_id])
 
         # 2. Epsilon-greedy exploration
-        if np.random.rand() < self.epsilon_explore:
-            return np.random.choice(self.num_actions)
+        if np.random.rand() < self.config.epsilon_explore:
+            return int(np.random.choice(self.config.num_actions))
         else:
             # Sample from the SRE probability distribution
-            return np.random.choice(self.num_actions, p=my_policy)
+            return int(np.random.choice(self.config.num_actions, p=my_policy))
 
     def update(self, state, actions, rewards, next_state, done=False, next_policies=None):
         """
@@ -245,16 +236,16 @@ class SRQAgent:
         # 2. Calculate the bootstrapped next-state value unless the transition is terminal.
         if np.isscalar(done):
             if done:
-                srq_values_next = np.zeros(self.num_agents, dtype=np.float64)
+                srq_values_next = np.zeros(self.config.num_agents, dtype=np.float64)
             else:
                 srq_values_next = self.calculate_srq_value(
                     next_state, policies=next_policies
                 )
         else:
             done_mask = np.asarray(done, dtype=np.float64).reshape(-1)
-            if done_mask.shape[0] != self.num_agents:
+            if done_mask.shape[0] != self.config.num_agents:
                 raise ValueError(
-                    f"Expected done mask length {self.num_agents}, got {done_mask.shape[0]}."
+                    f"Expected done mask length {self.config.num_agents}, got {done_mask.shape[0]}."
                 )
             srq_values_next = self.calculate_srq_value(
                 next_state, policies=next_policies
@@ -269,39 +260,73 @@ class SRQAgent:
 
         # Bellman update
         update_start = time.perf_counter()
-        new_vals = (1 - self.alpha) * current_vals + \
-                   self.alpha * (np.array(rewards) + self.gamma * srq_values_next)
+        new_vals = (1 - self.config.alpha) * current_vals + \
+                   self.config.alpha * (np.array(rewards) + self.config.gamma * srq_values_next)
         self.q_table[state_key][idx] = new_vals
         self.update_times.append(time.perf_counter() - update_start)
 
-    def decay_parameters(self):
-        """
-        Exponentially decay epsilon, epsilon_explore, and alpha to minimum values.
+    def on_episode_end(self, *_):
+        pass
 
-        """
-        self.epsilon_robust = max(
-            self.epsilon_robust_min, self.epsilon_robust * self.decay_rate
+    def save_checkpoint(self, path):
+        self.save_q_table(path)
+
+    def decay_parameters(
+        self,
+        *,
+        epsilon_schedule=None,
+        epsilon_robust_initial=None,
+        episode_idx=None,
+        n_episodes=None,
+    ):
+        if epsilon_schedule is None:
+            epsilon_schedule = self.config.epsilon_schedule
+        if epsilon_robust_initial is None:
+            epsilon_robust_initial = self.initial_epsilon_robust
+
+        if epsilon_schedule == "constant":
+            self.config.epsilon_robust = float(epsilon_robust_initial)
+        elif epsilon_schedule == "linear":
+            if episode_idx is None or n_episodes is None:
+                raise ValueError(
+                    "episode_idx and n_episodes are required for linear epsilon decay."
+                )
+            if n_episodes <= 1:
+                self.config.epsilon_robust = 0.0
+            else:
+                fraction = min(max(episode_idx, 0) / float(n_episodes - 1), 1.0)
+                self.config.epsilon_robust = float(epsilon_robust_initial) * (1.0 - fraction)
+        elif epsilon_schedule == "exponential":
+            self.config.epsilon_robust = max(
+                self.config.epsilon_robust_min,
+                self.config.epsilon_robust * self.config.decay_rate,
+            )
+        else:
+            raise ValueError(f"Unsupported epsilon schedule: {epsilon_schedule}")
+        self.config.epsilon_explore = max(
+            self.config.epsilon_explore_min,
+            self.config.epsilon_explore * self.config.decay_rate,
         )
-        self.epsilon_explore = max(
-            self.epsilon_explore_min, self.epsilon_explore * self.decay_rate
+        self.config.alpha = max(
+            self.config.alpha_min,
+            self.config.alpha * self.config.decay_rate,
         )
-        self.alpha = max(self.alpha_min, self.alpha * self.decay_rate)
 
     def save_q_table(self, path):
         payload = {
             "format_version": 2,
             "agent_class": type(self).__name__,
-            "agent_id": self.agent_id,
-            "num_agents": self.num_agents,
-            "num_actions": self.num_actions,
-            "epsilon_robust": self.epsilon_robust,
-            "epsilon_explore": self.epsilon_explore,
-            "alpha": self.alpha,
-            "gamma": self.gamma,
-            "decay_rate": self.decay_rate,
-            "epsilon_robust_min": self.epsilon_robust_min,
-            "epsilon_explore_min": self.epsilon_explore_min,
-            "alpha_min": self.alpha_min,
+            "agent_id": self.config.agent_id,
+            "num_agents": self.config.num_agents,
+            "num_actions": self.config.num_actions,
+            "epsilon_robust": self.config.epsilon_robust,
+            "epsilon_explore": self.config.epsilon_explore,
+            "alpha": self.config.alpha,
+            "gamma": self.config.gamma,
+            "decay_rate": self.config.decay_rate,
+            "epsilon_robust_min": self.config.epsilon_robust_min,
+            "epsilon_explore_min": self.config.epsilon_explore_min,
+            "alpha_min": self.config.alpha_min,
             "q_table": self.q_table,
             "update_times": list(self.update_times),
             "sre_solve_time_count": self.sre_solve_time_count,
@@ -317,23 +342,25 @@ class SRQAgent:
         with open(path, "rb") as f:
             payload = pickle.load(f)
         if isinstance(payload, dict) and "q_table" in payload:
-            self.agent_id = payload.get("agent_id", self.agent_id)
-            self.num_agents = payload.get("num_agents", self.num_agents)
-            self.num_actions = payload.get("num_actions", self.num_actions)
-            self.epsilon_robust = payload.get("epsilon_robust", self.epsilon_robust)
-            self.epsilon_explore = payload.get(
-                "epsilon_explore", self.epsilon_explore
+            self.config.agent_id = payload.get("agent_id", self.config.agent_id)
+            self.config.num_agents = payload.get("num_agents", self.config.num_agents)
+            self.config.num_actions = payload.get("num_actions", self.config.num_actions)
+            self.config.epsilon_robust = payload.get(
+                "epsilon_robust", self.config.epsilon_robust
             )
-            self.alpha = payload.get("alpha", self.alpha)
-            self.gamma = payload.get("gamma", self.gamma)
-            self.decay_rate = payload.get("decay_rate", self.decay_rate)
-            self.epsilon_robust_min = payload.get(
-                "epsilon_robust_min", self.epsilon_robust_min
+            self.config.epsilon_explore = payload.get(
+                "epsilon_explore", self.config.epsilon_explore
             )
-            self.epsilon_explore_min = payload.get(
-                "epsilon_explore_min", self.epsilon_explore_min
+            self.config.alpha = payload.get("alpha", self.config.alpha)
+            self.config.gamma = payload.get("gamma", self.config.gamma)
+            self.config.decay_rate = payload.get("decay_rate", self.config.decay_rate)
+            self.config.epsilon_robust_min = payload.get(
+                "epsilon_robust_min", self.config.epsilon_robust_min
             )
-            self.alpha_min = payload.get("alpha_min", self.alpha_min)
+            self.config.epsilon_explore_min = payload.get(
+                "epsilon_explore_min", self.config.epsilon_explore_min
+            )
+            self.config.alpha_min = payload.get("alpha_min", self.config.alpha_min)
             self.q_table = payload["q_table"]
             self.update_times = list(payload.get("update_times", []))
             self.sre_solve_time_count = payload.get(

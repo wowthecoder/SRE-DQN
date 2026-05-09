@@ -17,3 +17,4 @@ lbforaging
 pyomo
 gurobipy
 highway-env
+dotenv

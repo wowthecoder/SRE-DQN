@@ -1,7 +1,8 @@
 # SRE-DQN
 Deep Reinforcement Learning for Strategically Robust Equilibria
 
-export PATH_LICENSE_STRING="1259252040&Courtesy&&&USR&GEN2035&5_1_2026&1000&PATH&GEN&31_12_2035&0_0_0&6000&0_0"
+cp .env.example .env
+# then set PATH_LICENSE_STRING in .env
 
 cd discrete_action_space
 

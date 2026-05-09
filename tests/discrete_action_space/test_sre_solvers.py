@@ -91,18 +91,20 @@ def test_lemke_solver_returns_valid_policies_when_installed():
 
 def test_dueling_double_dqn_uses_injected_solver_policy():
     pytest.importorskip("torch")
-    from dueling_double_dqn_sre import DuelingDoubleDqnSreAgent
+    from dueling_double_dqn_sre import DuelingDoubleDqnSreAgent, DuelingDoubleDqnSreAgentConfig
 
     solver = _FakeSolver()
     agent = DuelingDoubleDqnSreAgent(
-        agent_id=0,
-        obs_dim=4,
-        num_agents=2,
-        num_actions=2,
-        epsilon_explore=0.0,
-        learning_starts=999,
-        use_gpu=False,
-        sre_solver=solver,
+        DuelingDoubleDqnSreAgentConfig(
+            agent_id=0,
+            obs_dim=4,
+            num_agents=2,
+            num_actions=2,
+            epsilon_explore=0.0,
+            learning_starts=999,
+            use_gpu=False,
+            sre_solver=solver,
+        )
     )
     try:
         action = agent.act(np.zeros(4, dtype=np.float32), agent_id=0)
@@ -115,16 +117,18 @@ def test_dueling_double_dqn_uses_injected_solver_policy():
 
 def test_sre_cache_key_separates_solver_names():
     pytest.importorskip("torch")
-    from dueling_double_dqn_sre import DuelingDoubleDqnSreAgent
+    from dueling_double_dqn_sre import DuelingDoubleDqnSreAgent, DuelingDoubleDqnSreAgentConfig
 
     solver = _FakeSolver(name="solver_a")
     agent = DuelingDoubleDqnSreAgent(
-        agent_id=0,
-        obs_dim=4,
-        num_agents=2,
-        num_actions=2,
-        use_gpu=False,
-        sre_solver=solver,
+        DuelingDoubleDqnSreAgentConfig(
+            agent_id=0,
+            obs_dim=4,
+            num_agents=2,
+            num_actions=2,
+            use_gpu=False,
+            sre_solver=solver,
+        )
     )
     try:
         q_tensor = np.zeros((2, 2, 2), dtype=np.float32)

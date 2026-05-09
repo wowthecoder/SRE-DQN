@@ -177,15 +177,18 @@ def test_dueling_double_dqn_supports_three_agents_with_fake_solver():
             pass
 
     del torch
+    from dueling_double_dqn_sre import DuelingDoubleDqnSreAgentConfig
     agent = DuelingDoubleDqnSreAgent(
-        agent_id=0,
-        obs_dim=5,
-        num_agents=3,
-        num_actions=2,
-        epsilon_explore=0.0,
-        learning_starts=99,
-        use_gpu=False,
-        sre_solver=FakeSolver(),
+        DuelingDoubleDqnSreAgentConfig(
+            agent_id=0,
+            obs_dim=5,
+            num_agents=3,
+            num_actions=2,
+            epsilon_explore=0.0,
+            learning_starts=99,
+            use_gpu=False,
+            sre_solver=FakeSolver(),
+        )
     )
     try:
         q = agent.q_net(
