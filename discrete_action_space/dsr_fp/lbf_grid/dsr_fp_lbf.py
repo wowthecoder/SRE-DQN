@@ -31,6 +31,7 @@ from stats_utils import (
     summarize_rewards,
 )
 from pz_wrapper import make_pz_env
+from scenarios import mixed_coop_comp_lbf_config
 
 from dsr_fp_agent import DsrFpAgent
 
@@ -56,18 +57,7 @@ DSR_FP_LBF_HYPERPARAMS = {
     "target_tau": None,
 }
 
-DEFAULT_LBF_CONFIG = {
-    "players": 3,
-    "field_size": (10, 10),
-    "sight": 10,
-    "max_food": 3,
-    "max_episode_steps": 75,
-    "start_positions": [(0, 0), (0, 9), (9, 0)],
-    "wall_positions": [(r, 4) for r in range(8)],
-    "trap_positions": [(2, 2), (7, 7)],
-    "collision_penalty": -1.0,
-    "trap_penalty": -5.0,
-}
+DEFAULT_LBF_CONFIG = mixed_coop_comp_lbf_config()
 
 
 def set_global_seed(seed=BASE_SEED):
@@ -268,7 +258,7 @@ def train_lbf_dsr_fp_experiment(
     stats = {
         "environment": "lbf_grid",
         "algorithm": "DSR-FP",
-        "scenario_name": "LBF 3-player compact",
+        "scenario_name": "LBF 3-player mixed cooperative-competitive",
         "rewards": rewards_history,
         "n_episodes": int(n_episodes),
         "seed": int(seed),

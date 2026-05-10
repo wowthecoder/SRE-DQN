@@ -305,3 +305,235 @@ def _run_iql_torchrl(
             pickle.dump(episode_rewards, f)
 
     return {"episode_rewards": episode_rewards, "models": online}
+
+
+def run_mappo(
+    make_env_fn,
+    n_frames: int = 50_000,
+    rollout_steps: int = 1024,
+    train_minibatch_size: int = 256,
+    ppo_epochs: int = 4,
+    lr: float = 3e-4,
+    gamma: float = 0.99,
+    gae_lambda: float = 0.95,
+    clip_epsilon: float = 0.2,
+    entropy_coef: float = 0.01,
+    value_coef: float = 0.5,
+    max_grad_norm: float = 10.0,
+    seed: int = 0,
+    device: str = "cpu",
+):
+    """
+    Lightweight MAPPO baseline for PettingZoo parallel environments.
+
+    Uses one categorical actor per agent and a centralized critic that consumes
+    the concatenated observations.  This is intentionally small and dependency
+    light so mixed general-sum LBF can be compared against a standard
+    centralized-training/decentralized-execution baseline.
+    """
+    import torch
+    import torch.nn as nn
+    from torch.distributions import Categorical
+
+    torch.manual_seed(seed)
+    random.seed(seed)
+    np.random.seed(seed)
+
+    probe = make_env_fn()
+    agents = list(probe.possible_agents)
+    obs_dims = {
+        a: int(np.prod(probe.observation_space(a).shape))
+        for a in agents
+    }
+    n_actions = {a: int(probe.action_space(a).n) for a in agents}
+    probe.close()
+
+    num_agents = len(agents)
+    state_dim = sum(obs_dims.values())
+
+    def make_actor(obs_dim, n_act):
+        return nn.Sequential(
+            nn.Linear(obs_dim, 128), nn.Tanh(),
+            nn.Linear(128, 128), nn.Tanh(),
+            nn.Linear(128, n_act),
+        ).to(device)
+
+    critic = nn.Sequential(
+        nn.Linear(state_dim, 256), nn.Tanh(),
+        nn.Linear(256, 256), nn.Tanh(),
+        nn.Linear(256, num_agents),
+    ).to(device)
+    actors = {a: make_actor(obs_dims[a], n_actions[a]) for a in agents}
+
+    parameters = list(critic.parameters())
+    for actor in actors.values():
+        parameters.extend(actor.parameters())
+    optimizer = torch.optim.Adam(parameters, lr=lr)
+
+    def flatten_obs(obs_dict):
+        return {
+            a: np.asarray(obs_dict[a], dtype=np.float32).reshape(-1)
+            for a in agents
+        }
+
+    def central_state(flat_obs):
+        return np.concatenate([flat_obs[a] for a in agents]).astype(np.float32)
+
+    def tensor(x):
+        return torch.as_tensor(x, dtype=torch.float32, device=device)
+
+    def choose_actions(flat_obs, state):
+        actions = {}
+        log_probs = []
+        entropies = []
+        with torch.no_grad():
+            values = critic(tensor(state).unsqueeze(0)).squeeze(0)
+            for a in agents:
+                logits = actors[a](tensor(flat_obs[a]).unsqueeze(0)).squeeze(0)
+                dist = Categorical(logits=logits)
+                action = dist.sample()
+                actions[a] = int(action.item())
+                log_probs.append(dist.log_prob(action))
+                entropies.append(dist.entropy())
+        return actions, torch.stack(log_probs), torch.stack(entropies), values
+
+    def compute_gae(rewards, dones, values, next_value):
+        returns = np.zeros_like(rewards, dtype=np.float32)
+        advantages = np.zeros_like(rewards, dtype=np.float32)
+        gae = np.zeros(num_agents, dtype=np.float32)
+        for t in reversed(range(len(rewards))):
+            bootstrap = next_value if t == len(rewards) - 1 else values[t + 1]
+            nonterminal = 1.0 - float(dones[t])
+            delta = rewards[t] + gamma * bootstrap * nonterminal - values[t]
+            gae = delta + gamma * gae_lambda * nonterminal * gae
+            advantages[t] = gae
+            returns[t] = gae + values[t]
+        return returns, advantages
+
+    episode_rewards = {a: [] for a in agents}
+    frame_count = 0
+    episode = 0
+
+    while frame_count < n_frames:
+        batch_states = []
+        batch_obs = {a: [] for a in agents}
+        batch_actions = {a: [] for a in agents}
+        batch_old_log_probs = {a: [] for a in agents}
+        batch_rewards = []
+        batch_dones = []
+        batch_values = []
+        final_state = None
+        final_done = True
+
+        while len(batch_states) < rollout_steps and frame_count < n_frames:
+            env = make_env_fn()
+            obs_dict, _ = env.reset(seed=seed + episode)
+            flat = flatten_obs(obs_dict)
+            ep_rewards = {a: 0.0 for a in agents}
+            done = False
+
+            while env.agents and len(batch_states) < rollout_steps and frame_count < n_frames:
+                state = central_state(flat)
+                actions, old_log_probs, _, values = choose_actions(flat, state)
+                next_obs, rewards, terms, truncs, _ = env.step(actions)
+                done = all(
+                    bool(terms.get(a, False)) or bool(truncs.get(a, False))
+                    for a in agents
+                )
+
+                batch_states.append(state)
+                for agent_idx, a in enumerate(agents):
+                    batch_obs[a].append(flat[a])
+                    batch_actions[a].append(actions[a])
+                    batch_old_log_probs[a].append(float(old_log_probs[agent_idx].cpu()))
+                    ep_rewards[a] += float(rewards.get(a, 0.0))
+                batch_rewards.append(
+                    [float(rewards.get(a, 0.0)) for a in agents]
+                )
+                batch_dones.append(done)
+                batch_values.append(values.cpu().numpy())
+
+                flat.update(flatten_obs(next_obs))
+                frame_count += num_agents
+                final_state = central_state(flat)
+                final_done = done
+
+            env.close()
+            for a in agents:
+                episode_rewards[a].append(ep_rewards[a])
+            episode += 1
+
+        if final_state is None:
+            break
+        with torch.no_grad():
+            next_value = (
+                np.zeros(num_agents, dtype=np.float32)
+                if final_done
+                else critic(tensor(final_state).unsqueeze(0)).squeeze(0).cpu().numpy()
+            )
+
+        rewards_np = np.asarray(batch_rewards, dtype=np.float32)
+        dones_np = np.asarray(batch_dones, dtype=np.float32)
+        values_np = np.asarray(batch_values, dtype=np.float32)
+        returns_np, adv_np = compute_gae(rewards_np, dones_np, values_np, next_value)
+        adv_np = (adv_np - adv_np.mean(axis=0, keepdims=True)) / (
+            adv_np.std(axis=0, keepdims=True) + 1e-8
+        )
+
+        states_t = tensor(np.asarray(batch_states, dtype=np.float32))
+        returns_t = tensor(returns_np)
+        adv_t = tensor(adv_np)
+        old_log_prob_t = {
+            a: tensor(np.asarray(batch_old_log_probs[a], dtype=np.float32))
+            for a in agents
+        }
+        obs_t = {
+            a: tensor(np.asarray(batch_obs[a], dtype=np.float32))
+            for a in agents
+        }
+        actions_t = {
+            a: torch.as_tensor(batch_actions[a], dtype=torch.long, device=device)
+            for a in agents
+        }
+
+        batch_size = len(batch_states)
+        indices = np.arange(batch_size)
+        for _ in range(ppo_epochs):
+            np.random.shuffle(indices)
+            for start in range(0, batch_size, train_minibatch_size):
+                mb_idx_np = indices[start : start + train_minibatch_size]
+                mb_idx = torch.as_tensor(mb_idx_np, dtype=torch.long, device=device)
+
+                values_pred = critic(states_t.index_select(0, mb_idx))
+                value_loss = nn.functional.mse_loss(
+                    values_pred, returns_t.index_select(0, mb_idx)
+                )
+
+                actor_loss = torch.zeros((), dtype=torch.float32, device=device)
+                entropy = torch.zeros((), dtype=torch.float32, device=device)
+                for agent_idx, a in enumerate(agents):
+                    logits = actors[a](obs_t[a].index_select(0, mb_idx))
+                    dist = Categorical(logits=logits)
+                    new_log_prob = dist.log_prob(actions_t[a].index_select(0, mb_idx))
+                    ratio = torch.exp(
+                        new_log_prob - old_log_prob_t[a].index_select(0, mb_idx)
+                    )
+                    adv_agent = adv_t.index_select(0, mb_idx)[:, agent_idx]
+                    unclipped = ratio * adv_agent
+                    clipped = torch.clamp(
+                        ratio, 1.0 - clip_epsilon, 1.0 + clip_epsilon
+                    ) * adv_agent
+                    actor_loss = actor_loss - torch.min(unclipped, clipped).mean()
+                    entropy = entropy + dist.entropy().mean()
+
+                loss = actor_loss + value_coef * value_loss - entropy_coef * entropy
+                optimizer.zero_grad()
+                loss.backward()
+                nn.utils.clip_grad_norm_(parameters, max_grad_norm)
+                optimizer.step()
+
+        if episode % 10 == 0:
+            avg = {a: np.mean(episode_rewards[a][-20:]) for a in agents}
+            print(f"  frame {frame_count}/{n_frames} | ep {episode} | mappo_avg={avg}")
+
+    return {"episode_rewards": episode_rewards, "actors": actors, "critic": critic}

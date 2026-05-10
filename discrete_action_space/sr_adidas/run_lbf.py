@@ -19,8 +19,10 @@ from train import train_sr_adidas
 
 try:
     from lbf_grid.pz_wrapper import make_pz_env
+    from lbf_grid.scenarios import mixed_coop_comp_lbf_config
 except ImportError:
     from pz_wrapper import make_pz_env
+    from scenarios import mixed_coop_comp_lbf_config
 
 
 class _LbfWrapper:
@@ -67,13 +69,15 @@ def main():
     parser.add_argument("--no-gpu", action="store_true")
     args = parser.parse_args()
 
-    env_config = {
-        "players": args.players,
-        "field_size": (10, 10),
-        "sight": 10,
-        "max_food": 3,
-        "max_episode_steps": args.max_steps,
-    }
+    if args.players != 3:
+        raise ValueError("The mixed cooperative-competitive LBF preset is 3-player only.")
+
+    env_config = mixed_coop_comp_lbf_config(
+        {
+            "players": args.players,
+            "max_episode_steps": args.max_steps,
+        }
+    )
 
     # Probe env for obs_dim and num_actions
     probe_env = make_pz_env(**env_config)

@@ -36,8 +36,10 @@ from stats_utils import (
 
 try:  # Package import when used as discrete_action_space.lbf_grid.deep_srq_lbf
     from .pz_wrapper import make_pz_env
+    from .scenarios import mixed_coop_comp_lbf_config
 except ImportError:  # Script/notebook import from the lbf_grid directory
     from pz_wrapper import make_pz_env
+    from scenarios import mixed_coop_comp_lbf_config
 
 
 BASE_SEED = 2025
@@ -66,18 +68,7 @@ DEEP_SRQ_LBF_HYPERPARAMS = {
     "solver_temperature": 0.02,
 }
 
-DEFAULT_LBF_CONFIG = {
-    "players": 3,
-    "field_size": (10, 10),
-    "sight": 10,
-    "max_food": 3,
-    "max_episode_steps": 75,
-    "start_positions": [(0, 0), (0, 9), (9, 0)],
-    "wall_positions": [(r, 4) for r in range(8)],
-    "trap_positions": [(2, 2), (7, 7)],
-    "collision_penalty": -1.0,
-    "trap_penalty": -5.0,
-}
+DEFAULT_LBF_CONFIG = mixed_coop_comp_lbf_config()
 
 
 def set_global_seed(seed=BASE_SEED):
@@ -303,8 +294,8 @@ def train_lbf_deep_srq_experiment(
     plot_path = run_dir / "training_plot.png"
     stats = {
         "environment": "lbf_grid",
-        "scenario_key": "lbf_3p_compact",
-        "scenario_name": "LBF 3-player compact",
+        "scenario_key": "lbf_3p_mixed_coop_comp",
+        "scenario_name": "LBF 3-player mixed cooperative-competitive",
         "pairing": ["DeepSRQ" for _ in range(num_agents)],
         "pair_label": "DeepSRQ self-play",
         "pair_slug": run_name,
