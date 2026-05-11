@@ -1,4 +1,5 @@
 import itertools
+from functools import lru_cache
 from pathlib import Path
 import time
 
@@ -7,10 +8,10 @@ import numpy as np
 try:
     from path_solver import PathSolverWrapper
 except ImportError:  # Package import from repository root.
-    from ..path_solver import PathSolverWrapper
+    from ...path_solver import PathSolverWrapper
 
-from .base import SreSolveResult, SreStageGameSolver, _empty_duration_summary, _normalize_policy
-from .nplayer_common import (
+from ..base import SreSolveResult, SreStageGameSolver, _normalize_policy
+from ..nplayer_common import (
     _expected_nominal_values,
     _solution_dict_from_policies,
     _uniform_nplayer_policies,
@@ -19,7 +20,7 @@ from .nplayer_common import (
 )
 
 
-DEFAULT_PATHWRAP_PATH = Path(__file__).resolve().with_name("pathwrap.so")
+DEFAULT_PATHWRAP_PATH = Path(__file__).resolve().parent.parent / "pathwrap.so"
 INF = 1e20
 
 
@@ -34,8 +35,9 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
 
     name = "path_mcp_nplayer"
 
-    def __init__(self, pathwrap_path=DEFAULT_PATHWRAP_PATH):
+    def __init__(self, pathwrap_path=DEFAULT_PATHWRAP_PATH, random_seed=None):
         self.path_solver = PathSolverWrapper(pathwrap_path)
+        self.rng = np.random.default_rng(random_seed)
 
     @staticmethod
     def _opponent_profiles(action_sizes, player_id):
@@ -45,20 +47,16 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
 
     @staticmethod
     def _payoff_by_own_and_opponent_profile(q_tensor, player_id, profiles):
-        action_size = q_tensor.shape[player_id]
-        payoffs = np.zeros((action_size, len(profiles)), dtype=np.float64)
-        for action_id in range(action_size):
-            for profile_idx, profile in enumerate(profiles):
-                full_profile = []
-                opponent_pos = 0
-                for idx in range(q_tensor.shape[-1]):
-                    if idx == player_id:
-                        full_profile.append(action_id)
-                    else:
-                        full_profile.append(profile[opponent_pos])
-                        opponent_pos += 1
-                payoffs[action_id, profile_idx] = q_tensor[tuple(full_profile) + (player_id,)]
-        return payoffs
+        del profiles
+        payoff_tensor = np.asarray(q_tensor[..., player_id], dtype=np.float64)
+        return np.moveaxis(payoff_tensor, player_id, 0).reshape(q_tensor.shape[player_id], -1)
+
+    @staticmethod
+    @lru_cache(maxsize=64)
+    def _distance_matrix(num_opp_profiles):
+        distance = np.ones((int(num_opp_profiles), int(num_opp_profiles)), dtype=np.float64)
+        np.fill_diagonal(distance, 0.0)
+        return distance
 
     @staticmethod
     def _build_index(action_sizes):
@@ -97,19 +95,18 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
     def _make_start(self, index, action_sizes, opponent_data, policies=None):
         n_vars = index["kappa"][-1] + 1
         z = np.zeros(n_vars, dtype=np.float64)
-        rng = np.random.default_rng()
         for player_id, action_size in enumerate(action_sizes):
             if policies is None:
-                policy = rng.dirichlet(np.ones(action_size, dtype=np.float64))
+                policy = self.rng.dirichlet(np.ones(action_size, dtype=np.float64))
             else:
                 policy = np.asarray(policies[player_id], dtype=np.float64)
             z[index["prob"][player_id]] = policy
-            z[index["lambda"][player_id]] = rng.random() + 1e-2
+            z[index["lambda"][player_id]] = self.rng.random() + 1e-2
             xi_slice = index["xi"][player_id]
             eta_slice = index["eta"][player_id]
-            z[xi_slice] = 100.0 * rng.random(xi_slice.stop - xi_slice.start) - 50.0
-            z[eta_slice] = rng.random(eta_slice.stop - eta_slice.start)
-            z[index["kappa"][player_id]] = 100.0 * rng.random() - 50.0
+            z[xi_slice] = 100.0 * self.rng.random(xi_slice.stop - xi_slice.start) - 50.0
+            z[eta_slice] = self.rng.random(eta_slice.stop - eta_slice.start)
+            z[index["kappa"][player_id]] = 100.0 * self.rng.random() - 50.0
         return z
 
     def _initial_starts(self, index, action_sizes, opponent_data, num_repeats, include_pure_starts):
@@ -155,11 +152,21 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
             gradients.append(profile_grads)
         return distribution, gradients
 
-    def _compute_f_and_jacobian(self, z, q_tensor, epsilon, index, opponent_data, payoffs_by_player):
+    def _compute_f_and_jacobian(
+        self,
+        z,
+        q_tensor,
+        epsilon,
+        index,
+        opponent_data,
+        payoffs_by_player,
+        distances_by_player=None,
+        compute_jac=True,
+    ):
         action_sizes = q_tensor.shape[:-1]
         n_vars = z.shape[0]
         f = np.zeros(n_vars, dtype=np.float64)
-        jac = np.zeros((n_vars, n_vars), dtype=np.float64)
+        jac = np.zeros((n_vars, n_vars), dtype=np.float64) if compute_jac else None
 
         for player_id, action_size in enumerate(action_sizes):
             prob_slice = index["prob"][player_id]
@@ -174,25 +181,25 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
             eta = z[eta_slice].reshape(num_opp_profiles, num_opp_profiles)
             xi = z[xi_slice]
             lambda_value = z[lambda_idx]
-            distance = np.ones((num_opp_profiles, num_opp_profiles), dtype=np.float64)
-            np.fill_diagonal(distance, 0.0)
+            if distances_by_player is None:
+                distance = self._distance_matrix(num_opp_profiles)
+            else:
+                distance = distances_by_player[player_id]
 
             # d / d(prob_i): -kappa_i - sum_{k,l} eta_i[k,l] payoff_i(a_i,l)
             eta_col_sum = eta.sum(axis=0)
             f[prob_slice] = -z[kappa_idx] - payoffs @ eta_col_sum
-            jac[prob_slice, kappa_idx] = -1.0
-            eta_start = eta_slice.start
-            for action_id in range(action_size):
-                row = prob_slice.start + action_id
-                for k in range(num_opp_profiles):
-                    for l in range(num_opp_profiles):
-                        jac[row, eta_start + k * num_opp_profiles + l] = -payoffs[action_id, l]
+            if compute_jac:
+                jac[prob_slice, kappa_idx] = -1.0
+                jac[prob_slice, eta_slice] = -np.broadcast_to(
+                    payoffs[:, None, :],
+                    (action_size, num_opp_profiles, num_opp_profiles),
+                ).reshape(action_size, num_opp_profiles * num_opp_profiles)
 
             # d / d(lambda_i): epsilon_i - transport cost.
             f[lambda_idx] = float(epsilon) - float(np.sum(eta * distance))
-            for k in range(num_opp_profiles):
-                for l in range(num_opp_profiles):
-                    jac[lambda_idx, eta_start + k * num_opp_profiles + l] = -distance[k, l]
+            if compute_jac:
+                jac[lambda_idx, eta_slice] = -distance.reshape(-1)
 
             opponent_distribution, distribution_grads = self._opponent_distribution_and_gradients(
                 z, index, player_id, opponent_ids, profiles
@@ -200,43 +207,80 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
 
             # d / d(xi_i[j]): -prod opponents prob(profile_j) + sum_l eta_i[j,l]
             f[xi_slice] = -opponent_distribution + eta.sum(axis=1)
-            for j, profile_grads in enumerate(distribution_grads):
-                row = xi_slice.start + j
-                for opponent_id, grad in profile_grads:
-                    opponent_prob_slice = index["prob"][opponent_id]
-                    jac[row, opponent_prob_slice] -= grad
-                for l in range(num_opp_profiles):
-                    jac[row, eta_start + j * num_opp_profiles + l] = 1.0
+            if compute_jac:
+                eta_start = eta_slice.start
+                for j, profile_grads in enumerate(distribution_grads):
+                    row = xi_slice.start + j
+                    for opponent_id, grad in profile_grads:
+                        opponent_prob_slice = index["prob"][opponent_id]
+                        jac[row, opponent_prob_slice] -= grad
+                    row_slice = slice(
+                        eta_start + j * num_opp_profiles,
+                        eta_start + (j + 1) * num_opp_profiles,
+                    )
+                    jac[row, row_slice] = 1.0
 
             # Primal/dual transport complementarity against eta_i[k,l].
             own_expected_payoff = z[prob_slice] @ payoffs
-            for k in range(num_opp_profiles):
-                for l in range(num_opp_profiles):
-                    row = eta_start + k * num_opp_profiles + l
-                    f[row] = -xi[k] + own_expected_payoff[l] + lambda_value * distance[k, l]
-                    jac[row, xi_slice.start + k] = -1.0
-                    jac[row, prob_slice] = payoffs[:, l]
-                    jac[row, lambda_idx] = distance[k, l]
+            f[eta_slice] = (
+                -xi[:, None] + own_expected_payoff[None, :] + lambda_value * distance
+            ).reshape(-1)
+            if compute_jac:
+                jac[eta_slice, prob_slice] = np.broadcast_to(
+                    payoffs.T[None, :, :],
+                    (num_opp_profiles, num_opp_profiles, action_size),
+                ).reshape(num_opp_profiles * num_opp_profiles, action_size)
+                jac[eta_slice, lambda_idx] = distance.reshape(-1)
+                eta_start = eta_slice.start
+                for k in range(num_opp_profiles):
+                    row_slice = slice(
+                        eta_start + k * num_opp_profiles,
+                        eta_start + (k + 1) * num_opp_profiles,
+                    )
+                    jac[row_slice, xi_slice.start + k] = -1.0
 
             # Simplex equation.
             f[kappa_idx] = 1.0 - float(np.sum(z[prob_slice]))
-            jac[kappa_idx, prob_slice] = -1.0
+            if compute_jac:
+                jac[kappa_idx, prob_slice] = -1.0
 
         return f, jac
 
     @staticmethod
     def _fill_dense_csc(jac, col_start, col_len, row, data):
         n = jac.shape[0]
-        idx = 0
-        for col in range(n):
-            col_start[col] = idx + 1
-            col_len[col] = n
-            for r in range(n):
-                row[idx] = r + 1
-                data[idx] = jac[r, col]
-                idx += 1
+        col_start[:] = np.arange(n, dtype=col_start.dtype) * n + 1
+        col_len[:] = n
+        row[:] = np.tile(np.arange(1, n + 1, dtype=row.dtype), n)
+        data[:] = jac.T.ravel()
 
-    def _solve_from_start(self, z, q_tensor, epsilon, index, opponent_data, payoffs_by_player):
+    @staticmethod
+    def _dominant_action_policies(payoffs_by_player, tol=1e-12):
+        policies = []
+        for payoffs in payoffs_by_player:
+            action_size = payoffs.shape[0]
+            dominant_action = None
+            for action_id in range(action_size):
+                if np.all(payoffs[action_id][None, :] >= payoffs - tol):
+                    dominant_action = action_id
+                    break
+            if dominant_action is None:
+                return None
+            policy = np.zeros(action_size, dtype=np.float64)
+            policy[dominant_action] = 1.0
+            policies.append(policy)
+        return policies
+
+    def _solve_from_start(
+        self,
+        z,
+        q_tensor,
+        epsilon,
+        index,
+        opponent_data,
+        payoffs_by_player,
+        distances_by_player=None,
+    ):
         n_vars = z.shape[0]
         nnz = n_vars * n_vars
         f = np.zeros(n_vars, dtype=np.float64)
@@ -251,7 +295,14 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
             z_view = np.ctypeslib.as_array(z_ptr, shape=(n,))
             f_view = np.ctypeslib.as_array(f_ptr, shape=(n,))
             f_value, _ = self._compute_f_and_jacobian(
-                z_view, q_tensor, epsilon, index, opponent_data, payoffs_by_player
+                z_view,
+                q_tensor,
+                epsilon,
+                index,
+                opponent_data,
+                payoffs_by_player,
+                distances_by_player,
+                compute_jac=False,
             )
             f_view[:] = f_value
             return 0
@@ -263,7 +314,13 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
             row = np.ctypeslib.as_array(row_ptr, shape=(nnz_in,))
             data = np.ctypeslib.as_array(data_ptr, shape=(nnz_in,))
             _, jac = self._compute_f_and_jacobian(
-                z_view, q_tensor, epsilon, index, opponent_data, payoffs_by_player
+                z_view,
+                q_tensor,
+                epsilon,
+                index,
+                opponent_data,
+                payoffs_by_player,
+                distances_by_player,
             )
             self._fill_dense_csc(jac, col_start, col_len, row, data)
             return 0
@@ -288,6 +345,49 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
             self._payoff_by_own_and_opponent_profile(q_tensor, player_id, opponent_data[player_id][1])
             for player_id in range(q_tensor.shape[-1])
         ]
+        distances_by_player = [
+            self._distance_matrix(len(opponent_data[player_id][1]))
+            for player_id in range(q_tensor.shape[-1])
+        ]
+
+        dominant_policies = self._dominant_action_policies(payoffs_by_player)
+        if dominant_policies is not None:
+            exploitability, player_gaps, robust_values = robust_exploitability(
+                q_tensor, dominant_policies, epsilon
+            )
+            nominal = _expected_nominal_values(q_tensor, dominant_policies)
+            robust_policy_values = [
+                float(policy @ values)
+                for policy, values in zip(dominant_policies, robust_values)
+            ]
+            return SreSolveResult(
+                policies=dominant_policies,
+                solutions=[
+                    _solution_dict_from_policies(
+                        dominant_policies, round_digits=round_digits
+                    )
+                ],
+                utilities_sr=[robust_policy_values],
+                utilities_nominal=[[float(value) for value in nominal]],
+                success=bool(exploitability <= 1e-4),
+                message="" if exploitability <= 1e-4 else "Returned dominant-action candidate.",
+                metadata={
+                    "solver": self.name,
+                    "algorithm_family": "path_mcp_multilinear_complementarity",
+                    "path_shortcut": "dominant_actions",
+                    "epsilon": float(epsilon),
+                    "num_agents": int(q_tensor.shape[-1]),
+                    "action_sizes": [int(size) for size in action_sizes],
+                    "num_starts": 0,
+                    "num_candidates": 1,
+                    "wall_seconds": float(time.perf_counter() - start),
+                    "robust_exploitability": float(exploitability),
+                    "player_robust_gaps": [float(gap) for gap in player_gaps],
+                    "robust_policy_values": robust_policy_values,
+                    "nominal_values": [float(value) for value in nominal],
+                    "joint_nominal_welfare": float(np.sum(nominal)),
+                },
+            )
 
         starts = self._initial_starts(
             index, action_sizes, opponent_data, num_repeats, include_pure_starts
@@ -298,7 +398,13 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
         for z0 in starts:
             try:
                 status, z_sol = self._solve_from_start(
-                    z0, q_tensor, epsilon, index, opponent_data, payoffs_by_player
+                    z0,
+                    q_tensor,
+                    epsilon,
+                    index,
+                    opponent_data,
+                    payoffs_by_player,
+                    distances_by_player,
                 )
             except Exception as exc:
                 messages.append(str(exc))
@@ -335,24 +441,32 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
                 q_tensor, policies, epsilon
             )
             nominal = _expected_nominal_values(q_tensor, policies)
+            robust_policy_values = [
+                float(policy @ values) for policy, values in zip(policies, robust_values)
+            ]
             return SreSolveResult(
-                policies=[],
-                solutions=[],
-                utilities_sr=[],
-                utilities_nominal=[],
+                policies=policies,
+                solutions=[_solution_dict_from_policies(policies, round_digits=round_digits)],
+                utilities_sr=[robust_policy_values],
+                utilities_nominal=[[float(value) for value in nominal]],
                 success=False,
-                message="No N-player PATH MCP solution was returned. " + "; ".join(messages[:3]),
+                message="PATH MCP failed to return a candidate. " + "; ".join(messages[:3]),
                 metadata={
                     "solver": self.name,
                     "algorithm_family": "path_mcp_multilinear_complementarity",
+                    "path_failed": True,
+                    "path_failure_messages": messages[:3],
                     "epsilon": float(epsilon),
                     "num_agents": int(q_tensor.shape[-1]),
                     "action_sizes": [int(size) for size in action_sizes],
                     "num_starts": int(len(starts)),
+                    "num_candidates": 0,
                     "wall_seconds": float(elapsed),
-                    "fallback_uniform_robust_exploitability": float(exploitability),
-                    "fallback_uniform_player_robust_gaps": [float(gap) for gap in player_gaps],
-                    "fallback_uniform_nominal_values": [float(value) for value in nominal],
+                    "robust_exploitability": float(exploitability),
+                    "player_robust_gaps": [float(gap) for gap in player_gaps],
+                    "robust_policy_values": robust_policy_values,
+                    "nominal_values": [float(value) for value in nominal],
+                    "joint_nominal_welfare": float(np.sum(nominal)),
                 },
             )
 

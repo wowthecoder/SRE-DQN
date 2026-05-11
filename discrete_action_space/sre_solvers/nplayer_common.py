@@ -1,8 +1,5 @@
 import numpy as np
 
-from .base import _normalize_policy
-
-
 def validate_nplayer_q_tensor(q_tensor):
     q_tensor = np.asarray(q_tensor, dtype=np.float64)
     if q_tensor.ndim < 3:
@@ -29,21 +26,16 @@ def _uniform_nplayer_policies(q_tensor):
     ]
 
 
-def _normalize_nplayer_policies(policies, action_sizes):
-    normalized = []
-    for policy, size in zip(policies, action_sizes):
-        p = _normalize_policy(policy)
-        if p is None or p.shape[0] != size:
-            p = np.full(size, 1.0 / size, dtype=np.float64)
-        normalized.append(p)
-    return normalized
-
-
 def _joint_distribution(policies):
     distribution = np.asarray(policies[0], dtype=np.float64)
     for policy in policies[1:]:
         distribution = np.multiply.outer(distribution, policy)
     return distribution.reshape(-1)
+
+
+def _payoff_matrix_for_player(q_tensor, player_id):
+    payoff_tensor = np.asarray(q_tensor[..., player_id], dtype=np.float64)
+    return np.moveaxis(payoff_tensor, player_id, 0).reshape(q_tensor.shape[player_id], -1)
 
 
 def _expected_nominal_values(q_tensor, policies):
@@ -108,23 +100,21 @@ def _tv_worst_case_value(nominal_distribution, values, epsilon, return_q_star=Fa
     return (val, q) if return_q_star else val
 
 
-def _opponent_payoff_values(q_tensor, player_id, action_id):
-    slicer = [slice(None)] * q_tensor.ndim
-    slicer[player_id] = int(action_id)
-    slicer[-1] = int(player_id)
-    return np.asarray(q_tensor[tuple(slicer)], dtype=np.float64).reshape(-1)
-
-
-def robust_action_values(q_tensor, policies, epsilon, player_id):
-    q_tensor = validate_nplayer_q_tensor(q_tensor)
+def robust_action_values(q_tensor, policies, epsilon, player_id, *, validated=False):
+    if not validated:
+        q_tensor = validate_nplayer_q_tensor(q_tensor)
+    else:
+        q_tensor = np.asarray(q_tensor, dtype=np.float64)
     action_sizes = q_tensor.shape[:-1]
     opponent_policies = [
         policies[j] for j in range(len(action_sizes)) if j != player_id
     ]
     opponent_distribution = _joint_distribution(opponent_policies)
-    values = np.zeros(action_sizes[player_id], dtype=np.float64)
-    for action_id in range(action_sizes[player_id]):
-        payoff_values = _opponent_payoff_values(q_tensor, player_id, action_id)
+    payoff_matrix = _payoff_matrix_for_player(q_tensor, player_id)
+    values = np.zeros(payoff_matrix.shape[0], dtype=np.float64)
+    if float(epsilon) <= 0.0:
+        return payoff_matrix @ opponent_distribution
+    for action_id, payoff_values in enumerate(payoff_matrix):
         values[action_id] = _tv_worst_case_value(
             opponent_distribution, payoff_values, epsilon
         )
@@ -133,11 +123,12 @@ def robust_action_values(q_tensor, policies, epsilon, player_id):
 
 def robust_exploitability(q_tensor, policies, epsilon):
     q_tensor = validate_nplayer_q_tensor(q_tensor)
+    robust_values = [
+        robust_action_values(q_tensor, policies, epsilon, player_id, validated=True)
+        for player_id in range(q_tensor.shape[-1])
+    ]
     gaps = []
-    robust_values = []
-    for player_id, policy in enumerate(policies):
-        action_values = robust_action_values(q_tensor, policies, epsilon, player_id)
-        robust_values.append(action_values)
+    for policy, action_values in zip(policies, robust_values):
         current_value = float(np.asarray(policy, dtype=np.float64) @ action_values)
         gaps.append(max(0.0, float(np.max(action_values) - current_value)))
     return float(max(gaps) if gaps else 0.0), gaps, robust_values
@@ -151,4 +142,3 @@ def _solution_dict_from_policies(policies, round_digits=4):
             values = np.round(values, round_digits)
         solution[f"p{idx}"] = values.tolist()
     return solution
-

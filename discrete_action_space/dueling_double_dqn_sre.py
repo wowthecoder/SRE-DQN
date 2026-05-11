@@ -15,7 +15,7 @@ _THIS_DIR = Path(__file__).resolve().parent
 if str(_THIS_DIR) not in sys.path:
     sys.path.insert(0, str(_THIS_DIR))
 
-from sre_solvers import IterativeNPlayerSreSolver, PathCBimatrixSreSolver
+from sre_solvers import PathCBimatrixSreSolver, PathMcpNPlayerSreSolver
 
 
 def _linear_schedule(start, end, step, total_steps):
@@ -58,8 +58,11 @@ class DuelingDoubleDqnSreAgentConfig:
     learning_starts: int = 1000
     grad_clip_norm: float = 10.0
     use_gpu: bool = True
-    sre_num_repeats: int = 20
-    sre_include_pure_starts: bool = True
+    # N-player solvers are called inside the DQN training loop; keep the
+    # default approximate budget small. Set these back to 20/True for
+    # exhaustive offline solver comparisons.
+    sre_num_repeats: int = 4
+    sre_include_pure_starts: bool = False
     train_every: int = 1
     sre_solver: Any = None
     network_type: str = "joint_output"
@@ -253,7 +256,7 @@ class DuelingDoubleDqnSreAgent:
             if config.num_agents == 2:
                 sre_solver = PathCBimatrixSreSolver(pathwrap_path=config.pathwrap_path)
             else:
-                sre_solver = IterativeNPlayerSreSolver()
+                sre_solver = PathMcpNPlayerSreSolver(pathwrap_path=config.pathwrap_path)
             self.sre_solver = sre_solver
         else:
             self.sre_solver = config.sre_solver

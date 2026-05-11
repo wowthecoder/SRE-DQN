@@ -43,7 +43,7 @@ except ImportError:  # Script/notebook import from the lbf_grid directory
 
 
 BASE_SEED = 2025
-DEFAULT_LBF_SOLVER = "baseline_nplayer"
+DEFAULT_LBF_SOLVER = "path_mcp_nplayer"
 DEFAULT_OUTPUT_ROOT = Path("lbf_deep_srq_runs")
 
 DEEP_SRQ_LBF_HYPERPARAMS = {
@@ -130,12 +130,9 @@ def _central_state(obs_dict, agent_order):
 
 
 def _make_solver(solver_name, hp, seed):
+    del hp
     return make_sre_solver(
         solver_name,
-        max_iter=hp["solver_max_iter"],
-        tol=hp["solver_tol"],
-        damping=hp["solver_damping"],
-        temperature=hp["solver_temperature"],
         random_seed=seed,
     )
 
@@ -343,10 +340,7 @@ def run_lbf_solver_ablation(
     hyperparameter_overrides=None,
 ):
     variants = variants or (
-        {"label": "baseline", "solver_name": "baseline_nplayer"},
-        {"label": "dca_bl_only", "solver_name": "dca_bl_nplayer"},
-        {"label": "sbb_only", "solver_name": "sbb_nplayer"},
-        {"label": "efficient_warm_start", "solver_name": "warm_start_nplayer"},
+        {"label": "path_mcp", "solver_name": "path_mcp_nplayer"},
     )
     results = {}
     for variant_index, variant in enumerate(variants):
