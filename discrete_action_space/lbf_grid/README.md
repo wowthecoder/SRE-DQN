@@ -1,9 +1,9 @@
-# LBF Grid — Custom Level-Based Foraging
+# LBF Grid — Basic Level-Based Foraging
 
-10×10 level-based foraging environment built on top of
-[uoe-agents/lb-foraging](https://github.com/uoe-agents/lb-foraging), extended
-with walls, traps, collision penalties, fixed starts/food, and optional mixed
-cooperative-competitive reward shaping.
+PettingZoo-style wrapper around the upstream
+[uoe-agents/lb-foraging](https://github.com/uoe-agents/lb-foraging) package.
+The environment is intentionally basic: no custom walls, traps, fixed starts,
+collision penalties, or reward shaping beyond the package's native LBF rules.
 
 ## Installation
 
@@ -15,83 +15,80 @@ pip install lbforaging
 
 ```python
 import sys; sys.path.insert(0, "../..")
-from discrete_action_space.lbf_grid import make_mixed_coop_comp_pz_env
+from discrete_action_space.lbf_grid import make_basic_lbf_pz_env
 
-env = make_mixed_coop_comp_pz_env()
+env = make_basic_lbf_pz_env()
 
-obs, infos = env.reset()
+obs, infos = env.reset(seed=2025)
 while env.agents:
     actions = {a: env.action_space(a).sample() for a in env.agents}
     obs, rewards, terms, truncs, infos = env.step(actions)
 env.close()
 ```
 
+## Default Scenario
+
+`make_basic_lbf_pz_env()` creates:
+
+- 3 agents.
+- 10x10 grid.
+- Full observability (`sight=None` resolves to the largest grid dimension).
+- Random agent and food positions controlled by `reset(seed=...)`.
+- 3 food items with levels sampled from 1 to 3.
+- Fixed player levels `[1, 1, 1]` by default.
+- Native normalized lb-foraging rewards.
+
 ## Parameters
 
 | Argument | Default | Description |
-|---|---|---|
-| `players` | 2 | Number of agents |
-| `field_size` | (10, 10) | Grid dimensions |
-| `sight` | 10 | Observation radius; `field_size[0]` = fully observable |
-| `max_food` | 3 | Number of food items on the grid |
-| `max_episode_steps` | 100 | Episode length cap |
-| `start_positions` | None | Fixed `(row, col)` start per agent; random if None |
-| `player_levels` | None | Fixed level per agent; random if None |
-| `food_positions` | None | Fixed `(row, col)` food locations; random if None |
-| `food_levels` | None | Fixed food level for each `food_positions` entry |
-| `food_types` | None | Semantic labels used by `preferred_food_bonus` |
-| `wall_positions` | None | Impassable cells |
-| `trap_positions` | None | Cells that apply `trap_penalty` on entry |
-| `collision_penalty` | -1.0 | Reward added to both agents when they collide |
-| `collision_penalty_by_agent` | None | Per-agent collision penalties |
-| `collision_mover_penalty` | 0.0 | Extra collision cost for agents that attempted movement |
-| `collision_blocker_penalty` | 0.0 | Extra collision cost for stationary/loading agents in a collision |
-| `trap_penalty` | -5.0 | Reward added when an agent steps on a trap |
-| `trap_penalty_by_agent` | None | Per-agent trap penalties |
-| `trap_on_entry_only` | True | Apply trap penalty only when entering a trap cell |
-| `team_food_reward` | 0.0 | Shared bonus to all agents when any food is loaded |
-| `personal_food_rewards` | None | Per-agent bonus for participating in a successful load |
-| `preferred_food_bonus` | None | Per-agent food-type bonus table |
-| `last_loader_bonus` | None | Per-agent bonus for agents issuing successful `LOAD` |
-| `time_penalties` | None | Per-step per-agent time costs |
+|---|---:|---|
+| `players` | 3 | Number of agents |
+| `field_size` | `(10, 10)` | Grid dimensions |
+| `sight` | `None` | Observation radius; `None` gives full observability for the grid |
+| `max_food` | 3 | Number of food items spawned by lb-foraging |
+| `max_episode_steps` | 75 | Episode length cap |
+| `player_levels` | `[1, 1, 1]` in preset | Fixed per-agent levels; overrides min/max player levels |
+| `min_player_level` | 1 | Minimum random player level when `player_levels` is not set |
+| `max_player_level` | 1 | Maximum random player level when `player_levels` is not set |
+| `food_levels` | `None` | Exact per-food levels; positions remain random |
+| `min_food_level` | 1 | Minimum random food level when `food_levels` is not set |
+| `max_food_level` | 3 | Maximum random food level when `food_levels` is not set |
+| `force_coop` | `False` | Native lb-foraging cooperative loading constraint |
+| `normalize_reward` | `True` | Use native normalized lb-foraging rewards |
 
-## Mixed cooperative-competitive preset
+`food_levels` must have length `max_food`. For example, `max_food=5,
+food_levels=[1, 1, 2, 2, 3]` keeps food positions random but fixes the spawned
+food-level multiset.
 
-`make_mixed_coop_comp_pz_env()` creates the default 3-player benchmark:
-
-- 10x10, fully observable, 75-step horizon.
-- Fixed starts at `(0, 0)`, `(0, 9)`, and `(9, 0)`.
-- A central wall with two chokepoint gaps and two trap-shortcuts.
-- Three fixed food items: one level-3 cooperative cache and two level-1
-  preferred/private caches.
-- Rewards combine normalized LBF food reward, shared team reward, private loader
-  reward, food-type preferences, time costs, trap costs, and asymmetric collision
-  costs.
-
-The same preset is the default for `deep_srq_lbf.py`, `dsr_fp_lbf.py`, and
-`sr_adidas/run_lbf.py`.
-
-## Baselines
-
-`discrete_action_space.lbf_grid.baselines` exposes callable entry points for the
-comparison table:
-
-- `run_lbf_iql_baseline`: independent DQN/IQL floor from `marl_utils.py`.
-- `run_lbf_mappo_baseline`: centralized-critic/decentralized-actor MAPPO.
-- `run_lbf_main_baseline_suite`: IQL, MAPPO, DeepSRQ with `epsilon_robust=0`,
-  DeepSRQ with `epsilon_robust=0.5 -> 0`, and optional DSR-FP.
-
-## Action space
+## Action Space
 
 | ID | Action |
-|---|---|
-| 0 | NONE (stay) |
+|---:|---|
+| 0 | NONE |
 | 1 | NORTH |
 | 2 | SOUTH |
 | 3 | WEST |
 | 4 | EAST |
-| 5 | LOAD (pick up food) |
+| 5 | LOAD |
 
-## See also
+## EPyMARL Baselines
 
-`lbf_example.ipynb` — random rollout, partial-obs demo, and IQL training.
+`lbf_epymarl_baselines.ipynb` runs:
+
+- Random policy, locally.
+- IQL, MAPPO, and QMIX through an external EPyMARL checkout.
+
+The notebook registers three local Gymnasium IDs for the requested scenarios:
+
+| Scenario | Episode length | EPyMARL `t_max` for 1000 episodes |
+|---|---:|---:|
+| 2 agents with levels 1 and 2, 8x8, 2 foods, max food level 3 | 50 | 50000 |
+| 2 level-1 agents, 8x8, 2 level-2 foods, forced cooperation | 50 | 50000 |
+| 3 agents with levels 1, 2, and 3, 10x10, 8 foods including one level-6 food | 100 | 100000 |
+
+Set `EPYMARL_ROOT` in the notebook to a local clone of
+`https://github.com/uoe-agents/epymarl` before running the EPyMARL algorithms.
+
+## See Also
+
+`lbf_example.ipynb` — random rollout and partial-observation demo.

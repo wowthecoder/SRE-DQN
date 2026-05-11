@@ -100,5 +100,5 @@ class PommermanParallelEnv(ParallelEnv):
 
 
 def make_pz_env(learner_slot: int = 0) -> PommermanParallelEnv:
-    """Factory for use with marl_utils.run_iql."""
+    """Factory for PettingZoo-style Pommerman experiments."""
     return PommermanParallelEnv(learner_slot=learner_slot)

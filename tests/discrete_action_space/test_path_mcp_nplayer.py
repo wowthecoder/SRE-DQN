@@ -4,6 +4,7 @@ import pytest
 from sre_solvers import (
     PathCBimatrixSreSolver,
     PathMcpNPlayerSreSolver,
+    ProcessPoolPathMcpNPlayerSreSolver,
     make_sre_solver,
     robust_action_values,
     robust_exploitability,
@@ -32,6 +33,12 @@ def test_factory_only_exposes_path_mcp_for_nplayer():
     solver = make_sre_solver("path_mcp_nplayer", random_seed=5)
     try:
         assert isinstance(solver, PathMcpNPlayerSreSolver)
+    finally:
+        solver.close()
+
+    solver = make_sre_solver("path_mcp_nplayer_pool", max_workers=1, random_seed=5)
+    try:
+        assert isinstance(solver, ProcessPoolPathMcpNPlayerSreSolver)
     finally:
         solver.close()
 
@@ -66,6 +73,36 @@ def test_path_mcp_nplayer_returns_valid_candidate_on_pure_dominant_game(path_run
     gap, _, _ = robust_exploitability(q_tensor, result.policies, epsilon=0.0)
     assert gap <= 1e-4
     assert result.metadata["algorithm_family"] == "path_mcp_multilinear_complementarity"
+
+
+def test_path_mcp_nplayer_pool_batches_pure_dominant_game():
+    q_tensor = np.zeros((2, 2, 2, 3), dtype=np.float64)
+    q_tensor[1, :, :, 0] = 2.0
+    q_tensor[:, 1, :, 1] = 3.0
+    q_tensor[:, :, 1, 2] = 4.0
+
+    solver = ProcessPoolPathMcpNPlayerSreSolver(max_workers=1, random_seed=5)
+    try:
+        results = solver.solve_batch(
+            [q_tensor, q_tensor],
+            epsilon=0.0,
+            num_repeats=2,
+            round_digits=None,
+        )
+        summary = solver.get_solve_time_summary()
+    finally:
+        solver.close()
+
+    assert len(results) == 2
+    assert all(result.success for result in results)
+    assert all(
+        result.metadata["solver"] == "path_mcp_nplayer_pool"
+        for result in results
+    )
+    assert summary["count"] == 2
+    assert np.allclose(results[0].policies[0], [0.0, 1.0])
+    assert np.allclose(results[0].policies[1], [0.0, 1.0])
+    assert np.allclose(results[0].policies[2], [0.0, 1.0])
 
 
 @pytest.mark.integration

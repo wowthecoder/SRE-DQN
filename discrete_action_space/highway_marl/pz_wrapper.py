@@ -100,7 +100,7 @@ def make_pz_env(
     vehicles_count: int = 20,
     render_mode: Optional[str] = None,
 ) -> HighwayParallelEnv:
-    """Factory for use with marl_utils.run_iql."""
+    """Factory for PettingZoo-style Highway experiments."""
     return HighwayParallelEnv(
         n_agents=n_agents,
         vehicles_count=vehicles_count,

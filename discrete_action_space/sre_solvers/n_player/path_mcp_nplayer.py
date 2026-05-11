@@ -1,5 +1,6 @@
 import itertools
 from functools import lru_cache
+import multiprocessing as mp
 from pathlib import Path
 import time
 
@@ -10,7 +11,12 @@ try:
 except ImportError:  # Package import from repository root.
     from ...path_solver import PathSolverWrapper
 
-from ..base import SreSolveResult, SreStageGameSolver, _normalize_policy
+from ..base import (
+    SreSolveResult,
+    SreStageGameSolver,
+    _empty_duration_summary,
+    _normalize_policy,
+)
 from ..nplayer_common import (
     _expected_nominal_values,
     _solution_dict_from_policies,
@@ -508,3 +514,164 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
 
     def close(self):
         self.path_solver.close()
+
+
+_NPLAYER_POOL_SOLVER = None
+
+
+def _path_mcp_nplayer_pool_initializer(pathwrap_path, random_seed):
+    global _NPLAYER_POOL_SOLVER
+    _NPLAYER_POOL_SOLVER = PathMcpNPlayerSreSolver(
+        pathwrap_path=pathwrap_path,
+        random_seed=random_seed,
+    )
+
+
+def _path_mcp_nplayer_pool_solve_task(payload):
+    (
+        q_tensor,
+        epsilon,
+        num_repeats,
+        round_digits,
+        include_pure_starts,
+        task_seed,
+    ) = payload
+    if task_seed is not None:
+        _NPLAYER_POOL_SOLVER.rng = np.random.default_rng(task_seed)
+
+    start = time.perf_counter()
+    result = _NPLAYER_POOL_SOLVER.solve(
+        q_tensor,
+        epsilon,
+        num_repeats=num_repeats,
+        round_digits=round_digits,
+        include_pure_starts=include_pure_starts,
+    )
+    elapsed = time.perf_counter() - start
+    result.metadata = dict(result.metadata)
+    result.metadata["worker_sre_wall_seconds"] = float(elapsed)
+    return result
+
+
+class ProcessPoolPathMcpNPlayerSreSolver(SreStageGameSolver):
+    """Multiprocessing batch wrapper for PATH-backed N-player MCP solves."""
+
+    name = "path_mcp_nplayer_pool"
+
+    def __init__(
+        self,
+        pathwrap_path=DEFAULT_PATHWRAP_PATH,
+        max_workers=4,
+        start_method=None,
+        random_seed=None,
+    ):
+        self.pathwrap_path = pathwrap_path
+        self.max_workers = int(max_workers)
+        self.start_method = start_method
+        self.random_seed = random_seed
+        self._task_counter = 0
+        self.solve_time_count = 0
+        self.solve_time_sum = 0.0
+        self.solve_time_sumsq = 0.0
+        self.solve_time_min = None
+        self.solve_time_max = None
+        if self.max_workers <= 0:
+            raise ValueError("max_workers must be positive for process-pool SRE.")
+        ctx = mp.get_context(start_method) if start_method else mp.get_context()
+        self._pool = ctx.Pool(
+            processes=self.max_workers,
+            initializer=_path_mcp_nplayer_pool_initializer,
+            initargs=(self.pathwrap_path, self.random_seed),
+        )
+
+    def _record_solve_time(self, duration):
+        self.solve_time_count += 1
+        self.solve_time_sum += duration
+        self.solve_time_sumsq += duration * duration
+        if self.solve_time_min is None or duration < self.solve_time_min:
+            self.solve_time_min = duration
+        if self.solve_time_max is None or duration > self.solve_time_max:
+            self.solve_time_max = duration
+
+    def _task_seed(self, batch_offset):
+        if self.random_seed is None:
+            return None
+        return int(self.random_seed) + int(self._task_counter) + int(batch_offset)
+
+    def solve(
+        self,
+        q_tensor,
+        epsilon,
+        *,
+        num_repeats=20,
+        round_digits=4,
+        include_pure_starts=True,
+    ):
+        return self.solve_batch(
+            [q_tensor],
+            epsilon,
+            num_repeats=num_repeats,
+            round_digits=round_digits,
+            include_pure_starts=include_pure_starts,
+        )[0]
+
+    def solve_batch(
+        self,
+        q_tensors,
+        epsilon,
+        *,
+        num_repeats=20,
+        round_digits=4,
+        include_pure_starts=True,
+    ):
+        q_tensors = [validate_nplayer_q_tensor(q_tensor) for q_tensor in q_tensors]
+        if not q_tensors:
+            return []
+
+        payloads = [
+            (
+                q_tensor,
+                float(epsilon),
+                int(num_repeats),
+                round_digits,
+                bool(include_pure_starts),
+                self._task_seed(batch_offset),
+            )
+            for batch_offset, q_tensor in enumerate(q_tensors)
+        ]
+        self._task_counter += len(payloads)
+
+        results = self._pool.map(_path_mcp_nplayer_pool_solve_task, payloads)
+        for result in results:
+            duration = float(result.metadata.get("worker_sre_wall_seconds", 0.0))
+            self._record_solve_time(duration)
+            result.metadata["solver"] = self.name
+            result.metadata["max_workers"] = self.max_workers
+        return results
+
+    def get_solve_time_summary(self):
+        count = self.solve_time_count
+        if count == 0:
+            return _empty_duration_summary()
+
+        mean = self.solve_time_sum / count
+        variance = max(self.solve_time_sumsq / count - mean * mean, 0.0)
+        std = float(np.sqrt(variance))
+        return {
+            "count": int(count),
+            "mean_seconds": float(mean),
+            "min_seconds": float(self.solve_time_min),
+            "max_seconds": float(self.solve_time_max),
+            "std_seconds": std,
+            "mean_microseconds": float(mean * 1_000_000.0),
+            "min_microseconds": float(self.solve_time_min * 1_000_000.0),
+            "max_microseconds": float(self.solve_time_max * 1_000_000.0),
+            "std_microseconds": float(std * 1_000_000.0),
+        }
+
+    def close(self):
+        pool = getattr(self, "_pool", None)
+        if pool is not None:
+            pool.close()
+            pool.join()
+            self._pool = None

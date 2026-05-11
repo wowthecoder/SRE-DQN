@@ -314,3 +314,36 @@ class TestSmokeTrain:
         assert len(result["rewards"][0]) == 2
         assert len(result["rewards"][1]) == 2
         assert result["wall_seconds"] > 0
+
+    def test_short_three_agent_training_run(self):
+        """Reward logging should scale with the configured number of agents."""
+        from sr_nqovi.trainer import train_sr_nqovi
+
+        class _TinyEnv:
+            def reset(self):
+                return np.zeros((3, 2), dtype=np.int64)
+
+            def step(self, actions):
+                assert len(actions) == 3
+                return np.zeros((3, 2), dtype=np.int64), [1.0, 2.0, 3.0], True, {}
+
+        features = TabularIndicatorFeatures(num_states=1, num_joint_actions=8)
+        config = SrNqoviConfig(
+            num_agents=3,
+            num_actions=2,
+            feature_dim=features.dim,
+            horizon=3,
+            total_episodes=2,
+            epsilon_robust_initial=0.5,
+            epsilon_schedule="linear",
+            sre_solver=_FakeSreSolver(),
+        )
+        agent = SrNqoviAgent(
+            config,
+            feature_fn=features,
+            state_to_index=lambda obs: 0,
+            joint_action_to_index=lambda acts: acts[0] * 4 + acts[1] * 2 + acts[2],
+        )
+        result = train_sr_nqovi(_TinyEnv(), agent, K=2, H=3, seed=0)
+        assert result["rewards"] == [[1.0, 1.0], [2.0, 2.0], [3.0, 3.0]]
+        assert result["wall_seconds"] > 0

@@ -176,7 +176,7 @@ class DsrFpAgent:
             pi_lists = [p.cpu().numpy() for p in self.pi_target(state_t)]  # N x [1, Ai]
             pi_avg_batch = [p for p in pi_lists]          # N x [1, Ai]
 
-        use_br = np.random.rand() < self.eta and len(self.reservoir) >= self.learning_starts
+        use_br = np.random.rand() < self.eta and len(self.replay_buffer) >= self.learning_starts
         if use_br:
             br_policies, _ = sr_br_policies_batch(
                 q_batch, pi_avg_batch, self.epsilon_robust,
@@ -215,7 +215,7 @@ class DsrFpAgent:
         eta_mask = (
             (np.random.rand(B, self.num_agents) < self.eta)
             & ~explore_mask
-            & (len(self.reservoir) >= self.learning_starts)
+            & (len(self.replay_buffer) >= self.learning_starts)
         )
 
         # Compute SR-BR only for envs where at least one agent uses it

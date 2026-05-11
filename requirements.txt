@@ -15,6 +15,5 @@ lemkelcp==0.1
 pygambit
 lbforaging
 pyomo
-gurobipy
 highway-env
 dotenv

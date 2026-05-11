@@ -1,157 +1,81 @@
+import numpy as np
 import pytest
 
 pytest.importorskip("lbforaging")
 
-from lbf_grid.env import CustomForagingEnv
+from lbf_grid.pz_wrapper import make_pz_env
 
 
-def _positions(env):
-    return [p.position for p in env._inner.players]
+def _food_positions(env):
+    return sorted(map(tuple, np.argwhere(env._inner.field > 0)))
 
 
-def test_wall_blocks_movement_without_double_move():
-    env = CustomForagingEnv(
-        players=1,
-        field_size=(5, 5),
-        sight=5,
-        max_food=1,
-        max_episode_steps=5,
-        start_positions=[(1, 1)],
-        food_positions=[(3, 3)],
-        food_levels=[1],
-        wall_positions=[(1, 2)],
-        collision_penalty=0.0,
-        trap_penalty=0.0,
-    )
+def test_basic_lbf_defaults_are_three_agent_full_observation():
+    env = make_pz_env()
     try:
-        env.reset(seed=0)
-        _, rewards, _, _, info = env.step([4])
+        obs, _ = env.reset(seed=0)
 
-        assert _positions(env) == [(1, 1)]
-        assert rewards == [0.0]
-        assert info["wall_block_agents"] == [0]
+        assert env.possible_agents == ["player_0", "player_1", "player_2"]
+        assert env._inner.field_size == (10, 10)
+        assert env._inner.sight == 10
+        assert len(obs) == 3
+        assert len(_food_positions(env)) == 3
     finally:
         env.close()
 
 
-def test_collision_penalties_can_distinguish_movers_and_blockers():
-    env = CustomForagingEnv(
-        players=2,
-        field_size=(5, 5),
-        sight=5,
-        max_food=1,
-        max_episode_steps=5,
-        start_positions=[(1, 1), (1, 3)],
-        food_positions=[(3, 3)],
-        food_levels=[1],
-        collision_penalty=-2.0,
-        collision_mover_penalty=-0.5,
-        trap_penalty=0.0,
-    )
+def test_seed_controls_random_food_positions():
+    env_a = make_pz_env(max_food=3, food_levels=[1, 2, 3])
+    env_b = make_pz_env(max_food=3, food_levels=[1, 2, 3])
+    env_c = make_pz_env(max_food=3, food_levels=[1, 2, 3])
     try:
-        env.reset(seed=1)
-        _, rewards, _, _, info = env.step([4, 3])
+        env_a.reset(seed=123)
+        env_b.reset(seed=123)
+        env_c.reset(seed=124)
 
-        assert _positions(env) == [(1, 1), (1, 3)]
-        assert rewards == [-2.5, -2.5]
-        assert info["collision_agents"] == [0, 1]
+        assert np.array_equal(env_a._inner.field, env_b._inner.field)
+        assert not np.array_equal(env_a._inner.field, env_c._inner.field)
+    finally:
+        env_a.close()
+        env_b.close()
+        env_c.close()
+
+
+def test_player_levels_can_be_fixed_per_agent():
+    env = make_pz_env(players=3, player_levels=[1, 2, 3])
+    try:
+        env.reset(seed=7)
+
+        assert [player.level for player in env._inner.players] == [1, 2, 3]
     finally:
         env.close()
 
 
-def test_trap_penalty_applies_on_entry_only_by_default():
-    env = CustomForagingEnv(
-        players=1,
-        field_size=(5, 5),
-        sight=5,
-        max_food=1,
-        max_episode_steps=5,
-        start_positions=[(1, 1)],
-        food_positions=[(3, 3)],
-        food_levels=[1],
-        trap_positions=[(1, 2)],
-        collision_penalty=0.0,
-        trap_penalty=-7.0,
-    )
+def test_food_count_and_exact_food_levels_are_tunable():
+    env = make_pz_env(max_food=4, food_levels=[1, 1, 2, 3])
     try:
-        env.reset(seed=2)
-        _, rewards, _, _, info = env.step([4])
-        assert _positions(env) == [(1, 2)]
-        assert rewards == [-7.0]
-        assert info["trap_agents"] == [0]
+        env.reset(seed=9)
+        spawned_levels = sorted(int(value) for value in env._inner.field[env._inner.field > 0])
 
-        _, rewards, _, _, info = env.step([0])
-        assert _positions(env) == [(1, 2)]
-        assert rewards == [0.0]
-        assert info["trap_agents"] == []
+        assert len(_food_positions(env)) == 4
+        assert spawned_levels == [1, 1, 2, 3]
     finally:
         env.close()
 
 
-def test_mixed_food_rewards_stack_on_successful_cooperative_load():
-    env = CustomForagingEnv(
-        players=2,
-        field_size=(5, 5),
-        sight=5,
-        max_food=1,
-        max_episode_steps=5,
-        start_positions=[(1, 1), (1, 3)],
-        player_levels=[1, 1],
-        food_positions=[(1, 2)],
-        food_levels=[2],
-        food_types=["coop"],
-        collision_penalty=0.0,
-        trap_penalty=0.0,
-        team_food_reward=3.0,
-        personal_food_rewards=[1.0, 2.0],
-        preferred_food_bonus=[{"coop": 0.5}, {"coop": 1.5}],
-        last_loader_bonus=[0.25, 0.75],
-    )
+def test_pettingzoo_wrapper_uses_basic_lbf_defaults():
+    env = make_pz_env()
     try:
-        env.reset(seed=3)
-        _, rewards, done, _, info = env.step([5, 5])
+        obs, infos = env.reset(seed=5)
+        actions = {agent: env.action_space(agent).sample() for agent in env.agents}
+        next_obs, rewards, terms, truncs, step_infos = env.step(actions)
 
-        assert bool(done) is True
-        assert env._inner.field[1, 2] == 0
-        assert rewards == pytest.approx([5.25, 7.75])
-        assert info["loaded_foods"] == [
-            {
-                "position": (1, 2),
-                "level": 2,
-                "food_type": "coop",
-                "participants": [0, 1],
-            }
-        ]
-    finally:
-        env.close()
-
-
-def test_failed_cooperative_load_does_not_apply_food_shaping():
-    env = CustomForagingEnv(
-        players=2,
-        field_size=(5, 5),
-        sight=5,
-        max_food=1,
-        max_episode_steps=5,
-        start_positions=[(1, 1), (1, 3)],
-        player_levels=[1, 1],
-        food_positions=[(1, 2)],
-        food_levels=[3],
-        food_types=["coop"],
-        collision_penalty=0.0,
-        trap_penalty=0.0,
-        team_food_reward=3.0,
-        personal_food_rewards=[1.0, 2.0],
-        preferred_food_bonus=[{"coop": 0.5}, {"coop": 1.5}],
-        last_loader_bonus=[0.25, 0.75],
-    )
-    try:
-        env.reset(seed=4)
-        _, rewards, done, _, info = env.step([5, 5])
-
-        assert bool(done) is False
-        assert env._inner.field[1, 2] == 3
-        assert rewards == [0.0, 0.0]
-        assert info["loaded_foods"] == []
+        assert list(obs) == ["player_0", "player_1", "player_2"]
+        assert set(infos) == set(obs)
+        assert set(next_obs) == set(obs)
+        assert set(rewards) == set(obs)
+        assert set(terms) == set(obs)
+        assert set(truncs) == set(obs)
+        assert set(step_infos) == set(obs)
     finally:
         env.close()

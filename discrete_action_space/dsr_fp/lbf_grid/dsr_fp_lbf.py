@@ -31,7 +31,7 @@ from stats_utils import (
     summarize_rewards,
 )
 from pz_wrapper import make_pz_env
-from scenarios import mixed_coop_comp_lbf_config
+from scenarios import basic_lbf_config
 
 from dsr_fp_agent import DsrFpAgent
 
@@ -57,7 +57,7 @@ DSR_FP_LBF_HYPERPARAMS = {
     "target_tau": None,
 }
 
-DEFAULT_LBF_CONFIG = mixed_coop_comp_lbf_config()
+DEFAULT_LBF_CONFIG = basic_lbf_config()
 
 
 def set_global_seed(seed=BASE_SEED):
@@ -258,7 +258,7 @@ def train_lbf_dsr_fp_experiment(
     stats = {
         "environment": "lbf_grid",
         "algorithm": "DSR-FP",
-        "scenario_name": "LBF 3-player mixed cooperative-competitive",
+        "scenario_name": "LBF 3-player basic",
         "rewards": rewards_history,
         "n_episodes": int(n_episodes),
         "seed": int(seed),

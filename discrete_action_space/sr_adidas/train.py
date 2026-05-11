@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Callable
 
 import numpy as np
+from tqdm import tqdm
 
 from .sr_adidas_agent import SrAdidasAgent
 
@@ -103,7 +104,7 @@ def train_sr_adidas(
 
     episode_rewards = []
 
-    for ep in range(n_episodes):
+    for ep in tqdm(range(n_episodes), desc="SR-ADIDAS", disable=not verbose):
         env = env_factory()
         raw_obs = env.reset()
         state = flatten_obs(raw_obs)
@@ -134,7 +135,7 @@ def train_sr_adidas(
             eps_rob = agent.epsilon_robust
             eps_exp = agent.epsilon_explore
             adi = agent.adi_estimates[-1] if agent.adi_estimates else float("nan")
-            print(
+            tqdm.write(
                 f"[ep {ep+1:5d}] mean_sum_reward={mean_r:7.2f} | "
                 f"tau={tau:.4f} | eps_rob={eps_rob:.3f} | eps_exp={eps_exp:.3f} | "
                 f"adi={adi:.5f} | buf={len(agent.replay_buffer)}"

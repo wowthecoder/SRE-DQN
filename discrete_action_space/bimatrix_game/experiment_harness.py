@@ -450,7 +450,9 @@ def train_pairing(
                 shared_policies = _shared_policies_if_available(agents, state)
                 actions = [agent.act(state, policies=shared_policies) for agent in agents]
                 next_state, rewards, done, _ = env.step(actions)
-                done_mask = list(getattr(env, "agents_finished", [done] * len(agents)))
+                done_mask = list(getattr(env, "agents_finished", [False] * len(agents)))
+                if done:
+                    done_mask = [True] * len(agents)
                 next_policies = (
                     None if done else _shared_policies_if_available(agents, next_state)
                 )

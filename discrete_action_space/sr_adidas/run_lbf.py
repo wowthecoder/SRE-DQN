@@ -19,10 +19,10 @@ from train import train_sr_adidas
 
 try:
     from lbf_grid.pz_wrapper import make_pz_env
-    from lbf_grid.scenarios import mixed_coop_comp_lbf_config
+    from lbf_grid.scenarios import basic_lbf_config
 except ImportError:
     from pz_wrapper import make_pz_env
-    from scenarios import mixed_coop_comp_lbf_config
+    from scenarios import basic_lbf_config
 
 
 class _LbfWrapper:
@@ -70,9 +70,9 @@ def main():
     args = parser.parse_args()
 
     if args.players != 3:
-        raise ValueError("The mixed cooperative-competitive LBF preset is 3-player only.")
+        raise ValueError("The default basic LBF preset is 3-player only.")
 
-    env_config = mixed_coop_comp_lbf_config(
+    env_config = basic_lbf_config(
         {
             "players": args.players,
             "max_episode_steps": args.max_steps,

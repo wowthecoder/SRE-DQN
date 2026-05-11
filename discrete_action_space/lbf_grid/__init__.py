@@ -1,17 +1,16 @@
-from .env import CustomForagingEnv
-from .pz_wrapper import make_pz_env
+from .pz_wrapper import LBFParallelEnv, make_pz_env
 from .scenarios import (
-    MIXED_COOP_COMP_LBF_CONFIG,
-    make_mixed_coop_comp_pz_env,
-    mixed_coop_comp_lbf_config,
+    BASIC_LBF_CONFIG,
+    basic_lbf_config,
+    make_basic_lbf_pz_env,
 )
 
 __all__ = [
-    "CustomForagingEnv",
+    "LBFParallelEnv",
     "make_pz_env",
-    "MIXED_COOP_COMP_LBF_CONFIG",
-    "make_mixed_coop_comp_pz_env",
-    "mixed_coop_comp_lbf_config",
+    "BASIC_LBF_CONFIG",
+    "basic_lbf_config",
+    "make_basic_lbf_pz_env",
 ]
 
 try:
@@ -25,16 +24,22 @@ except Exception:
 
 try:
     from .baselines import (
-        run_lbf_iql_baseline,
-        run_lbf_main_baseline_suite,
-        run_lbf_mappo_baseline,
+        EPYMARL_ALGORITHMS,
+        build_epymarl_command,
+        n_frames_for_episodes,
+        run_epymarl_baseline,
+        run_epymarl_baseline_suite,
+        run_random_policy_baseline,
     )
 
     __all__.extend(
         [
-            "run_lbf_iql_baseline",
-            "run_lbf_main_baseline_suite",
-            "run_lbf_mappo_baseline",
+            "EPYMARL_ALGORITHMS",
+            "build_epymarl_command",
+            "n_frames_for_episodes",
+            "run_epymarl_baseline",
+            "run_epymarl_baseline_suite",
+            "run_random_policy_baseline",
         ]
     )
 except Exception:

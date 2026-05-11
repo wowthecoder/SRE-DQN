@@ -5,7 +5,10 @@ from .base import (
 )
 from .factory import make_sre_solver
 from .lemkelcp import LemkeLcpBimatrixSreSolver, ProcessPoolLemkeLcpBimatrixSreSolver
-from .n_player.path_mcp_nplayer import PathMcpNPlayerSreSolver
+from .n_player.path_mcp_nplayer import (
+    PathMcpNPlayerSreSolver,
+    ProcessPoolPathMcpNPlayerSreSolver,
+)
 from .nplayer_common import (
     robust_action_values,
     robust_exploitability,
@@ -23,6 +26,7 @@ __all__ = [
     "PathCBimatrixSreSolver",
     "ProcessPoolPathCBimatrixSreSolver",
     "PathMcpNPlayerSreSolver",
+    "ProcessPoolPathMcpNPlayerSreSolver",
     "LemkeLcpBimatrixSreSolver",
     "ProcessPoolLemkeLcpBimatrixSreSolver",
     "make_sre_solver",

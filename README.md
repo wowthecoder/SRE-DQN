@@ -16,3 +16,17 @@ gcc -shared -fPIC -Ipathlib/include -Ipathlib/examples/C -o pathwrap.so \
 Virtual environment managed in conda, python version is 3.9 because marllib cannot go along with newer Python versions.
 Stored in /vol/bitbucket/jhl323/miniconda3/envs/fypenv
 Do `conda activate fypenv` to activate venv
+
+# Install EPyMARL
+
+```bash
+cd /home/wowthecoder/SRE-DQN
+source venv/bin/activate
+
+cd ..
+git clone https://github.com/uoe-agents/epymarl.git
+cd epymarl
+
+pip install -r requirements.txt
+pip install -r env_requirements.txt
+```

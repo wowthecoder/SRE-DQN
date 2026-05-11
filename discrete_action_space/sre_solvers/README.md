@@ -35,6 +35,7 @@ An SRE policy profile is evaluated by robust exploitability: for each player, co
 | `lemkelcp` | `LemkeLcpBimatrixSreSolver` | 2-player | Pure Python/package LCP fallback using Lemke's algorithm. |
 | `lemkelcp_pool` | `ProcessPoolLemkeLcpBimatrixSreSolver` | 2-player | Parallel batch wrapper around `lemkelcp`. |
 | `path_mcp_nplayer`, `path_nplayer`, `path_mcp` | `PathMcpNPlayerSreSolver` | N-player | PATH-backed multilinear MCP formulation. |
+| `path_mcp_nplayer_pool`, `path_nplayer_pool`, `path_mcp_pool` | `ProcessPoolPathMcpNPlayerSreSolver` | N-player | Parallel batch wrapper around `path_mcp_nplayer`. |
 
 ## Bimatrix Solvers
 
@@ -120,6 +121,18 @@ Factory aliases:
 - `path_nplayer`
 - `path_mcp`
 
+### `ProcessPoolPathMcpNPlayerSreSolver`
+
+File: `n_player/path_mcp_nplayer.py`
+
+This is a multiprocessing batch wrapper around `PathMcpNPlayerSreSolver`. `solve(...)` delegates to `solve_batch(...)`, and each worker owns its own PATH solver instance. Use it when many independent N-player Q tensors need to be solved in one batch.
+
+Factory aliases:
+
+- `path_mcp_nplayer_pool`
+- `path_nplayer_pool`
+- `path_mcp_pool`
+
 ## Support Modules
 
 - `base.py`: abstract solver interface, result dataclass, bimatrix validation, and common timing summary shape.
@@ -132,4 +145,4 @@ Factory aliases:
 
 Use `path_c` for two-player bimatrix games when possible. Use `path_c_pool` when solving many independent two-player games in batch.
 
-Use `path_mcp_nplayer` for N-player SRE stage games. The former experimental N-player solvers were removed from the factory surface so N-player training and evaluation consistently use the PATH MCP backend.
+Use `path_mcp_nplayer` for N-player SRE stage games. Use `path_mcp_nplayer_pool` when solving many independent N-player games in batch. The former experimental N-player solvers were removed from the factory surface so N-player training and evaluation consistently use the PATH MCP backend.

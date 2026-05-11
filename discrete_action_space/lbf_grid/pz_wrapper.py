@@ -1,83 +1,96 @@
-"""
-PettingZoo ParallelEnv wrapper around CustomForagingEnv.
-"""
+"""PettingZoo ParallelEnv wrapper around the basic lb-foraging environment."""
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Tuple
+from collections.abc import Iterable
+from typing import Dict, Optional, Sequence, Tuple
 
-import numpy as np
 from pettingzoo import ParallelEnv
-from gymnasium import spaces
 
-from .env import CustomForagingEnv
+
+def _as_level_list(name: str, values: Sequence[int], expected_len: int) -> list[int]:
+    levels = [int(value) for value in values]
+    if len(levels) != expected_len:
+        raise ValueError(f"{name} must have length {expected_len}, got {len(levels)}")
+    return levels
 
 
 class LBFParallelEnv(ParallelEnv):
-    """PettingZoo parallel wrapper for CustomForagingEnv."""
+    """PettingZoo parallel wrapper for ``lbforaging.foraging.ForagingEnv``."""
 
-    metadata = {"render_modes": ["human", "rgb_array"], "name": "lbf_custom_v0"}
+    metadata = {"render_modes": ["human", "rgb_array"], "name": "lbf_basic_v0"}
 
     def __init__(
         self,
-        players: int = 2,
+        players: int = 3,
         field_size: Tuple[int, int] = (10, 10),
-        sight: int = 10,
+        sight: Optional[int] = None,
         max_food: int = 3,
-        max_episode_steps: int = 100,
+        max_episode_steps: int = 75,
         force_coop: bool = False,
-        start_positions=None,
-        player_levels=None,
-        food_positions=None,
-        food_levels=None,
-        food_types=None,
-        wall_positions=None,
-        trap_positions=None,
-        collision_penalty: float = -1.0,
-        collision_penalty_by_agent=None,
-        collision_mover_penalty: float = 0.0,
-        collision_blocker_penalty: float = 0.0,
-        trap_penalty: float = -5.0,
-        trap_penalty_by_agent=None,
-        trap_on_entry_only: bool = True,
-        team_food_reward: float = 0.0,
-        personal_food_rewards=None,
-        preferred_food_bonus=None,
-        last_loader_bonus=None,
-        time_penalties=None,
+        player_levels: Optional[Sequence[int]] = None,
+        min_player_level: int | Sequence[int] = 1,
+        max_player_level: int | Sequence[int] = 1,
+        food_levels: Optional[Sequence[int]] = None,
+        min_food_level: int | Sequence[int] = 1,
+        max_food_level: Optional[int | Sequence[int]] = 3,
+        normalize_reward: bool = True,
+        grid_observation: bool = False,
+        observe_agent_levels: bool = True,
+        penalty: float = 0.0,
+        render_mode: Optional[str] = None,
     ):
+        from lbforaging.foraging import ForagingEnv
+
         super().__init__()
-        self._env = CustomForagingEnv(
+        self.n_players = int(players)
+        self.field_size = tuple(field_size)
+        self.sight = int(sight if sight is not None else max(self.field_size))
+        self.max_food = int(max_food)
+
+        self._player_levels = None
+        if player_levels is not None:
+            fixed_player_levels = _as_level_list(
+                "player_levels", player_levels, self.n_players
+            )
+            self._player_levels = fixed_player_levels
+            min_player_level = fixed_player_levels
+            max_player_level = fixed_player_levels
+
+        if food_levels is not None:
+            fixed_food_levels = _as_level_list("food_levels", food_levels, self.max_food)
+            min_food_level = fixed_food_levels
+            max_food_level = fixed_food_levels
+        elif isinstance(min_food_level, Iterable) and not isinstance(
+            min_food_level, (str, bytes)
+        ):
+            _as_level_list("min_food_level", min_food_level, self.max_food)
+        elif isinstance(max_food_level, Iterable) and not isinstance(
+            max_food_level, (str, bytes)
+        ):
+            _as_level_list("max_food_level", max_food_level, self.max_food)
+
+        self._inner = ForagingEnv(
             players=players,
-            field_size=field_size,
-            sight=sight,
-            max_food=max_food,
+            min_player_level=min_player_level,
+            max_player_level=max_player_level,
+            min_food_level=min_food_level,
+            max_food_level=max_food_level,
+            field_size=self.field_size,
+            max_num_food=self.max_food,
+            sight=self.sight,
             max_episode_steps=max_episode_steps,
             force_coop=force_coop,
-            start_positions=start_positions,
-            player_levels=player_levels,
-            food_positions=food_positions,
-            food_levels=food_levels,
-            food_types=food_types,
-            wall_positions=wall_positions,
-            trap_positions=trap_positions,
-            collision_penalty=collision_penalty,
-            collision_penalty_by_agent=collision_penalty_by_agent,
-            collision_mover_penalty=collision_mover_penalty,
-            collision_blocker_penalty=collision_blocker_penalty,
-            trap_penalty=trap_penalty,
-            trap_penalty_by_agent=trap_penalty_by_agent,
-            trap_on_entry_only=trap_on_entry_only,
-            team_food_reward=team_food_reward,
-            personal_food_rewards=personal_food_rewards,
-            preferred_food_bonus=preferred_food_bonus,
-            last_loader_bonus=last_loader_bonus,
-            time_penalties=time_penalties,
+            normalize_reward=normalize_reward,
+            grid_observation=grid_observation,
+            observe_agent_levels=observe_agent_levels,
+            penalty=penalty,
+            render_mode=render_mode,
         )
         self.possible_agents = [f"player_{i}" for i in range(players)]
         self.agents = list(self.possible_agents)
 
-        inner_obs = self._env.observation_space
-        inner_act = self._env.action_space
+        inner_obs = self._inner.observation_space
+        inner_act = self._inner.action_space
         self._obs_space = inner_obs[0] if hasattr(inner_obs, "__getitem__") else inner_obs
         self._act_space = inner_act[0] if hasattr(inner_act, "__getitem__") else inner_act
 
@@ -88,21 +101,38 @@ class LBFParallelEnv(ParallelEnv):
         return self._act_space
 
     def reset(self, seed=None, options=None):
-        obs_list, info = self._env.reset(seed=seed, options=options)
+        obs_list, _ = self._inner.reset(seed=seed, options=options)
+        if self._player_levels is not None:
+            for player, level in zip(self._inner.players, self._player_levels):
+                player.level = int(level)
+            self._inner._gen_valid_moves()
+            obs_list = self._inner._make_gym_obs()
+        if not isinstance(obs_list, (list, tuple)):
+            obs_list = [obs_list]
         self.agents = list(self.possible_agents)
-        obs = {a: obs_list[i] for i, a in enumerate(self.agents)}
-        infos = {a: {} for a in self.agents}
+        obs = {agent: obs_list[i] for i, agent in enumerate(self.agents)}
+        infos = {agent: {} for agent in self.agents}
         return obs, infos
 
     def step(self, actions: Dict):
-        action_list = [actions.get(a, 0) for a in self.possible_agents]
-        obs_list, reward_list, done, truncated, info = self._env.step(action_list)
+        action_list = [actions.get(agent, 0) for agent in self.possible_agents]
+        obs_list, reward_list, done, truncated, info = self._inner.step(action_list)
+        if not isinstance(obs_list, (list, tuple)):
+            obs_list = [obs_list]
+        if not isinstance(reward_list, (list, tuple)):
+            reward_list = [reward_list]
 
-        obs = {a: obs_list[i] for i, a in enumerate(self.possible_agents)}
-        rewards = {a: reward_list[i] for i, a in enumerate(self.possible_agents)}
-        terminations = {a: bool(done) for a in self.possible_agents}
-        truncations = {a: bool(truncated) for a in self.possible_agents}
-        infos = {a: dict(info) if isinstance(info, dict) else {} for a in self.possible_agents}
+        obs = {agent: obs_list[i] for i, agent in enumerate(self.possible_agents)}
+        rewards = {
+            agent: float(reward_list[i])
+            for i, agent in enumerate(self.possible_agents)
+        }
+        terminations = {agent: bool(done) for agent in self.possible_agents}
+        truncations = {agent: bool(truncated) for agent in self.possible_agents}
+        infos = {
+            agent: dict(info) if isinstance(info, dict) else {}
+            for agent in self.possible_agents
+        }
 
         if done or truncated:
             self.agents = []
@@ -110,62 +140,48 @@ class LBFParallelEnv(ParallelEnv):
         return obs, rewards, terminations, truncations, infos
 
     def render(self):
-        return self._env.render()
+        return self._inner.render()
 
     def close(self):
-        self._env.close()
+        self._inner.close()
 
 
 def make_pz_env(
-    players: int = 2,
+    players: int = 3,
     field_size: Tuple[int, int] = (10, 10),
-    sight: int = 10,
+    sight: Optional[int] = None,
     max_food: int = 3,
-    max_episode_steps: int = 100,
-    start_positions=None,
-    player_levels=None,
-    food_positions=None,
-    food_levels=None,
-    food_types=None,
-    wall_positions=None,
-    trap_positions=None,
-    collision_penalty: float = -1.0,
-    collision_penalty_by_agent=None,
-    collision_mover_penalty: float = 0.0,
-    collision_blocker_penalty: float = 0.0,
-    trap_penalty: float = -5.0,
-    trap_penalty_by_agent=None,
-    trap_on_entry_only: bool = True,
-    team_food_reward: float = 0.0,
-    personal_food_rewards=None,
-    preferred_food_bonus=None,
-    last_loader_bonus=None,
-    time_penalties=None,
+    max_episode_steps: int = 75,
+    force_coop: bool = False,
+    player_levels: Optional[Sequence[int]] = None,
+    min_player_level: int | Sequence[int] = 1,
+    max_player_level: int | Sequence[int] = 1,
+    food_levels: Optional[Sequence[int]] = None,
+    min_food_level: int | Sequence[int] = 1,
+    max_food_level: Optional[int | Sequence[int]] = 3,
+    normalize_reward: bool = True,
+    grid_observation: bool = False,
+    observe_agent_levels: bool = True,
+    penalty: float = 0.0,
+    render_mode: Optional[str] = None,
 ) -> LBFParallelEnv:
-    """Factory function for use with marl_utils.run_iql."""
+    """Create the default basic Level-Based Foraging PettingZoo env."""
     return LBFParallelEnv(
         players=players,
         field_size=field_size,
         sight=sight,
         max_food=max_food,
         max_episode_steps=max_episode_steps,
-        start_positions=start_positions,
+        force_coop=force_coop,
         player_levels=player_levels,
-        food_positions=food_positions,
+        min_player_level=min_player_level,
+        max_player_level=max_player_level,
         food_levels=food_levels,
-        food_types=food_types,
-        wall_positions=wall_positions,
-        trap_positions=trap_positions,
-        collision_penalty=collision_penalty,
-        collision_penalty_by_agent=collision_penalty_by_agent,
-        collision_mover_penalty=collision_mover_penalty,
-        collision_blocker_penalty=collision_blocker_penalty,
-        trap_penalty=trap_penalty,
-        trap_penalty_by_agent=trap_penalty_by_agent,
-        trap_on_entry_only=trap_on_entry_only,
-        team_food_reward=team_food_reward,
-        personal_food_rewards=personal_food_rewards,
-        preferred_food_bonus=preferred_food_bonus,
-        last_loader_bonus=last_loader_bonus,
-        time_penalties=time_penalties,
+        min_food_level=min_food_level,
+        max_food_level=max_food_level,
+        normalize_reward=normalize_reward,
+        grid_observation=grid_observation,
+        observe_agent_levels=observe_agent_levels,
+        penalty=penalty,
+        render_mode=render_mode,
     )

@@ -43,7 +43,9 @@ def train_sr_nqovi(
     """
     np.random.seed(seed)
 
-    rewards_history = [[] for _ in range(2)]  # per-agent episode rewards
+    rewards_history = [
+        [] for _ in range(agent.config.num_agents)
+    ]  # per-agent episode rewards
     wall_start = time.perf_counter()
 
     with tqdm(total=K, desc="SR-NQOVI") as pbar:
