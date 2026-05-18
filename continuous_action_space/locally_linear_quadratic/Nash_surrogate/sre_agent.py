@@ -6,7 +6,7 @@ import torch
 import torch.optim as optim
 import torch.nn.functional as F
 
-from NashAgent_lib import NashNN, PermInvariantQNN
+from continuous_action_space.locally_linear_quadratic.NashAgent_lib import NashNN, PermInvariantQNN
 
 
 class NashSurrogateSreNN(NashNN):

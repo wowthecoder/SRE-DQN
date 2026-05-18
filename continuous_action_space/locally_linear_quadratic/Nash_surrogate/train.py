@@ -5,18 +5,18 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 import numpy as np
 import torch
 
-from NashRL import run_training_loop
-from iterative_dual_best_response.sre_agent import IterativeDualBRSreNN
+from continuous_action_space.locally_linear_quadratic.NashRL import run_training_loop
+from continuous_action_space.locally_linear_quadratic.Nash_surrogate.sre_agent import NashSurrogateSreNN
 
 
-def run_SRE_IterDualBR(
+def run_SRE_Surrogate(
     sim_obj,
     sim_dict,
     max_steps,
     sre_agent=None,
     num_sim=15000,
-    AN_file_name="SRE_IterDualBR_Action_Net",
-    VN_file_name="SRE_IterDualBR_Value_Net",
+    AN_file_name="SRE_Surrogate_Action_Net",
+    VN_file_name="SRE_Surrogate_Value_Net",
     norm_mean=np.zeros((5, 1)),
     norm_std=np.ones((5, 1)),
     rv_min=0.01,
@@ -32,27 +32,18 @@ def run_SRE_IterDualBR(
     gamma=1.0,
     lambda_lr=3e-4,
     lambda_max=100.0,
-    br_iters=10,
-    br_tol=1e-5,
-    mu_lr=3e-4,
 ):
     """
-    Thin wrapper around run_training_loop for the Iterative Dual Best-Response
-    SRE-DQN variant.
+    Thin wrapper around run_training_loop for the Nash surrogate SRE-DQN (Approach B).
 
-    Extends the Nash surrogate interface with three additional parameters that
-    control the iterative solver and amortised actor:
+    Identical interface to run_SRE_Agent in linear_approximation/train.py, with two
+    additional parameters for the lambda (dual variable) network:
 
-    :param br_iters:  Maximum outer best-response iterations per state (default 10)
-    :param br_tol:    Convergence tolerance for the iterative solver (default 1e-5)
-    :param mu_lr:     Learning rate for the amortised actor μ_net (default 3e-4)
+    :param lambda_lr:  Learning rate for the lambda network (default 3e-4)
+    :param lambda_max: Upper bound for the dual variable λ (default 100.0)
 
-    The extra_update_fn runs two separate optimiser steps per replay batch:
-      1. λ-network update (Wasserstein constraint residual — inherited loss)
-      2. μ_net update (regression to solver output u*)
-
-    The λ step runs first so the μ_net regresses to the u* computed with the
-    latest λ values.
+    The lambda network is updated after each standard value+action update via
+    extra_update_fn, minimising the Wasserstein constraint residual.
     """
     if sim_obj is None:
         raise ValueError("sim_obj must be provided")
@@ -62,7 +53,7 @@ def run_SRE_IterDualBR(
         n_agents = sim_obj.N
         parameter_number = 5
         net_non_inv_dim = st0.to_numpy().shape[0] - (n_agents - 1)
-        sre_agent = IterativeDualBRSreNN(
+        sre_agent = NashSurrogateSreNN(
             non_invar_dim=net_non_inv_dim,
             output_dim=parameter_number,
             n_players=n_agents,
@@ -73,9 +64,6 @@ def run_SRE_IterDualBR(
             gamma=gamma,
             lambda_lr=lambda_lr,
             lambda_max=lambda_max,
-            br_iters=br_iters,
-            br_tol=br_tol,
-            mu_lr=mu_lr,
         )
 
     def make_sre_action(agent, eps_b, noise_std):
@@ -90,28 +78,17 @@ def run_SRE_IterDualBR(
         return eps_0 * max(0.0, 1.0 - k / max(eps_decay_horizon, 1))
 
     def extra_update(agent, replay_sample, eps_b):
-        # Step 1: update λ-network (Wasserstein constraint residual)
         agent.lambda_net.train()
         agent.optimizer_lambda.zero_grad()
-        lam_loss = agent.compute_lambda_loss(replay_sample, eps_b)
-        lam_loss.backward()
+        lambda_loss = agent.compute_lambda_loss(replay_sample, eps_b)
+        lambda_loss.backward()
         torch.nn.utils.clip_grad_norm_(agent.lambda_net.parameters(), 1e-1)
         agent.optimizer_lambda.step()
         agent.lambda_net.eval()
 
-        # Step 2: update μ_net (regression to solver u*)
-        agent.mu_net.train()
-        agent.optimizer_mu.zero_grad()
-        mu_loss = agent.compute_mu_loss(replay_sample, eps_b)
-        mu_loss.backward()
-        torch.nn.utils.clip_grad_norm_(agent.mu_net.parameters(), 1e-1)
-        agent.optimizer_mu.step()
-        agent.mu_net.eval()
-        agent._mu_net_ready = True
-
     def extra_checkpoint(k, eps_b):
         return {
-            'trainer': 'sre_iter_dual_br',
+            'trainer': 'sre_surrogate',
             'eps_0': float(eps_0),
             'eps_b': float(eps_b),
             'eps_decay_horizon': None if eps_decay_horizon is None else int(eps_decay_horizon),
@@ -120,9 +97,6 @@ def run_SRE_IterDualBR(
             'gamma': float(gamma),
             'lambda_lr': float(lambda_lr),
             'lambda_max': float(lambda_max),
-            'br_iters': int(br_iters),
-            'br_tol': float(br_tol),
-            'mu_lr': float(mu_lr),
         }
 
     return run_training_loop(
@@ -145,5 +119,5 @@ def run_SRE_IterDualBR(
         mini_batch=mini_batch,
         extra_checkpoint_fn=extra_checkpoint,
         extra_update_fn=extra_update,
-        desc="SRE-IterDualBR",
+        desc="SRE-Surrogate",
     )

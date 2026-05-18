@@ -4,22 +4,25 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 import numpy as np
 
-from NashRL import run_training_loop
-from full_fixed_point_iteration.sre_agent import FixedPointSreNN
+from continuous_action_space.locally_linear_quadratic.NashRL import run_training_loop
+from continuous_action_space.locally_linear_quadratic.linear_approximation.sre_agent import SreNN
 
 
-def run_SRE_FixedPoint(
+def run_SRE_Agent(
     sim_obj,
     sim_dict,
     max_steps,
     sre_agent=None,
     num_sim=15000,
-    AN_file_name="SRE_FP_Action_Net",
-    VN_file_name="SRE_FP_Value_Net",
+    batch_update_size=100,
+    buffersize=5000,
+    AN_file_name="SRE_Action_Net",
+    VN_file_name="SRE_Value_Net",
     norm_mean=np.zeros((5, 1)),
     norm_std=np.ones((5, 1)),
     rv_min=0.01,
     rv_max=2.5,
+    is_numpy=False,
     path='',
     early_stop=False,
     early_lim=1000,
@@ -29,19 +32,23 @@ def run_SRE_FixedPoint(
     eps_reg=0.01,
     delta_min=1e-6,
     gamma=1.0,
-    max_iter=10,
-    fp_tol=1e-5,
 ):
     """
-    Thin wrapper around run_training_loop for the full fixed-point SRE-DQN (Approach A iterative).
+    Thin wrapper around run_training_loop for the linearised SRE-DQN (Approach A).
 
-    Identical interface to run_SRE_Agent in linear_approximation/train.py, with two
-    additional parameters controlling the fixed-point solver:
+    Kept with the original run_SRE_Agent signature for notebook compatibility.
+    All training logic lives in run_training_loop (NashRL.py).
 
-    :param max_iter:  Max fixed-point iterations per SRE action evaluation (default 10)
-    :param fp_tol:    Early-exit convergence tolerance (default 1e-5)
-
-    At max_iter=1 and ε small, results match the linearised SreNN to first order in ε.
+    :param sim_obj:            MarketSimulator instance
+    :param sim_dict:           Dict of simulation parameters
+    :param max_steps:          Number of time steps per episode
+    :param sre_agent:          Pre-built SreNN instance (created internally if None)
+    :param eps_0:              Initial robustness parameter ε_0 (section 3.6)
+    :param eps_decay_horizon:  Episode index at which ε reaches 0 (B_decay)
+    :param eps_reg:            Frobenius regularisation coefficient for P_{12}
+    :param delta_min:          Threshold below which ψ is treated as zero
+    :param gamma:              Discount factor γ
+    :return:                   (sre_agent, sum_loss array)
     """
     if sim_obj is None:
         raise ValueError("sim_obj must be provided")
@@ -51,7 +58,7 @@ def run_SRE_FixedPoint(
         n_agents = sim_obj.N
         parameter_number = 5
         net_non_inv_dim = st0.to_numpy().shape[0] - (n_agents - 1)
-        sre_agent = FixedPointSreNN(
+        sre_agent = SreNN(
             non_invar_dim=net_non_inv_dim,
             output_dim=parameter_number,
             n_players=n_agents,
@@ -60,8 +67,6 @@ def run_SRE_FixedPoint(
             eps_reg=eps_reg,
             delta_min=delta_min,
             gamma=gamma,
-            max_iter=max_iter,
-            fp_tol=fp_tol,
         )
 
     def make_sre_action(agent, eps_b, noise_std):
@@ -78,15 +83,13 @@ def run_SRE_FixedPoint(
 
     def extra_checkpoint(k, eps_b):
         return {
-            'trainer': 'sre_fixed_point',
+            'trainer': 'sre_linear',
             'eps_0': float(eps_0),
             'eps_b': float(eps_b),
             'eps_decay_horizon': None if eps_decay_horizon is None else int(eps_decay_horizon),
             'eps_reg': float(eps_reg),
             'delta_min': float(delta_min),
             'gamma': float(gamma),
-            'max_iter': int(max_iter),
-            'fp_tol': float(fp_tol),
         }
 
     return run_training_loop(
@@ -108,5 +111,5 @@ def run_SRE_FixedPoint(
         early_lim=early_lim,
         mini_batch=mini_batch,
         extra_checkpoint_fn=extra_checkpoint,
-        desc="SRE-FixedPoint",
+        desc="SRE-Linear",
     )

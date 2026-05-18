@@ -5,7 +5,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 import numpy as np
 import torch
 
-from linear_approximation.sre_agent import SreNN
+from continuous_action_space.locally_linear_quadratic.linear_approximation.sre_agent import SreNN
 
 
 class FixedPointSreNN(SreNN):

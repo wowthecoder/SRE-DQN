@@ -5,8 +5,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 import torch
 import torch.optim as optim
 
-from NashAgent_lib import PermInvariantQNN
-from Nash_surrogate.sre_agent import NashSurrogateSreNN
+from continuous_action_space.locally_linear_quadratic.NashAgent_lib import PermInvariantQNN
+from continuous_action_space.locally_linear_quadratic.Nash_surrogate.sre_agent import NashSurrogateSreNN
 
 
 class IterativeDualBRSreNN(NashSurrogateSreNN):

@@ -4,7 +4,7 @@ from datetime import date
 from copy import deepcopy as dc
 from tqdm import tqdm
 
-from NashAgent_lib import *
+from continuous_action_space.locally_linear_quadratic.NashAgent_lib import *
 
 import os
 

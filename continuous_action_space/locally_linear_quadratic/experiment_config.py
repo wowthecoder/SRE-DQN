@@ -5,7 +5,7 @@
 import random
 import numpy as np
 import torch
-from simulation_lib import MarketSimulator
+from continuous_action_space.locally_linear_quadratic.simulation_lib import MarketSimulator
 
 
 def seed_everything(seed):

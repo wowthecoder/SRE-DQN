@@ -5,7 +5,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 import numpy as np
 import torch
 
-from NashAgent_lib import NashNN
+from continuous_action_space.locally_linear_quadratic.NashAgent_lib import NashNN
 
 
 class SreNN(NashNN):
