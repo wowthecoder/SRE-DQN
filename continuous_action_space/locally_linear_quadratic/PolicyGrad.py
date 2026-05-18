@@ -1,13 +1,17 @@
 import torch
 import torch.nn as nn
-from continuous_action_space.locally_linear_quadratic.simulation_lib import ExperienceReplay
 import numpy as np
 import timeit
 from copy import deepcopy as dc
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 
-from continuous_action_space.locally_linear_quadratic.NashRL import collect_parallel_rollouts
+try:
+    from continuous_action_space.locally_linear_quadratic.simulation_lib import ExperienceReplay
+    from continuous_action_space.locally_linear_quadratic.NashRL import collect_parallel_rollouts
+except ModuleNotFoundError:
+    from simulation_lib import ExperienceReplay
+    from NashRL import collect_parallel_rollouts
 
 class Policy(torch.nn.Module):
 

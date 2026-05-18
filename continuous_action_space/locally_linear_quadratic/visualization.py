@@ -7,10 +7,13 @@ import matplotlib.gridspec as gridspec
 import copy
 import os
 
-from continuous_action_space.locally_linear_quadratic.NashRL import expand_list
+try:
+    from continuous_action_space.locally_linear_quadratic.NashRL import expand_list
+    from continuous_action_space.locally_linear_quadratic.simulation_lib import State
+except ModuleNotFoundError:
+    from NashRL import expand_list
+    from simulation_lib import State
 from textwrap import wrap
-
-from continuous_action_space.locally_linear_quadratic.simulation_lib import State
 
 
 font = {'size'   : 12}

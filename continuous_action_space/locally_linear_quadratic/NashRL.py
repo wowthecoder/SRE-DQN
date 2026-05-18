@@ -4,7 +4,10 @@ from datetime import date
 from copy import deepcopy as dc
 from tqdm import tqdm
 
-from continuous_action_space.locally_linear_quadratic.NashAgent_lib import *
+try:
+    from continuous_action_space.locally_linear_quadratic.NashAgent_lib import *
+except ModuleNotFoundError:
+    from NashAgent_lib import *
 
 import os
 
@@ -295,33 +298,26 @@ def run_training_loop(
     early_stop=False,
     early_lim=1000,
     mini_batch=128,
-    extra_checkpoint_fn=None,
-    extra_update_fn=None,
+    checkpoint_metadata=None,
     desc="Training",
 ):
     """
-    Unified training loop shared by Nash-DQN and all SRE-DQN variants.
+    Shared training loop for Nash-DQN and the locally linear-quadratic SRE-DQN.
 
-    Variation points vs. hard-coded training loops:
-
-    :param make_action_fn:    Callable(agent, eps_b, noise_std) -> action_fn(cur_s, cur_ivt).
-                              Returns the per-step action function for rollout collection.
-                              Nash passes predict_action()[:,4]; SRE variants pass compute_sre_action().
+    :param make_action_fn:    Callable(agent, eps_b, noise_std) -> action_fn(cur_s, cur_ivt)
+                              used for rollout collection.
     :param eps_schedule_fn:   Optional Callable(k, num_sim) -> float.
                               Returns eps_b for the current episode.
-                              None means eps_b=0.0 (Nash behaviour — losses ignore eps).
-    :param extra_checkpoint_fn: Optional Callable(k, eps_b) -> dict.
-                              Returns additional fields to store in the best-checkpoint extra_state.
-    :param extra_update_fn:   Optional Callable(agent, replay_sample, eps_b) -> None.
-                              Called after the standard value+action updates. Used by Nash surrogate
-                              to update the lambda network.
+                              None means eps_b=0.0.
+    :param checkpoint_metadata: Static fields to store in the best-checkpoint extra_state.
     :param desc:              tqdm progress-bar description string.
     :return:                  (agent, sum_loss array)
     """
     if sim_obj is None:
         raise ValueError("sim_obj must be provided")
 
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    if path:
+        os.makedirs(path, exist_ok=True)
 
     max_T = max_steps
 
@@ -397,10 +393,6 @@ def run_training_loop(
         agent.value_net.eval()
         agent.action_net.eval()
 
-        # Optional extra update (e.g. lambda network for Nash surrogate)
-        if extra_update_fn is not None:
-            extra_update_fn(agent, replay_sample, eps_b)
-
         total_l = vloss + aloss
         sum_loss[k] = total_l.item()
 
@@ -423,7 +415,10 @@ def run_training_loop(
             best_idx = k
             impv_counter = 0
 
-            extra_state = extra_checkpoint_fn(k, eps_b) if extra_checkpoint_fn is not None else {}
+            extra_state = dict(checkpoint_metadata or {})
+            extra_state.update({
+                'eps_b': float(eps_b),
+            })
             extra_state.update({
                 'num_sim': int(num_sim),
                 'max_steps': int(max_T),
@@ -492,17 +487,12 @@ def run_Nash_Agent(
 ):
     """
     Thin wrapper around run_training_loop for Nash-DQN.
-
-    Kept for backward compatibility. All training logic lives in run_training_loop.
     """
     def make_nash_action(agent, eps_b, noise_std):
         def fn(cur_s, cur_ivt):
             mu = agent.predict_action(cur_s, cur_ivt)[:, 4]
             return mu + torch.randn_like(mu) * noise_std
         return fn
-
-    def extra_checkpoint(k, eps_b):
-        return {'trainer': 'nash'}
 
     return run_training_loop(
         sim_obj=sim_obj,
@@ -522,6 +512,6 @@ def run_Nash_Agent(
         early_stop=early_stop,
         early_lim=early_lim,
         mini_batch=mini_batch,
-        extra_checkpoint_fn=extra_checkpoint,
+        checkpoint_metadata={'trainer': 'nash'},
         desc="Nash-DQN",
     )

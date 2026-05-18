@@ -1,16 +1,15 @@
-import sys
-import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-
 import numpy as np
 import torch
 
-from continuous_action_space.locally_linear_quadratic.NashAgent_lib import NashNN
+try:
+    from continuous_action_space.locally_linear_quadratic.NashAgent_lib import NashNN
+except ModuleNotFoundError:
+    from NashAgent_lib import NashNN
 
 
 class SreNN(NashNN):
     """
-    SRE-DQN Agent: augments Nash-DQN with Smooth Robustness Equilibrium (SRE) action selection.
+    SRE-DQN Agent: augments Nash-DQN with Strategically Robust Equilibrium (SRE) action selection.
 
     The advantage-function network outputs five parameters per agent (same as NashNN):
         col 0: c1 = P_{11}  — own-action quadratic cost (forced positive)
@@ -29,7 +28,7 @@ class SreNN(NashNN):
         P_{22,i} = c3 · I
         ψ_i      = c4 · 1  ((N-1)-vector, uniform linear cross-term)
 
-    The linearised SRE correction (section 3.3, Approach A) is then:
+    The linearised locally LQ SRE correction is:
         correction_i = ε · P_{11}^{-1} P_{12} ψ_i / ‖ψ_i‖
                      = ε · (c2 / (2c1)) · sign(c4) · √(N−1)
 
@@ -82,7 +81,7 @@ class SreNN(NashNN):
 
     def compute_sre_correction(self, c1_list, c2_list, c4_list, eps):
         """
-        Linearised SRE robustness correction (Approach A, section 3.3):
+        Linearised locally LQ SRE robustness correction:
             correction_i = ε · P_{11}^{-1} · P_{12} · ψ_i / ‖ψ_i‖
 
         For the scalar LQ structure in this codebase:

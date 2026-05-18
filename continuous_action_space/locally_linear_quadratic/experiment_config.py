@@ -5,7 +5,10 @@
 import random
 import numpy as np
 import torch
-from continuous_action_space.locally_linear_quadratic.simulation_lib import MarketSimulator
+try:
+    from continuous_action_space.locally_linear_quadratic.simulation_lib import MarketSimulator
+except ModuleNotFoundError:
+    from simulation_lib import MarketSimulator
 
 
 def seed_everything(seed):
@@ -57,7 +60,7 @@ sim_dict = {
 _inv_std = sim_dict['volatility'] * torch.sqrt(
     (1 - torch.exp(-2 * KAPPA * sim_dict['T'])) / (2 * KAPPA)
 )
-sim_dict['initial_price_var'] = torch.tensor(_inv_std).to(_device).detach()
+sim_dict['initial_price_var'] = _inv_std.clone().detach().to(_device)
 
 norm_mean = torch.tensor([2.25, 10, 0, 0, 0]).to(_device).detach()
 norm_std = torch.tensor([
