@@ -74,8 +74,21 @@ class DuelingDoubleDqnSreAgentConfig:
     sre_solver_name: str = "path_c_pool"
     sre_solver_workers: int = 8
     sre_solver_start_method: Optional[str] = None
+    q_hidden_dims: tuple = (128, 128)
     epsilon_robust_initial: float = 1.0
     epsilon_schedule: str = "exponential"
+
+
+def _make_feature_mlp(input_dim, hidden_dims):
+    hidden_dims = tuple(int(dim) for dim in hidden_dims)
+    if any(dim <= 0 for dim in hidden_dims):
+        raise ValueError(f"Hidden dimensions must be positive, got {hidden_dims}.")
+    layers = []
+    prev_dim = input_dim
+    for hidden_dim in hidden_dims:
+        layers.extend([nn.Linear(prev_dim, hidden_dim), nn.ReLU()])
+        prev_dim = hidden_dim
+    return nn.Sequential(*layers), prev_dim
 
 
 class DuelingJointQNetwork(nn.Module):
@@ -84,7 +97,7 @@ class DuelingJointQNetwork(nn.Module):
     Output shape: [batch, num_actions, ..., num_actions, num_agents].
     """
 
-    def __init__(self, obs_dim, num_actions, num_agents):
+    def __init__(self, obs_dim, num_actions, num_agents, hidden_dims=(128, 128)):
         super().__init__()
 
         self.num_actions = num_actions
@@ -92,14 +105,9 @@ class DuelingJointQNetwork(nn.Module):
         self.joint_action_count = num_actions ** num_agents
         self.output_shape = [num_actions] * num_agents + [num_agents]
 
-        self.feature = nn.Sequential(
-            nn.Linear(obs_dim, 128),
-            nn.ReLU(),
-            nn.Linear(128, 128),
-            nn.ReLU(),
-        )
-        self.value_head = nn.Linear(128, num_agents)
-        self.adv_head = nn.Linear(128, self.joint_action_count * num_agents)
+        self.feature, feature_dim = _make_feature_mlp(obs_dim, hidden_dims)
+        self.value_head = nn.Linear(feature_dim, num_agents)
+        self.adv_head = nn.Linear(feature_dim, self.joint_action_count * num_agents)
 
     def forward(self, state):
         features = self.feature(state)
@@ -134,7 +142,7 @@ class DuelingPerAgentJointQNetwork(nn.Module):
     [batch, num_actions, ..., num_actions, num_agents].
     """
 
-    def __init__(self, obs_dim, num_actions, num_agents):
+    def __init__(self, obs_dim, num_actions, num_agents, hidden_dims=(128, 128)):
         super().__init__()
 
         self.num_actions = num_actions
@@ -142,16 +150,14 @@ class DuelingPerAgentJointQNetwork(nn.Module):
         self.joint_action_count = num_actions ** num_agents
         self.output_shape = [num_actions] * num_agents + [num_agents]
         self.critics = nn.ModuleList(
-            [
-                nn.Sequential(
-                    nn.Linear(obs_dim, 128),
-                    nn.ReLU(),
-                    nn.Linear(128, 128),
-                    nn.ReLU(),
-                    _DuelingPayoffHead(128, self.joint_action_count),
-                )
-                for _ in range(num_agents)
-            ]
+            [self._make_critic(obs_dim, hidden_dims) for _ in range(num_agents)]
+        )
+
+    def _make_critic(self, obs_dim, hidden_dims):
+        feature, feature_dim = _make_feature_mlp(obs_dim, hidden_dims)
+        return nn.Sequential(
+            feature,
+            _DuelingPayoffHead(feature_dim, self.joint_action_count),
         )
 
     def forward(self, state):
@@ -167,22 +173,17 @@ class DuelingSharedTrunkPerAgentJointQNetwork(nn.Module):
     This shares feature extraction while retaining agent-specific payoff heads.
     """
 
-    def __init__(self, obs_dim, num_actions, num_agents):
+    def __init__(self, obs_dim, num_actions, num_agents, hidden_dims=(128, 128)):
         super().__init__()
 
         self.num_actions = num_actions
         self.num_agents = num_agents
         self.joint_action_count = num_actions ** num_agents
         self.output_shape = [num_actions] * num_agents + [num_agents]
-        self.feature = nn.Sequential(
-            nn.Linear(obs_dim, 128),
-            nn.ReLU(),
-            nn.Linear(128, 128),
-            nn.ReLU(),
-        )
+        self.feature, feature_dim = _make_feature_mlp(obs_dim, hidden_dims)
         self.heads = nn.ModuleList(
             [
-                _DuelingPayoffHead(128, self.joint_action_count)
+                _DuelingPayoffHead(feature_dim, self.joint_action_count)
                 for _ in range(num_agents)
             ]
         )
@@ -194,14 +195,22 @@ class DuelingSharedTrunkPerAgentJointQNetwork(nn.Module):
         return q_joint.view(-1, *self.output_shape)
 
 
-def make_q_network(obs_dim, num_actions, num_agents, network_type="joint_output"):
+def make_q_network(
+    obs_dim,
+    num_actions,
+    num_agents,
+    network_type="joint_output",
+    hidden_dims=(128, 128),
+):
     if network_type == "joint_output":
-        return DuelingJointQNetwork(obs_dim, num_actions, num_agents)
+        return DuelingJointQNetwork(obs_dim, num_actions, num_agents, hidden_dims)
     if network_type == "per_agent_independent":
-        return DuelingPerAgentJointQNetwork(obs_dim, num_actions, num_agents)
+        return DuelingPerAgentJointQNetwork(
+            obs_dim, num_actions, num_agents, hidden_dims
+        )
     if network_type == "shared_trunk_separate_heads":
         return DuelingSharedTrunkPerAgentJointQNetwork(
-            obs_dim, num_actions, num_agents
+            obs_dim, num_actions, num_agents, hidden_dims
         )
     raise ValueError(f"Unknown network_type: {network_type}")
 
@@ -233,12 +242,14 @@ class DuelingDoubleDqnSreAgent:
             config.num_actions,
             config.num_agents,
             network_type=config.network_type,
+            hidden_dims=config.q_hidden_dims,
         ).to(self.device)
         self.target_net = make_q_network(
             config.obs_dim,
             config.num_actions,
             config.num_agents,
             network_type=config.network_type,
+            hidden_dims=config.q_hidden_dims,
         ).to(self.device)
         self.target_net.load_state_dict(self.q_net.state_dict())
 
@@ -630,6 +641,7 @@ class DuelingDoubleDqnSreAgent:
             "sre_include_pure_starts": self.config.sre_include_pure_starts,
             "train_every": self.config.train_every,
             "network_type": self.config.network_type,
+            "q_hidden_dims": tuple(self.config.q_hidden_dims),
             "update_calls": self._update_calls,
             "buffer_size": self.replay_buffer.buffer.maxlen,
             "update_times": list(self.update_times),
@@ -670,6 +682,7 @@ class DuelingDoubleDqnSreAgent:
         cfg.sre_include_pure_starts = bool(checkpoint.get("sre_include_pure_starts", cfg.sre_include_pure_starts))
         cfg.train_every = max(1, int(checkpoint.get("train_every", cfg.train_every)))
         cfg.network_type = checkpoint.get("network_type", cfg.network_type)
+        cfg.q_hidden_dims = tuple(checkpoint.get("q_hidden_dims", cfg.q_hidden_dims))
         self.q_tensor_shape = tuple([cfg.num_actions] * cfg.num_agents + [cfg.num_agents])
         self._update_calls = int(checkpoint.get("update_calls", self._update_calls))
 
