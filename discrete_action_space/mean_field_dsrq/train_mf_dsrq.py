@@ -25,6 +25,12 @@ if str(_DISCRETE_DIR) not in sys.path:
 
 from mean_field_dsrq.mf_dsrq_agent import MFDsrqAgent
 from mean_field_dsrq.magent_env_wrapper import VectorizedMAgentWrapper
+from mean_field_dsrq.benchmarl_magent2 import make_magent2_parallel_env_factory
+
+try:
+    from tqdm.auto import tqdm as _tqdm
+except ImportError:
+    _tqdm = None
 
 try:
     from torch.utils.tensorboard import SummaryWriter as _SummaryWriter
@@ -43,32 +49,29 @@ def _linear_schedule(start, end, fraction):
     return start + (end - start) * min(max(fraction, 0.0), 1.0)
 
 
+def _make_progress_bar(total_steps: int, cfg: dict):
+    use_progress_bar = bool(cfg.get("use_progress_bar", True))
+    if not use_progress_bar or _tqdm is None:
+        return None
+    return _tqdm(
+        total=total_steps,
+        desc="MF-DSRQ training",
+        unit="step",
+        dynamic_ncols=True,
+        leave=True,
+        file=sys.stdout,
+    )
+
+
 def _make_env_factory(cfg: dict):
-    env_name = cfg["env_name"]
-    map_size = cfg.get("map_size", 45)
-    max_cycles = cfg.get("max_cycles", 400)
-
-    def factory():
-        if env_name == "battle_v4":
-            from pettingzoo.magent import battle_v4
-            return battle_v4.parallel_env(
-                map_size=map_size,
-                max_cycles=max_cycles,
-                minimap_mode=False,
-                extra_features=False,
-            )
-        elif env_name == "adversarial_pursuit_v4":
-            from pettingzoo.magent import adversarial_pursuit_v4
-            return adversarial_pursuit_v4.parallel_env(
-                map_size=map_size,
-                max_cycles=max_cycles,
-                minimap_mode=False,
-                extra_features=False,
-            )
-        else:
-            raise ValueError(f"Unknown env: {env_name}")
-
-    return factory
+    backend = cfg.get("env_backend", "magent2")
+    if backend not in {"magent2", "legacy_pettingzoo"}:
+        raise ValueError("env_backend must be 'magent2' or 'legacy_pettingzoo'")
+    return make_magent2_parallel_env_factory(
+        cfg,
+        prefer_magent2=(backend == "magent2"),
+        fallback_to_legacy_pettingzoo=True,
+    )
 
 
 def train(cfg: dict):
@@ -149,123 +152,151 @@ def train(cfg: dict):
     t_start = time.perf_counter()
 
     print(f"Starting training: {total_steps} env steps, {num_envs} envs")
+    progress_bar = _make_progress_bar(total_steps, cfg)
 
-    while global_step < total_steps:
-        frac = global_step / max(total_steps, 1)
+    try:
+        while global_step < total_steps:
+            frac = global_step / max(total_steps, 1)
 
-        # Anneal hyperparameters.
-        eps_tv = _linear_schedule(eps_tv_start, eps_tv_end, frac / max(eps_tv_decay_frac, 1e-6))
-        beta = _linear_schedule(beta_start, beta_end, frac / max(beta_anneal_frac, 1e-6))
-        eps_explore_frac = frac / max(eps_explore_decay_frac, 1e-6)
-        eps_explore = _linear_schedule(eps_explore_start, eps_explore_end, eps_explore_frac)
-        for agent in agents.values():
-            agent.epsilon_tv = eps_tv
-            agent.beta = beta
-            agent.epsilon_explore = eps_explore
+            # Anneal hyperparameters.
+            eps_tv = _linear_schedule(eps_tv_start, eps_tv_end, frac / max(eps_tv_decay_frac, 1e-6))
+            beta = _linear_schedule(beta_start, beta_end, frac / max(beta_anneal_frac, 1e-6))
+            eps_explore_frac = frac / max(eps_explore_decay_frac, 1e-6)
+            eps_explore = _linear_schedule(eps_explore_start, eps_explore_end, eps_explore_frac)
+            for agent in agents.values():
+                agent.epsilon_tv = eps_tv
+                agent.beta = beta
+                agent.epsilon_explore = eps_explore
 
-        # Collect actions for all alive agents in all envs.
-        actions_per_env = []
-        for env_idx in range(num_envs):
-            obs_dict = env_obs_dicts[env_idx]
-            env_obj = vec_env.envs[env_idx]
-            env_actions = {}
-            for type_name in type_prefixes:
-                type_agents = env_obj.agents_of_type(type_name)
-                if not type_agents:
-                    continue
-                agent = agents[type_name]
-                obs_batch = np.stack([obs_dict[aid] for aid in type_agents if aid in obs_dict])
-                mean_a_batch = np.stack([env_obj.get_mean_a(aid) for aid in type_agents if aid in obs_dict])
-                if len(obs_batch) == 0:
-                    continue
-                acts = agent.act_batch(obs_batch, mean_a_batch)
-                for aid, a in zip(type_agents, acts):
-                    env_actions[aid] = int(a)
-            actions_per_env.append(env_actions)
-
-        # Step all envs.
-        results = vec_env.step_all(actions_per_env)
-
-        # Process transitions and push to buffers.
-        new_obs_dicts = []
-        for env_idx, (obs_dict_next, rewards, dones, mean_a_t, mean_a_tp1, _) in enumerate(results):
-            env_obj = vec_env.envs[env_idx]
-            obs_dict_prev = env_obs_dicts[env_idx]
-            env_actions = actions_per_env[env_idx]
-
-            for aid, action in env_actions.items():
-                if aid not in obs_dict_prev:
-                    continue
-                type_name = env_obj.agent_type(aid)
-                if type_name is None:
-                    continue
-                agent = agents[type_name]
-                obs = obs_dict_prev[aid]
-                next_obs_arr = obs_dict_next.get(aid, np.zeros_like(obs))
-                reward = rewards.get(aid, 0.0)
-                done = dones.get(aid, False)
-                m_a = mean_a_t.get(aid, np.full(agent.n_nbr_actions, 1.0 / agent.n_nbr_actions, dtype=np.float32))
-                m_a_next = mean_a_tp1.get(aid, m_a.copy())
-                valid = not done
-
-                agent.push(obs, action, reward, next_obs_arr, m_a, m_a_next, done, valid)
-                ep_reward_accum[env_idx][type_name] += reward
-
-            # Check if env is done (no alive agents).
-            if len(env_obj.alive_agents) == 0:
+            # Collect actions for all alive agents in all envs.
+            actions_per_env = []
+            for env_idx in range(num_envs):
+                obs_dict = env_obs_dicts[env_idx]
+                env_obj = vec_env.envs[env_idx]
+                env_actions = {}
                 for type_name in type_prefixes:
-                    episode_rewards[env_idx][type_name].append(ep_reward_accum[env_idx][type_name])
-                    ep_reward_accum[env_idx][type_name] = 0.0
-                obs_d, _ = env_obj.reset()
-                new_obs_dicts.append(obs_d)
-                completed_episodes += 1
-            else:
-                new_obs_dicts.append(obs_dict_next)
+                    type_agents = env_obj.agents_of_type(type_name)
+                    if not type_agents:
+                        continue
+                    agent = agents[type_name]
+                    obs_batch = np.stack([obs_dict[aid] for aid in type_agents if aid in obs_dict])
+                    mean_a_batch = np.stack([env_obj.get_mean_a(aid) for aid in type_agents if aid in obs_dict])
+                    if len(obs_batch) == 0:
+                        continue
+                    acts = agent.act_batch(obs_batch, mean_a_batch)
+                    for aid, a in zip(type_agents, acts):
+                        env_actions[aid] = int(a)
+                actions_per_env.append(env_actions)
 
-        env_obs_dicts = new_obs_dicts
+            # Step all envs.
+            results = vec_env.step_all(actions_per_env)
 
-        # Train step.
-        for type_name, agent in agents.items():
-            loss = agent.maybe_train()
-            if loss is not None:
-                gradient_steps += 1
+            # Process transitions and push to buffers.
+            new_obs_dicts = []
+            for env_idx, (obs_dict_next, rewards, dones, mean_a_t, mean_a_tp1, _) in enumerate(results):
+                env_obj = vec_env.envs[env_idx]
+                obs_dict_prev = env_obs_dicts[env_idx]
+                env_actions = actions_per_env[env_idx]
 
-        global_step += num_envs
+                for aid, action in env_actions.items():
+                    if aid not in obs_dict_prev:
+                        continue
+                    type_name = env_obj.agent_type(aid)
+                    if type_name is None:
+                        continue
+                    agent = agents[type_name]
+                    obs = obs_dict_prev[aid]
+                    next_obs_arr = obs_dict_next.get(aid, np.zeros_like(obs))
+                    reward = rewards.get(aid, 0.0)
+                    done = dones.get(aid, False)
+                    m_a = mean_a_t.get(
+                        aid,
+                        np.full(agent.n_nbr_actions, 1.0 / agent.n_nbr_actions, dtype=np.float32),
+                    )
+                    m_a_next = mean_a_tp1.get(aid, m_a.copy())
+                    valid = not done
 
-        # Logging.
-        if global_step % log_interval < num_envs:
-            elapsed = time.perf_counter() - t_start
-            sps = global_step / elapsed
-            log_str = (
-                f"step={global_step:,}  eps_tv={eps_tv:.3f}  "
-                f"beta={beta:.2f}  eps_explore={eps_explore:.3f}  "
-                f"grad_steps={gradient_steps}  episodes={completed_episodes}  "
-                f"sps={sps:.0f}"
-            )
+                    agent.push(obs, action, reward, next_obs_arr, m_a, m_a_next, done, valid)
+                    ep_reward_accum[env_idx][type_name] += reward
+
+                # Check if env is done (no alive agents).
+                if len(env_obj.alive_agents) == 0:
+                    for type_name in type_prefixes:
+                        episode_rewards[env_idx][type_name].append(ep_reward_accum[env_idx][type_name])
+                        ep_reward_accum[env_idx][type_name] = 0.0
+                    obs_d, _ = env_obj.reset()
+                    new_obs_dicts.append(obs_d)
+                    completed_episodes += 1
+                else:
+                    new_obs_dicts.append(obs_dict_next)
+
+            env_obs_dicts = new_obs_dicts
+
+            # Train step.
             for type_name, agent in agents.items():
-                if agent._last_loss is not None:
-                    log_str += f"  loss_{type_name}={agent._last_loss:.4f}"
-                all_ep_r = episode_rewards[0].get(type_name, [])
-                if all_ep_r:
-                    log_str += f"  ep_r_{type_name}={np.mean(all_ep_r[-20:]):.2f}"
-            print(log_str)
+                loss = agent.maybe_train()
+                if loss is not None:
+                    gradient_steps += 1
 
-            if writer is not None:
-                writer.add_scalar("train/eps_tv", eps_tv, global_step)
-                writer.add_scalar("train/beta", beta, global_step)
-                writer.add_scalar("train/eps_explore", eps_explore, global_step)
-                writer.add_scalar("train/episodes", completed_episodes, global_step)
+            step_increment = min(num_envs, total_steps - global_step)
+            global_step += step_increment
+            if progress_bar is not None:
+                progress_bar.update(step_increment)
+
+            # Logging.
+            if global_step % log_interval < num_envs:
+                elapsed = time.perf_counter() - t_start
+                sps = global_step / max(elapsed, 1e-6)
+                progress_metrics = {
+                    "episodes": completed_episodes,
+                    "sps": f"{sps:.0f}",
+                    "eps_tv": f"{eps_tv:.3f}",
+                    "beta": f"{beta:.2f}",
+                    "eps_exp": f"{eps_explore:.3f}",
+                }
+                log_str = (
+                    f"step={global_step:,}  eps_tv={eps_tv:.3f}  "
+                    f"beta={beta:.2f}  eps_explore={eps_explore:.3f}  "
+                    f"grad_steps={gradient_steps}  episodes={completed_episodes}  "
+                    f"sps={sps:.0f}"
+                )
                 for type_name, agent in agents.items():
                     if agent._last_loss is not None:
-                        writer.add_scalar(f"train/loss_{type_name}", agent._last_loss, global_step)
+                        progress_metrics[f"loss_{type_name}"] = f"{agent._last_loss:.4f}"
+                        log_str += f"  loss_{type_name}={agent._last_loss:.4f}"
                     all_ep_r = episode_rewards[0].get(type_name, [])
                     if all_ep_r:
-                        writer.add_scalar(f"train/ep_reward_{type_name}", np.mean(all_ep_r[-20:]), global_step)
+                        mean_ep_reward = np.mean(all_ep_r[-20:])
+                        progress_metrics[f"r_{type_name}"] = f"{mean_ep_reward:.2f}"
+                        log_str += f"  ep_r_{type_name}={mean_ep_reward:.2f}"
+                if progress_bar is not None:
+                    progress_bar.set_postfix(progress_metrics)
+                else:
+                    print(log_str)
 
-        # Save checkpoints.
-        if global_step % save_interval < num_envs:
-            for type_name, agent in agents.items():
-                agent.save_checkpoint(run_dir / f"ckpt_{type_name}_step{global_step}.pt")
+                if writer is not None:
+                    writer.add_scalar("train/eps_tv", eps_tv, global_step)
+                    writer.add_scalar("train/beta", beta, global_step)
+                    writer.add_scalar("train/eps_explore", eps_explore, global_step)
+                    writer.add_scalar("train/episodes", completed_episodes, global_step)
+                    for type_name, agent in agents.items():
+                        if agent._last_loss is not None:
+                            writer.add_scalar(f"train/loss_{type_name}", agent._last_loss, global_step)
+                        all_ep_r = episode_rewards[0].get(type_name, [])
+                        if all_ep_r:
+                            writer.add_scalar(
+                                f"train/ep_reward_{type_name}",
+                                np.mean(all_ep_r[-20:]),
+                                global_step,
+                            )
+
+            # Save checkpoints.
+            if global_step % save_interval < num_envs:
+                for type_name, agent in agents.items():
+                    agent.save_checkpoint(run_dir / f"ckpt_{type_name}_step{global_step}.pt")
+    finally:
+        if progress_bar is not None:
+            progress_bar.close()
 
     # Final save.
     for type_name, agent in agents.items():

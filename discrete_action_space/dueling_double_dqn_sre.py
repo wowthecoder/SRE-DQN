@@ -1,7 +1,7 @@
 import random
 import sys
 import time
-from collections import deque
+from collections import OrderedDict, deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
@@ -15,7 +15,11 @@ _THIS_DIR = Path(__file__).resolve().parent
 if str(_THIS_DIR) not in sys.path:
     sys.path.insert(0, str(_THIS_DIR))
 
-from sre_solvers import PathCBimatrixSreSolver, PathMcpNPlayerSreSolver
+from sre_solvers import (
+    PathCBimatrixSreSolver,
+    PathMcpNPlayerSreSolver,
+    robust_exploitability,
+)
 
 
 def _linear_schedule(start, end, step, total_steps):
@@ -68,6 +72,7 @@ class DuelingDoubleDqnSreAgentConfig:
     network_type: str = "joint_output"
     target_tau: Optional[float] = None
     target_update_steps: int = 100
+    target_equilibrium_update_steps: int = 4
     action_epsilon_start: float = 1.0
     action_epsilon_end: float = 0.05
     action_epsilon_decay_fraction: float = 0.5
@@ -77,6 +82,14 @@ class DuelingDoubleDqnSreAgentConfig:
     q_hidden_dims: tuple = (128, 128)
     epsilon_robust_initial: float = 1.0
     epsilon_schedule: str = "exponential"
+    sre_policy_cache_enabled: bool = True
+    sre_policy_cache_size: int = 4096
+    sre_policy_cache_round_digits: int = 6
+    sre_state_cache_round_digits: int = 4
+    sre_approx_cache_enabled: bool = True
+    sre_cache_exploitability_tol: float = 1e-3
+    sre_solver_exploitability_tol: float = 1e-4
+    sre_solver_early_exit: bool = True
 
 
 def _make_feature_mlp(input_dim, hidden_dims):
@@ -262,6 +275,28 @@ class DuelingDoubleDqnSreAgent:
         self.sre_solve_time_sumsq = 0.0
         self.sre_solve_time_min = None
         self.sre_solve_time_max = None
+        self._sre_policy_cache = OrderedDict()
+        self._sre_state_policy_keys = {}
+        self._last_sre_cache_key = None
+        self.sre_cache_exact_hits = 0
+        self.sre_cache_approx_hits = 0
+        self.sre_cache_misses = 0
+        self.sre_cache_stores = 0
+        self.sre_cache_evictions = 0
+        self.sre_cache_warm_start_uses = 0
+        self.sre_cache_validation_count = 0
+        self.sre_cache_validation_time_sum = 0.0
+        self.sre_cache_lookup_count = 0
+        self.sre_cache_lookup_time_sum = 0.0
+        self.sre_cache_lookup_time_sumsq = 0.0
+        self.sre_cache_lookup_time_min = None
+        self.sre_cache_lookup_time_max = None
+        self.sre_uniform_fallback_count = 0
+        self.sre_cache_forced_refreshes = 0
+        self.target_equilibrium_refresh_count = 0
+        self.target_equilibrium_cache_only_count = 0
+        self.target_equilibrium_cache_only_misses = 0
+        self.target_equilibrium_stale_policy_reuses = 0
 
         if config.sre_solver is None:
             if config.num_agents == 2:
@@ -318,6 +353,96 @@ class DuelingDoubleDqnSreAgent:
             "std_microseconds": float(std * 1_000_000.0),
         }
 
+    def _record_cache_lookup_time(self, duration):
+        self.sre_cache_lookup_count += 1
+        self.sre_cache_lookup_time_sum += duration
+        self.sre_cache_lookup_time_sumsq += duration * duration
+        if (
+            self.sre_cache_lookup_time_min is None
+            or duration < self.sre_cache_lookup_time_min
+        ):
+            self.sre_cache_lookup_time_min = duration
+        if (
+            self.sre_cache_lookup_time_max is None
+            or duration > self.sre_cache_lookup_time_max
+        ):
+            self.sre_cache_lookup_time_max = duration
+
+    def _cache_lookup_duration_summary(self):
+        count = self.sre_cache_lookup_count
+        if count == 0:
+            return {
+                "count": 0,
+                "mean_seconds": None,
+                "min_seconds": None,
+                "max_seconds": None,
+                "std_seconds": None,
+                "mean_microseconds": None,
+                "min_microseconds": None,
+                "max_microseconds": None,
+                "std_microseconds": None,
+            }
+        mean = self.sre_cache_lookup_time_sum / count
+        variance = max(self.sre_cache_lookup_time_sumsq / count - mean * mean, 0.0)
+        std = float(np.sqrt(variance))
+        return {
+            "count": int(count),
+            "mean_seconds": float(mean),
+            "min_seconds": float(self.sre_cache_lookup_time_min),
+            "max_seconds": float(self.sre_cache_lookup_time_max),
+            "std_seconds": std,
+            "mean_microseconds": float(mean * 1_000_000.0),
+            "min_microseconds": float(self.sre_cache_lookup_time_min * 1_000_000.0),
+            "max_microseconds": float(self.sre_cache_lookup_time_max * 1_000_000.0),
+            "std_microseconds": float(std * 1_000_000.0),
+        }
+
+    def get_sre_cache_summary(self):
+        exact_hits = int(self.sre_cache_exact_hits)
+        approx_hits = int(self.sre_cache_approx_hits)
+        misses = int(self.sre_cache_misses)
+        requests = exact_hits + approx_hits + misses
+        path_avoided = exact_hits + approx_hits
+        validation_mean = None
+        if self.sre_cache_validation_count:
+            validation_mean = (
+                self.sre_cache_validation_time_sum / self.sre_cache_validation_count
+            )
+        return {
+            "enabled": bool(self.config.sre_policy_cache_enabled),
+            "approx_enabled": bool(self.config.sre_approx_cache_enabled),
+            "entries": int(len(self._sre_policy_cache)),
+            "max_entries": int(self.config.sre_policy_cache_size),
+            "requests": int(requests),
+            "exact_hits": exact_hits,
+            "approx_hits": approx_hits,
+            "misses": misses,
+            "hit_rate": None if requests == 0 else float(path_avoided / requests),
+            "path_solves_avoided": int(path_avoided),
+            "stores": int(self.sre_cache_stores),
+            "evictions": int(self.sre_cache_evictions),
+            "warm_start_uses": int(self.sre_cache_warm_start_uses),
+            "forced_refreshes": int(self.sre_cache_forced_refreshes),
+            "validation_count": int(self.sre_cache_validation_count),
+            "validation_mean_seconds": (
+                None if validation_mean is None else float(validation_mean)
+            ),
+            "validation_mean_microseconds": (
+                None if validation_mean is None else float(validation_mean * 1_000_000.0)
+            ),
+            "lookup_time": self._cache_lookup_duration_summary(),
+            "uniform_fallbacks": int(self.sre_uniform_fallback_count),
+            "cache_round_digits": int(self.config.sre_policy_cache_round_digits),
+            "state_round_digits": int(self.config.sre_state_cache_round_digits),
+            "approx_exploitability_tol": float(self.config.sre_cache_exploitability_tol),
+            "solver_exploitability_tol": float(self.config.sre_solver_exploitability_tol),
+            "target_equilibrium_update_steps": int(self.config.target_equilibrium_update_steps),
+            "target_equilibrium_refreshes": int(self.target_equilibrium_refresh_count),
+            "target_equilibrium_cache_only_steps": int(self.target_equilibrium_cache_only_count),
+            "target_equilibrium_cache_only_misses": int(self.target_equilibrium_cache_only_misses),
+            "target_equilibrium_stale_policy_reuses": int(self.target_equilibrium_stale_policy_reuses),
+        }
+
     def _state_to_vector(self, state):
         vector = np.asarray(state, dtype=np.float32).reshape(-1)
         if vector.shape[0] != self.config.obs_dim:
@@ -339,7 +464,10 @@ class DuelingDoubleDqnSreAgent:
         return [u.copy() for _ in range(self.config.num_agents)]
 
     def _sre_batch_key(self, q_tensor):
-        q_key = np.ascontiguousarray(np.round(q_tensor, 6), dtype=np.float32)
+        q_key = np.ascontiguousarray(
+            np.round(q_tensor, int(self.config.sre_policy_cache_round_digits)),
+            dtype=np.float32,
+        )
         solver_name = getattr(self.sre_solver, "name", type(self.sre_solver).__name__)
         return (
             solver_name,
@@ -353,41 +481,249 @@ class DuelingDoubleDqnSreAgent:
         # Backward-compatible alias retained for older tests/notebooks.
         return self._sre_batch_key(q_tensor)
 
-    def _solve_sre(self, q_tensor):
-        solve_start = time.perf_counter()
+    def _sre_state_key(self, state):
+        if state is None:
+            return None
+        state_vec = self._state_to_vector(state)
+        state_key = np.ascontiguousarray(
+            np.round(state_vec, int(self.config.sre_state_cache_round_digits)),
+            dtype=np.float32,
+        )
+        return state_key.tobytes()
+
+    @staticmethod
+    def _copy_policies(policies):
+        return [np.asarray(policy, dtype=np.float32).copy() for policy in policies]
+
+    def _policies_valid(self, policies):
+        return (
+            policies is not None
+            and len(policies) == self.config.num_agents
+            and all(
+                np.asarray(policy).shape[0] == self.config.num_actions
+                for policy in policies
+            )
+        )
+
+    def _store_sre_policy_cache(self, cache_key, policies, *, state_key=None, metadata=None):
+        if not self.config.sre_policy_cache_enabled:
+            return
+        max_entries = max(0, int(self.config.sre_policy_cache_size))
+        if max_entries <= 0 or not self._policies_valid(policies):
+            return
+        entry = {
+            "policies": self._copy_policies(policies),
+            "state_key": state_key,
+            "metadata": dict(metadata or {}),
+            "stored_at_update": int(self._update_calls),
+            "uses": 0,
+        }
+        if cache_key in self._sre_policy_cache:
+            self._sre_policy_cache.move_to_end(cache_key)
+        self._sre_policy_cache[cache_key] = entry
+        self._last_sre_cache_key = cache_key
+        if state_key is not None:
+            self._sre_state_policy_keys[state_key] = cache_key
+        self.sre_cache_stores += 1
+        while len(self._sre_policy_cache) > max_entries:
+            evicted_key, evicted_entry = self._sre_policy_cache.popitem(last=False)
+            self.sre_cache_evictions += 1
+            evicted_state_key = evicted_entry.get("state_key")
+            if (
+                evicted_state_key is not None
+                and self._sre_state_policy_keys.get(evicted_state_key) == evicted_key
+            ):
+                self._sre_state_policy_keys.pop(evicted_state_key, None)
+            if self._last_sre_cache_key == evicted_key:
+                self._last_sre_cache_key = next(
+                    reversed(self._sre_policy_cache), None
+                )
+
+    def _cache_candidate_keys(self, cache_key, state_key):
+        candidates = []
+        if state_key is not None:
+            state_cache_key = self._sre_state_policy_keys.get(state_key)
+            if state_cache_key is not None and state_cache_key != cache_key:
+                candidates.append(state_cache_key)
+        if self._last_sre_cache_key is not None and self._last_sre_cache_key != cache_key:
+            candidates.append(self._last_sre_cache_key)
+        seen = set()
+        ordered = []
+        for candidate in candidates:
+            if candidate not in seen and candidate in self._sre_policy_cache:
+                ordered.append(candidate)
+                seen.add(candidate)
+        return ordered
+
+    def _lookup_sre_policy_cache(self, q_tensor, cache_key, state_key=None, *, allow_reuse=True):
+        start = time.perf_counter()
         try:
+            if not self.config.sre_policy_cache_enabled:
+                return None, None
+
+            entry = self._sre_policy_cache.get(cache_key)
+            if entry is not None:
+                self._sre_policy_cache.move_to_end(cache_key)
+                entry["uses"] = int(entry.get("uses", 0)) + 1
+                self._last_sre_cache_key = cache_key
+                policies = self._copy_policies(entry["policies"])
+                if allow_reuse:
+                    self.sre_cache_exact_hits += 1
+                    return policies, self._copy_policies(policies)
+                self.sre_cache_forced_refreshes += 1
+                self.sre_cache_warm_start_uses += 1
+                return None, policies
+
+            warm_policies = None
+            best_gap = None
+            for candidate_key in self._cache_candidate_keys(cache_key, state_key):
+                candidate = self._sre_policy_cache[candidate_key]
+                candidate_policies = self._copy_policies(candidate["policies"])
+                if warm_policies is None:
+                    warm_policies = candidate_policies
+                if allow_reuse and self.config.sre_approx_cache_enabled:
+                    validation_start = time.perf_counter()
+                    try:
+                        gap, _, _ = robust_exploitability(
+                            q_tensor,
+                            candidate_policies,
+                            self.config.epsilon_robust,
+                        )
+                    finally:
+                        self.sre_cache_validation_time_sum += (
+                            time.perf_counter() - validation_start
+                        )
+                        self.sre_cache_validation_count += 1
+                    if best_gap is None or gap < best_gap:
+                        best_gap = gap
+                        warm_policies = candidate_policies
+                    if gap <= float(self.config.sre_cache_exploitability_tol):
+                        candidate["uses"] = int(candidate.get("uses", 0)) + 1
+                        self._sre_policy_cache.move_to_end(candidate_key)
+                        self.sre_cache_approx_hits += 1
+                        self._store_sre_policy_cache(
+                            cache_key,
+                            candidate_policies,
+                            state_key=state_key,
+                            metadata={
+                                "source": "verified_cached_policy",
+                                "robust_exploitability": float(gap),
+                            },
+                        )
+                        return self._copy_policies(candidate_policies), self._copy_policies(candidate_policies)
+
+            self.sre_cache_misses += 1
+            if warm_policies is not None:
+                self.sre_cache_warm_start_uses += 1
+            return None, warm_policies
+        finally:
+            self._record_cache_lookup_time(time.perf_counter() - start)
+
+    def _call_sre_solver(self, q_tensor, *, initial_policies=None):
+        kwargs = {
+            "epsilon": self.config.epsilon_robust,
+            "num_repeats": self.config.sre_num_repeats,
+            "include_pure_starts": self.config.sre_include_pure_starts,
+            "exploitability_tol": self.config.sre_solver_exploitability_tol,
+            "early_exit": self.config.sre_solver_early_exit,
+        }
+        if initial_policies is not None:
+            kwargs["initial_policies"] = initial_policies
+        while True:
             try:
-                result = self.sre_solver.solve(
-                    q_tensor,
-                    epsilon=self.config.epsilon_robust,
-                    num_repeats=self.config.sre_num_repeats,
-                    include_pure_starts=self.config.sre_include_pure_starts,
-                )
+                return self.sre_solver.solve(q_tensor, **kwargs)
             except TypeError as exc:
-                if "include_pure_starts" not in str(exc):
+                message = str(exc)
+                removed = False
+                for key in (
+                    "initial_policies",
+                    "exploitability_tol",
+                    "early_exit",
+                    "include_pure_starts",
+                ):
+                    if key in kwargs and key in message:
+                        kwargs.pop(key, None)
+                        removed = True
+                if not removed:
                     raise
-                result = self.sre_solver.solve(
-                    q_tensor,
-                    epsilon=self.config.epsilon_robust,
-                    num_repeats=self.config.sre_num_repeats,
-                )
-        except Exception:
-            self._record_sre_solve_time(time.perf_counter() - solve_start)
-            return self._uniform_policies()
-        self._record_sre_solve_time(time.perf_counter() - solve_start)
 
-        if not result.success or not result.policies:
-            return self._uniform_policies()
+    def _call_sre_solver_batch(self, q_tensors, *, initial_policies_batch=None):
+        kwargs = {
+            "epsilon": self.config.epsilon_robust,
+            "num_repeats": self.config.sre_num_repeats,
+            "include_pure_starts": self.config.sre_include_pure_starts,
+            "exploitability_tol": self.config.sre_solver_exploitability_tol,
+            "early_exit": self.config.sre_solver_early_exit,
+        }
+        if initial_policies_batch is not None:
+            kwargs["initial_policies_batch"] = initial_policies_batch
+        while True:
+            try:
+                return self.sre_solver.solve_batch(q_tensors, **kwargs)
+            except TypeError as exc:
+                message = str(exc)
+                removed = False
+                for key in (
+                    "initial_policies_batch",
+                    "exploitability_tol",
+                    "early_exit",
+                    "include_pure_starts",
+                ):
+                    if key in kwargs and key in message:
+                        kwargs.pop(key, None)
+                        removed = True
+                if not removed:
+                    raise
 
+    def _policies_from_sre_result(self, result):
+        if result is None or not result.success or not result.policies:
+            self.sre_uniform_fallback_count += 1
+            return self._uniform_policies(), False
         policies = [self._normalize_policy(policy) for policy in result.policies]
         if (
             len(policies) != self.config.num_agents
             or any(policy.shape[0] != self.config.num_actions for policy in policies)
         ):
-            policies = self._uniform_policies()
+            self.sre_uniform_fallback_count += 1
+            return self._uniform_policies(), False
+        return policies, True
+
+    def _solve_sre(self, q_tensor, state_key=None):
+        q_tensor = np.asarray(q_tensor, dtype=np.float32)
+        cache_key = self._sre_batch_key(q_tensor)
+        cached_policies, warm_policies = self._lookup_sre_policy_cache(
+            q_tensor, cache_key, state_key=state_key
+        )
+        if cached_policies is not None:
+            return cached_policies
+
+        solve_start = time.perf_counter()
+        try:
+            result = self._call_sre_solver(q_tensor, initial_policies=warm_policies)
+        except Exception:
+            self._record_sre_solve_time(time.perf_counter() - solve_start)
+            self.sre_uniform_fallback_count += 1
+            return self._uniform_policies()
+        self._record_sre_solve_time(time.perf_counter() - solve_start)
+
+        policies, cacheable = self._policies_from_sre_result(result)
+        if cacheable:
+            self._store_sre_policy_cache(
+                cache_key,
+                policies,
+                state_key=state_key,
+                metadata=getattr(result, "metadata", None),
+            )
         return policies
 
-    def _solve_sre_batch(self, q_tensors):
+    def _solve_sre_batch(
+        self,
+        q_tensors,
+        states=None,
+        *,
+        allow_solver=True,
+        allow_cache_reuse=True,
+    ):
         q_tensors = np.asarray(q_tensors, dtype=np.float32)
         expected_ndim = self.config.num_agents + 2
         if q_tensors.ndim != expected_ndim:
@@ -401,9 +737,17 @@ class DuelingDoubleDqnSreAgent:
                 f"got {q_tensors.shape[1:]}."
             )
 
+        if states is not None:
+            states = np.asarray(states, dtype=np.float32)
+            if states.shape[0] != q_tensors.shape[0]:
+                raise ValueError(
+                    "states must be None or have the same leading dimension as q_tensors."
+                )
+
         policies_by_index = [None] * q_tensors.shape[0]
         unique_q_tensors = []
         unique_keys = []
+        unique_state_keys = []
         key_to_unique_index = {}
 
         for batch_index, q_tensor in enumerate(q_tensors):
@@ -414,82 +758,90 @@ class DuelingDoubleDqnSreAgent:
                 key_to_unique_index[batch_key] = unique_index
                 unique_q_tensors.append(q_tensor)
                 unique_keys.append(batch_key)
+                state_key = None
+                if states is not None:
+                    state_key = self._sre_state_key(states[batch_index])
+                unique_state_keys.append(state_key)
             policies_by_index[batch_index] = unique_index
 
+        unique_policies = [None] * len(unique_q_tensors)
+        pending_q_tensors = []
+        pending_indices = []
+        pending_warm_policies = []
         if unique_q_tensors:
+            for unique_index, (q_tensor, batch_key, state_key) in enumerate(
+                zip(unique_q_tensors, unique_keys, unique_state_keys)
+            ):
+                cached_policies, warm_policies = self._lookup_sre_policy_cache(
+                    q_tensor,
+                    batch_key,
+                    state_key=state_key,
+                    allow_reuse=allow_cache_reuse,
+                )
+                if cached_policies is not None:
+                    unique_policies[unique_index] = cached_policies
+                else:
+                    pending_q_tensors.append(q_tensor)
+                    pending_indices.append(unique_index)
+                    pending_warm_policies.append(warm_policies)
+
+        if pending_q_tensors and not allow_solver:
+            self.target_equilibrium_cache_only_misses += len(pending_q_tensors)
+            for unique_index, warm_policies in zip(pending_indices, pending_warm_policies):
+                if self._policies_valid(warm_policies):
+                    unique_policies[unique_index] = self._copy_policies(warm_policies)
+                    self.target_equilibrium_stale_policy_reuses += 1
+                else:
+                    unique_policies[unique_index] = self._uniform_policies()
+                    self.sre_uniform_fallback_count += 1
+            pending_q_tensors = []
+            pending_indices = []
+            pending_warm_policies = []
+
+        if pending_q_tensors:
             solve_start = time.perf_counter()
             try:
                 if hasattr(self.sre_solver, "solve_batch"):
-                    try:
-                        results = self.sre_solver.solve_batch(
-                            unique_q_tensors,
-                            epsilon=self.config.epsilon_robust,
-                            num_repeats=self.config.sre_num_repeats,
-                            include_pure_starts=self.config.sre_include_pure_starts,
-                        )
-                    except TypeError as exc:
-                        if "include_pure_starts" not in str(exc):
-                            raise
-                        results = self.sre_solver.solve_batch(
-                            unique_q_tensors,
-                            epsilon=self.config.epsilon_robust,
-                            num_repeats=self.config.sre_num_repeats,
-                        )
+                    results = self._call_sre_solver_batch(
+                        pending_q_tensors,
+                        initial_policies_batch=pending_warm_policies,
+                    )
                 else:
                     results = [
-                        self._solve_sre_result(q_tensor)
-                        for q_tensor in unique_q_tensors
+                        self._solve_sre_result(q_tensor, initial_policies=warm_policies)
+                        for q_tensor, warm_policies in zip(
+                            pending_q_tensors, pending_warm_policies
+                        )
                     ]
             except Exception:
                 elapsed = time.perf_counter() - solve_start
-                self._record_sre_solve_time(elapsed, count=len(unique_q_tensors))
-                results = [None] * len(unique_q_tensors)
+                self._record_sre_solve_time(elapsed, count=len(pending_q_tensors))
+                results = [None] * len(pending_q_tensors)
             else:
                 elapsed = time.perf_counter() - solve_start
-                self._record_sre_solve_time(elapsed, count=len(unique_q_tensors))
+                self._record_sre_solve_time(elapsed, count=len(pending_q_tensors))
 
-            unique_policies = []
-            for q_tensor, batch_key, result in zip(unique_q_tensors, unique_keys, results):
-                if result is None or not result.success or not result.policies:
-                    policies = self._uniform_policies()
-                else:
-                    policies = [
-                        self._normalize_policy(policy) for policy in result.policies
-                    ]
-                    if (
-                        len(policies) != self.config.num_agents
-                        or any(
-                            policy.shape[0] != self.config.num_actions
-                            for policy in policies
-                        )
-                    ):
-                        policies = self._uniform_policies()
-                unique_policies.append(policies)
+            for unique_index, result in zip(pending_indices, results):
+                policies, cacheable = self._policies_from_sre_result(result)
+                unique_policies[unique_index] = policies
+                if cacheable:
+                    self._store_sre_policy_cache(
+                        unique_keys[unique_index],
+                        policies,
+                        state_key=unique_state_keys[unique_index],
+                        metadata=getattr(result, "metadata", None),
+                    )
 
-            for batch_index, entry in enumerate(policies_by_index):
-                if isinstance(entry, int):
-                    policies_by_index[batch_index] = [
-                        policy.copy() for policy in unique_policies[entry]
-                    ]
+        for batch_index, entry in enumerate(policies_by_index):
+            if isinstance(entry, int):
+                policies_by_index[batch_index] = [
+                    policy.copy() for policy in unique_policies[entry]
+                ]
 
         return policies_by_index
 
-    def _solve_sre_result(self, q_tensor):
-        try:
-            return self.sre_solver.solve(
-                q_tensor,
-                epsilon=self.config.epsilon_robust,
-                num_repeats=self.config.sre_num_repeats,
-                include_pure_starts=self.config.sre_include_pure_starts,
-            )
-        except TypeError as exc:
-            if "include_pure_starts" not in str(exc):
-                raise
-            return self.sre_solver.solve(
-                q_tensor,
-                epsilon=self.config.epsilon_robust,
-                num_repeats=self.config.sre_num_repeats,
-            )
+    def _solve_sre_result(self, q_tensor, initial_policies=None):
+        return self._call_sre_solver(q_tensor, initial_policies=initial_policies)
 
     def _sre_expected_values(self, q_tensor, policies):
         expected = q_tensor
@@ -520,9 +872,36 @@ class DuelingDoubleDqnSreAgent:
         with torch.no_grad():
             q_tensor = self.q_net(state_t).squeeze(0).detach().cpu().numpy()
 
-        policies = self._solve_sre(q_tensor)
+        policies = self._solve_sre(q_tensor, state_key=self._sre_state_key(state_vec))
         my_policy = self._normalize_policy(policies[agent_id])
         return int(np.random.choice(self.config.num_actions, p=my_policy))
+
+    def act_joint(self, state):
+        """Sample one joint action, solving the SRE policy profile at most once."""
+        state_vec = self._state_to_vector(state)
+        explore_mask = (
+            np.random.rand(self.config.num_agents) < self.config.epsilon_explore
+        )
+        actions = np.empty(self.config.num_agents, dtype=np.int64)
+        for agent_id, explore in enumerate(explore_mask):
+            if explore:
+                actions[agent_id] = np.random.choice(self.config.num_actions)
+
+        if np.all(explore_mask):
+            return actions.astype(int).tolist()
+
+        state_t = torch.as_tensor(
+            state_vec, dtype=torch.float32, device=self.device
+        ).unsqueeze(0)
+        with torch.no_grad():
+            q_tensor = self.q_net(state_t).squeeze(0).detach().cpu().numpy()
+
+        policies = self._solve_sre(q_tensor, state_key=self._sre_state_key(state_vec))
+        for agent_id, explore in enumerate(explore_mask):
+            if not explore:
+                policy = self._normalize_policy(policies[agent_id])
+                actions[agent_id] = np.random.choice(self.config.num_actions, p=policy)
+        return actions.astype(int).tolist()
 
     def update(self, state, joint_actions, joint_rewards, next_state, done=False, batch_size=64):
         state_vec = self._state_to_vector(state)
@@ -577,7 +956,24 @@ class DuelingDoubleDqnSreAgent:
             next_online = self.q_net(next_states_t).detach().cpu().numpy()
             next_target = self.target_net(next_states_t).detach().cpu().numpy()
 
-            policies_batch = self._solve_sre_batch(next_online)
+            gradient_step_index = len(self.update_times) + 1
+            target_equilibrium_update_steps = max(
+                1, int(self.config.target_equilibrium_update_steps)
+            )
+            refresh_target_equilibria = (
+                (gradient_step_index - 1) % target_equilibrium_update_steps == 0
+            )
+            if refresh_target_equilibria:
+                self.target_equilibrium_refresh_count += 1
+            else:
+                self.target_equilibrium_cache_only_count += 1
+
+            policies_batch = self._solve_sre_batch(
+                next_online,
+                states=next_states_arr,
+                allow_solver=refresh_target_equilibria,
+                allow_cache_reuse=not refresh_target_equilibria,
+            )
             next_values = self._sre_expected_values_batch(next_target, policies_batch)
 
             next_values_t = torch.as_tensor(
@@ -642,6 +1038,15 @@ class DuelingDoubleDqnSreAgent:
             "train_every": self.config.train_every,
             "network_type": self.config.network_type,
             "q_hidden_dims": tuple(self.config.q_hidden_dims),
+            "sre_policy_cache_enabled": self.config.sre_policy_cache_enabled,
+            "sre_policy_cache_size": self.config.sre_policy_cache_size,
+            "sre_policy_cache_round_digits": self.config.sre_policy_cache_round_digits,
+            "sre_state_cache_round_digits": self.config.sre_state_cache_round_digits,
+            "sre_approx_cache_enabled": self.config.sre_approx_cache_enabled,
+            "sre_cache_exploitability_tol": self.config.sre_cache_exploitability_tol,
+            "sre_solver_exploitability_tol": self.config.sre_solver_exploitability_tol,
+            "sre_solver_early_exit": self.config.sre_solver_early_exit,
+            "target_equilibrium_update_steps": self.config.target_equilibrium_update_steps,
             "update_calls": self._update_calls,
             "buffer_size": self.replay_buffer.buffer.maxlen,
             "update_times": list(self.update_times),
@@ -650,6 +1055,11 @@ class DuelingDoubleDqnSreAgent:
             "sre_solve_time_sumsq": self.sre_solve_time_sumsq,
             "sre_solve_time_min": self.sre_solve_time_min,
             "sre_solve_time_max": self.sre_solve_time_max,
+            "target_equilibrium_refresh_count": self.target_equilibrium_refresh_count,
+            "target_equilibrium_cache_only_count": self.target_equilibrium_cache_only_count,
+            "target_equilibrium_cache_only_misses": self.target_equilibrium_cache_only_misses,
+            "target_equilibrium_stale_policy_reuses": self.target_equilibrium_stale_policy_reuses,
+            "sre_cache_summary": self.get_sre_cache_summary(),
             "sre_solver_name": getattr(
                 self.sre_solver, "name", type(self.sre_solver).__name__
             ),
@@ -683,6 +1093,15 @@ class DuelingDoubleDqnSreAgent:
         cfg.train_every = max(1, int(checkpoint.get("train_every", cfg.train_every)))
         cfg.network_type = checkpoint.get("network_type", cfg.network_type)
         cfg.q_hidden_dims = tuple(checkpoint.get("q_hidden_dims", cfg.q_hidden_dims))
+        cfg.sre_policy_cache_enabled = bool(checkpoint.get("sre_policy_cache_enabled", cfg.sre_policy_cache_enabled))
+        cfg.sre_policy_cache_size = int(checkpoint.get("sre_policy_cache_size", cfg.sre_policy_cache_size))
+        cfg.sre_policy_cache_round_digits = int(checkpoint.get("sre_policy_cache_round_digits", cfg.sre_policy_cache_round_digits))
+        cfg.sre_state_cache_round_digits = int(checkpoint.get("sre_state_cache_round_digits", cfg.sre_state_cache_round_digits))
+        cfg.sre_approx_cache_enabled = bool(checkpoint.get("sre_approx_cache_enabled", cfg.sre_approx_cache_enabled))
+        cfg.sre_cache_exploitability_tol = float(checkpoint.get("sre_cache_exploitability_tol", cfg.sre_cache_exploitability_tol))
+        cfg.sre_solver_exploitability_tol = float(checkpoint.get("sre_solver_exploitability_tol", cfg.sre_solver_exploitability_tol))
+        cfg.sre_solver_early_exit = bool(checkpoint.get("sre_solver_early_exit", cfg.sre_solver_early_exit))
+        cfg.target_equilibrium_update_steps = max(1, int(checkpoint.get("target_equilibrium_update_steps", cfg.target_equilibrium_update_steps)))
         self.q_tensor_shape = tuple([cfg.num_actions] * cfg.num_agents + [cfg.num_agents])
         self._update_calls = int(checkpoint.get("update_calls", self._update_calls))
 
@@ -697,6 +1116,10 @@ class DuelingDoubleDqnSreAgent:
         self.sre_solve_time_sumsq = checkpoint.get("sre_solve_time_sumsq", self.sre_solve_time_sumsq)
         self.sre_solve_time_min = checkpoint.get("sre_solve_time_min", self.sre_solve_time_min)
         self.sre_solve_time_max = checkpoint.get("sre_solve_time_max", self.sre_solve_time_max)
+        self.target_equilibrium_refresh_count = int(checkpoint.get("target_equilibrium_refresh_count", self.target_equilibrium_refresh_count))
+        self.target_equilibrium_cache_only_count = int(checkpoint.get("target_equilibrium_cache_only_count", self.target_equilibrium_cache_only_count))
+        self.target_equilibrium_cache_only_misses = int(checkpoint.get("target_equilibrium_cache_only_misses", self.target_equilibrium_cache_only_misses))
+        self.target_equilibrium_stale_policy_reuses = int(checkpoint.get("target_equilibrium_stale_policy_reuses", self.target_equilibrium_stale_policy_reuses))
 
     def close(self):
         if hasattr(self, "sre_solver") and self.sre_solver is not None:

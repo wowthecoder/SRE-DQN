@@ -1,5 +1,6 @@
 # MF-DSRQ config for MAgent2 battle_v4
 env_name: battle_v4
+env_backend: magent2
 map_size: 45
 max_cycles: 400
 

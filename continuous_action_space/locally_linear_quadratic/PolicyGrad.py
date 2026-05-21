@@ -6,12 +6,8 @@ from copy import deepcopy as dc
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 
-try:
-    from continuous_action_space.locally_linear_quadratic.simulation_lib import ExperienceReplay
-    from continuous_action_space.locally_linear_quadratic.NashRL import collect_parallel_rollouts
-except ModuleNotFoundError:
-    from simulation_lib import ExperienceReplay
-    from NashRL import collect_parallel_rollouts
+from continuous_action_space.trading_competition.simulation_lib import ExperienceReplay
+from continuous_action_space.trading_competition.training import collect_parallel_rollouts
 
 class Policy(torch.nn.Module):
 

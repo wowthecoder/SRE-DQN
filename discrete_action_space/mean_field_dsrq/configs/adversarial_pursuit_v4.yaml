@@ -1,21 +1,22 @@
 # MF-DSRQ config for MAgent2 adversarial_pursuit_v4
 env_name: adversarial_pursuit_v4
+env_backend: magent2
 map_size: 45
 max_cycles: 500
 
 # Two types with different action spaces:
-# predators have 13 actions, prey have 5 actions.
+# predators have 13 actions, prey have 9 actions in the current MAgent2 build.
 type_prefixes:
   predator: "predator_"
   prey: "prey_"
 
 # Neighbor action space for each type.
 # Predators observe predator neighbors (13 actions).
-# Prey observe prey neighbors (5 actions).
+# Prey observe prey neighbors (9 actions).
 # Asymmetric: specify overrides explicitly.
 n_nbr_actions_override:
   predator: 13
-  prey: 5
+  prey: 9
 
 # TV robustness
 epsilon_tv_start: 0.10

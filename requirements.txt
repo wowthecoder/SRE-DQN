@@ -9,6 +9,7 @@ pytest
 torchrl
 benchmarl
 vmas
+magent2
 pandas
 scipy
 lemkelcp==0.1

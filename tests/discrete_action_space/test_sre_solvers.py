@@ -140,6 +140,174 @@ def test_sre_cache_key_separates_solver_names():
         agent.close()
 
 
+def test_dueling_double_dqn_reuses_policy_cache_for_repeated_state():
+    pytest.importorskip("torch")
+    from dueling_double_dqn_sre import DuelingDoubleDqnSreAgent, DuelingDoubleDqnSreAgentConfig
+
+    solver = _FakeSolver()
+    agent = DuelingDoubleDqnSreAgent(
+        DuelingDoubleDqnSreAgentConfig(
+            agent_id=0,
+            obs_dim=4,
+            num_agents=2,
+            num_actions=2,
+            epsilon_explore=0.0,
+            learning_starts=999,
+            use_gpu=False,
+            sre_solver=solver,
+        )
+    )
+    try:
+        state = np.zeros(4, dtype=np.float32)
+        assert agent.act(state, agent_id=0) == 0
+        assert agent.act(state, agent_id=0) == 0
+        summary = agent.get_sre_cache_summary()
+        assert solver.calls == 1
+        assert summary["misses"] == 1
+        assert summary["exact_hits"] == 1
+        assert summary["path_solves_avoided"] == 1
+    finally:
+        agent.close()
+
+
+def test_dueling_double_dqn_act_joint_solves_once_for_all_agents():
+    pytest.importorskip("torch")
+    from dueling_double_dqn_sre import DuelingDoubleDqnSreAgent, DuelingDoubleDqnSreAgentConfig
+
+    class FakeNPlayerSolver:
+        name = "fake_nplayer"
+
+        def __init__(self):
+            self.calls = 0
+
+        def solve(self, q_tensor, epsilon, *, num_repeats=20, round_digits=4):
+            del epsilon, num_repeats, round_digits
+            self.calls += 1
+            assert np.asarray(q_tensor).shape == (2, 2, 2, 3)
+            return SreSolveResult(
+                policies=[
+                    np.array([1.0, 0.0]),
+                    np.array([0.0, 1.0]),
+                    np.array([1.0, 0.0]),
+                ],
+                solutions=[],
+                utilities_sr=[],
+                utilities_nominal=[],
+                success=True,
+            )
+
+        def close(self):
+            pass
+
+    solver = FakeNPlayerSolver()
+    agent = DuelingDoubleDqnSreAgent(
+        DuelingDoubleDqnSreAgentConfig(
+            agent_id=0,
+            obs_dim=5,
+            num_agents=3,
+            num_actions=2,
+            epsilon_explore=0.0,
+            learning_starts=99,
+            use_gpu=False,
+            sre_solver=solver,
+        )
+    )
+    try:
+        actions = agent.act_joint(np.zeros(5, dtype=np.float32))
+        assert actions == [0, 1, 0]
+        assert solver.calls == 1
+    finally:
+        agent.close()
+
+
+def test_target_equilibrium_frequency_reuses_cache_between_refreshes():
+    pytest.importorskip("torch")
+    from dueling_double_dqn_sre import DuelingDoubleDqnSreAgent, DuelingDoubleDqnSreAgentConfig
+
+    class FakeBatchSolver:
+        name = "fake_batch_solver"
+
+        def __init__(self):
+            self.batch_calls = 0
+            self.batch_sizes = []
+            self.initial_policies_batches = []
+
+        def solve_batch(
+            self,
+            q_tensors,
+            epsilon,
+            *,
+            num_repeats=20,
+            include_pure_starts=True,
+            initial_policies_batch=None,
+            exploitability_tol=1e-4,
+            early_exit=True,
+        ):
+            del epsilon, num_repeats, include_pure_starts, exploitability_tol, early_exit
+            self.batch_calls += 1
+            self.batch_sizes.append(len(q_tensors))
+            self.initial_policies_batches.append(initial_policies_batch)
+            return [
+                SreSolveResult(
+                    policies=[
+                        np.array([1.0, 0.0], dtype=np.float64),
+                        np.array([0.0, 1.0], dtype=np.float64),
+                    ],
+                    solutions=[],
+                    utilities_sr=[],
+                    utilities_nominal=[],
+                    success=True,
+                )
+                for _ in q_tensors
+            ]
+
+        def close(self):
+            pass
+
+    solver = FakeBatchSolver()
+    agent = DuelingDoubleDqnSreAgent(
+        DuelingDoubleDqnSreAgentConfig(
+            obs_dim=4,
+            num_agents=2,
+            num_actions=2,
+            lr=0.0,
+            batch_size=1,
+            learning_starts=1,
+            train_every=1,
+            target_equilibrium_update_steps=4,
+            use_gpu=False,
+            sre_solver=solver,
+            sre_approx_cache_enabled=False,
+        )
+    )
+    try:
+        state = np.zeros(4, dtype=np.float32)
+        next_state = np.ones(4, dtype=np.float32)
+        for _ in range(5):
+            loss = agent.update(
+                state,
+                [0, 1],
+                [1.0, 0.0],
+                next_state,
+                done=np.zeros(2, dtype=np.float32),
+                batch_size=1,
+            )
+            assert loss is not None
+
+        summary = agent.get_sre_cache_summary()
+        assert solver.batch_calls == 2
+        assert solver.batch_sizes == [1, 1]
+        assert solver.initial_policies_batches[0][0] is None
+        assert solver.initial_policies_batches[1][0] is not None
+        assert summary["target_equilibrium_update_steps"] == 4
+        assert summary["target_equilibrium_refreshes"] == 2
+        assert summary["target_equilibrium_cache_only_steps"] == 3
+        assert summary["exact_hits"] == 3
+        assert summary["forced_refreshes"] == 1
+    finally:
+        agent.close()
+
+
 def test_collect_timing_stats_can_omit_episode_durations():
     timing = collect_timing_stats(
         [],

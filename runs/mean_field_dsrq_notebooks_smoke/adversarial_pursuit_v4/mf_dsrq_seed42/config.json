@@ -1,0 +1,39 @@
+{
+  "env_name": "adversarial_pursuit_v4",
+  "env_backend": "magent2",
+  "map_size": 16,
+  "max_cycles": 5,
+  "type_prefixes": {
+    "predator": "predator_",
+    "prey": "prey_"
+  },
+  "n_nbr_actions_override": {
+    "predator": 13,
+    "prey": 9
+  },
+  "epsilon_tv_start": 0.1,
+  "epsilon_tv_end": 0.02,
+  "epsilon_tv_decay_frac": 1.0,
+  "beta_start": 1.0,
+  "beta_end": 5.0,
+  "beta_anneal_frac": 0.5,
+  "epsilon_explore_start": 1.0,
+  "epsilon_explore_end": 0.05,
+  "epsilon_explore_decay_frac": 0.2,
+  "gamma": 0.95,
+  "lr": 0.0001,
+  "batch_size": 8,
+  "buffer_capacity": 10000,
+  "learning_starts": 1000,
+  "train_every": 4,
+  "target_tau": 0.005,
+  "grad_clip": 10.0,
+  "ema_momentum": 0.5,
+  "total_steps": 4,
+  "num_envs": 1,
+  "seed": 42,
+  "output_dir": "runs/mean_field_dsrq_notebooks_smoke",
+  "log_interval": 2,
+  "save_interval": 4,
+  "use_gpu": false
+}

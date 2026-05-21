@@ -14,6 +14,8 @@ venv/
 # reference repositories
 strategically-robust-game-theory/
 sre-sandbox/
+Nash-DQN/
+nfg_transformer_ref/
 
 AGENTs.md
 CLAUDE.md

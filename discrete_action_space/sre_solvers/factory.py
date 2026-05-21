@@ -3,6 +3,7 @@ from .n_player.path_mcp_nplayer import (
     PathMcpNPlayerSreSolver,
     ProcessPoolPathMcpNPlayerSreSolver,
 )
+from .nfg_transformer import NfgTransformerSreSolver
 from .path_c import PathCBimatrixSreSolver, ProcessPoolPathCBimatrixSreSolver
 
 
@@ -13,6 +14,7 @@ def make_sre_solver(
     max_workers=4,
     start_method=None,
     random_seed=None,
+    **kwargs,
 ):
     if solver_name == "path_c":
         kwargs = {}
@@ -49,4 +51,9 @@ def make_sre_solver(
         if pathwrap_path is not None:
             kwargs["pathwrap_path"] = pathwrap_path
         return ProcessPoolPathMcpNPlayerSreSolver(**kwargs)
+    if solver_name in {"nfg_transformer_sre", "nfg_sre"}:
+        solver_kwargs = dict(kwargs)
+        if pathwrap_path is not None:
+            solver_kwargs["pathwrap_path"] = pathwrap_path
+        return NfgTransformerSreSolver(**solver_kwargs)
     raise ValueError(f"Unknown SRE solver: {solver_name}")

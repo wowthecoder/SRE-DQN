@@ -9,6 +9,11 @@ from .n_player.path_mcp_nplayer import (
     PathMcpNPlayerSreSolver,
     ProcessPoolPathMcpNPlayerSreSolver,
 )
+from .nfg_transformer import (
+    NfgTransformerConfig,
+    NfgTransformerSreNet,
+    NfgTransformerSreSolver,
+)
 from .nplayer_common import (
     robust_action_values,
     robust_exploitability,
@@ -27,6 +32,9 @@ __all__ = [
     "ProcessPoolPathCBimatrixSreSolver",
     "PathMcpNPlayerSreSolver",
     "ProcessPoolPathMcpNPlayerSreSolver",
+    "NfgTransformerConfig",
+    "NfgTransformerSreNet",
+    "NfgTransformerSreSolver",
     "LemkeLcpBimatrixSreSolver",
     "ProcessPoolLemkeLcpBimatrixSreSolver",
     "make_sre_solver",

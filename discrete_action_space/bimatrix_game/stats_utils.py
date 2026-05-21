@@ -96,6 +96,10 @@ def collect_timing_stats(
             agent_backend_solve_summary = solver.get_solve_time_summary()
         else:
             agent_backend_solve_summary = summarize_durations([])
+        if hasattr(agent, "get_sre_cache_summary"):
+            agent_sre_cache_summary = agent.get_sre_cache_summary()
+        else:
+            agent_sre_cache_summary = {}
         agent_update_times = list(getattr(agent, "update_times", []) or [])
         sre_solve_summaries.append(agent_sre_solve_summary)
         backend_solve_summaries.append(agent_backend_solve_summary)
@@ -106,6 +110,7 @@ def collect_timing_stats(
                 "sre_solve_time": agent_sre_solve_summary,
                 "backend_solve_time": agent_backend_solve_summary,
                 "path_solve_time": agent_backend_solve_summary,
+                "sre_policy_cache": agent_sre_cache_summary,
                 "update_time": summarize_durations(agent_update_times),
             }
         )
@@ -121,6 +126,33 @@ def collect_timing_stats(
         "path_solve_time": combine_duration_summaries(backend_solve_summaries),
         "agents": update_times_by_agent,
     }
+    cache_summaries = [
+        agent.get("sre_policy_cache", {})
+        for agent in update_times_by_agent
+        if agent.get("sre_policy_cache")
+    ]
+    if cache_summaries:
+        timing["sre_policy_cache"] = {
+            "requests": int(sum(summary.get("requests", 0) or 0 for summary in cache_summaries)),
+            "exact_hits": int(sum(summary.get("exact_hits", 0) or 0 for summary in cache_summaries)),
+            "approx_hits": int(sum(summary.get("approx_hits", 0) or 0 for summary in cache_summaries)),
+            "misses": int(sum(summary.get("misses", 0) or 0 for summary in cache_summaries)),
+            "path_solves_avoided": int(sum(summary.get("path_solves_avoided", 0) or 0 for summary in cache_summaries)),
+            "warm_start_uses": int(sum(summary.get("warm_start_uses", 0) or 0 for summary in cache_summaries)),
+            "forced_refreshes": int(sum(summary.get("forced_refreshes", 0) or 0 for summary in cache_summaries)),
+            "stores": int(sum(summary.get("stores", 0) or 0 for summary in cache_summaries)),
+            "evictions": int(sum(summary.get("evictions", 0) or 0 for summary in cache_summaries)),
+            "validation_count": int(sum(summary.get("validation_count", 0) or 0 for summary in cache_summaries)),
+            "target_equilibrium_refreshes": int(sum(summary.get("target_equilibrium_refreshes", 0) or 0 for summary in cache_summaries)),
+            "target_equilibrium_cache_only_steps": int(sum(summary.get("target_equilibrium_cache_only_steps", 0) or 0 for summary in cache_summaries)),
+            "target_equilibrium_cache_only_misses": int(sum(summary.get("target_equilibrium_cache_only_misses", 0) or 0 for summary in cache_summaries)),
+            "target_equilibrium_stale_policy_reuses": int(sum(summary.get("target_equilibrium_stale_policy_reuses", 0) or 0 for summary in cache_summaries)),
+        }
+        requests = timing["sre_policy_cache"]["requests"]
+        avoided = timing["sre_policy_cache"]["path_solves_avoided"]
+        timing["sre_policy_cache"]["hit_rate"] = (
+            None if requests == 0 else float(avoided / requests)
+        )
     if include_episode_durations:
         timing["episode_durations_seconds"] = [
             float(duration) for duration in episode_durations

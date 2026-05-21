@@ -23,8 +23,12 @@ where `ā'` is the **observed EMA mean action** from the rollout — no per-stat
 | `mf_replay_buffer.py` | Ring buffer storing `(obs, action, reward, next_obs, ā_t, ā_{t+1}, done, valid)` |
 | `mf_dsrq_agent.py` | Per-type training agent: act, push, train_step |
 | `magent_env_wrapper.py` | PettingZoo MAgent2 wrapper with EMA mean-action tracking |
+| `benchmarl_magent2.py` | BenchMARL/MAgent2 helpers for notebook baselines |
+| `notebook_utils.py` | Notebook-facing train/eval helpers |
 | `train_mf_dsrq.py` | CLI training driver |
 | `eval_mf_dsrq.py` | Evaluation: robustness sweeps, obs-noise experiments |
+| `magent2_benchmarl_baselines.ipynb` | BenchMARL baseline training/evaluation notebook |
+| `magent2_mf_dsrq.ipynb` | MF-DSRQ training/evaluation notebook |
 | `configs/battle_v4.yaml` | Hyperparameters for MAgent2 battle_v4 |
 | `configs/adversarial_pursuit_v4.yaml` | Hyperparameters for MAgent2 adversarial_pursuit_v4 |
 
@@ -34,11 +38,15 @@ where `ā'` is the **observed EMA mean action** from the rollout — no per-stat
 source venv/bin/activate
 
 # Install MAgent2 (if not already installed)
-pip install pettingzoo[magent2]
+pip install magent2
 
 # Run unit tests
 pytest tests/discrete_action_space/test_mf_robust_value.py -v
 pytest tests/discrete_action_space/test_mf_dsrq_reduction.py -v
+
+# Notebook workflow
+jupyter lab discrete_action_space/mean_field_dsrq/magent2_benchmarl_baselines.ipynb
+jupyter lab discrete_action_space/mean_field_dsrq/magent2_mf_dsrq.ipynb
 
 # Smoke training run (small map, few steps)
 python -m discrete_action_space.mean_field_dsrq.train_mf_dsrq \
@@ -56,6 +64,20 @@ python -m discrete_action_space.mean_field_dsrq.eval_mf_dsrq \
     --num_episodes 100 \
     --obs_noise_sigmas 0,0.05,0.10,0.20
 ```
+
+## BenchMARL / MAgent2 / VMAS
+
+The baseline notebook uses BenchMARL's built-in MAgent2 `adversarial_pursuit_v4`
+task, so MAPPO, IPPO, QMIX, VDN, and IQL all run through the same BenchMARL
+experiment machinery. BenchMARL's VMAS backend is a separate vectorized
+simulator family; VMAS parallelization applies to VMAS scenarios, not to MAgent2
+`adversarial_pursuit_v4`. For MAgent2, use BenchMARL collection settings
+(`n_envs_per_worker`, `parallel_collection`) to scale collection.
+
+The MF-DSRQ notebook keeps the algorithmic target exactly the same as the
+script implementation, but the environment factory now prefers the modern
+`magent2.environments` package and falls back to legacy `pettingzoo.magent`
+imports only for compatibility.
 
 ## Algorithm Details
 

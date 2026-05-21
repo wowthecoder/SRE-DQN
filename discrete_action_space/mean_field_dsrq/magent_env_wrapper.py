@@ -91,7 +91,14 @@ class MAgentMFWrapper:
             obs_dict: {agent_id: obs_array (C,H,W)}
             info: {}
         """
-        obs_dict_raw, _ = self.env.reset()
+        reset_result = self.env.reset()
+        if isinstance(reset_result, tuple):
+            if len(reset_result) >= 1:
+                obs_dict_raw = reset_result[0]
+            else:
+                obs_dict_raw = {}
+        else:
+            obs_dict_raw = reset_result
         self._alive = set(self.env.agents)
         self._prev_actions = {}
         self._mean_a = {}
@@ -124,7 +131,18 @@ class MAgentMFWrapper:
         self._prev_actions = dict(actions)
 
         # Step.
-        obs_raw, rewards_raw, terms_raw, truncs_raw, _ = self.env.step(actions)
+        step_result = self.env.step(actions)
+        if not isinstance(step_result, tuple):
+            raise TypeError(f"Expected env.step() to return a tuple, got {type(step_result)!r}")
+        if len(step_result) >= 5:
+            obs_raw, rewards_raw, terms_raw, truncs_raw, _ = step_result[:5]
+        elif len(step_result) == 4:
+            obs_raw, rewards_raw, terms_raw, _ = step_result
+            truncs_raw = {aid: False for aid in terms_raw}
+        else:
+            raise ValueError(
+                f"Expected env.step() to return 4 or 5 values, got {len(step_result)}"
+            )
 
         dones = {
             aid: (terms_raw.get(aid, False) or truncs_raw.get(aid, False))

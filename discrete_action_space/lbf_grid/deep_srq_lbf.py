@@ -61,12 +61,25 @@ DEEP_SRQ_LBF_HYPERPARAMS = {
     "train_every": 4,
     "network_type": "shared_trunk_separate_heads",
     "target_update_steps": 250,
+    "target_equilibrium_update_steps": 4,
     "target_tau": None,
     "solver_max_iter": 150,
     "solver_tol": 1e-4,
     "solver_damping": 0.35,
     "solver_temperature": 0.02,
     "sre_solver_workers": 8,
+    "sre_policy_cache_enabled": True,
+    "sre_policy_cache_size": 4096,
+    "sre_policy_cache_round_digits": 6,
+    "sre_state_cache_round_digits": 4,
+    "sre_approx_cache_enabled": True,
+    "sre_cache_exploitability_tol": 1e-3,
+    "sre_solver_exploitability_tol": 1e-4,
+    "sre_solver_early_exit": True,
+    "nfg_checkpoint_path": None,
+    "nfg_device": None,
+    "nfg_fallback_enabled": True,
+    "nfg_accept_gap": None,
 }
 
 DEFAULT_LBF_CONFIG = basic_lbf_config()
@@ -131,6 +144,15 @@ def _central_state(obs_dict, agent_order):
 
 
 def _make_solver(solver_name, hp, seed):
+    if solver_name in {"nfg_transformer_sre", "nfg_sre"}:
+        return make_sre_solver(
+            solver_name,
+            random_seed=seed,
+            checkpoint_path=hp.get("nfg_checkpoint_path"),
+            device=hp.get("nfg_device"),
+            fallback_enabled=hp.get("nfg_fallback_enabled", True),
+            accept_exploitability_tol=hp.get("nfg_accept_gap"),
+        )
     return make_sre_solver(
         solver_name,
         random_seed=seed,
@@ -188,6 +210,15 @@ def train_lbf_deep_srq_experiment(
             network_type=hp["network_type"],
             use_gpu=use_gpu,
             sre_solver=_make_solver(solver_name, hp, seed),
+            target_equilibrium_update_steps=hp.get("target_equilibrium_update_steps", 4),
+            sre_policy_cache_enabled=hp.get("sre_policy_cache_enabled", True),
+            sre_policy_cache_size=hp.get("sre_policy_cache_size", 4096),
+            sre_policy_cache_round_digits=hp.get("sre_policy_cache_round_digits", 6),
+            sre_state_cache_round_digits=hp.get("sre_state_cache_round_digits", 4),
+            sre_approx_cache_enabled=hp.get("sre_approx_cache_enabled", True),
+            sre_cache_exploitability_tol=hp.get("sre_cache_exploitability_tol", 1e-3),
+            sre_solver_exploitability_tol=hp.get("sre_solver_exploitability_tol", 1e-4),
+            sre_solver_early_exit=hp.get("sre_solver_early_exit", True),
         )
     )
 
@@ -222,10 +253,7 @@ def train_lbf_deep_srq_experiment(
             ep_steps = 0
 
             while env.agents:
-                actions_list = [
-                    agent.act(state, agent_id=agent_id)
-                    for agent_id in range(num_agents)
-                ]
+                actions_list = agent.act_joint(state)
                 actions_dict = {
                     agent_name: int(actions_list[agent_id])
                     for agent_id, agent_name in enumerate(agent_order)
@@ -340,9 +368,13 @@ def run_lbf_solver_ablation(
     lbf_config_overrides=None,
     hyperparameter_overrides=None,
 ):
-    variants = variants or (
-        {"label": "path_mcp", "solver_name": "path_mcp_nplayer"},
-    )
+    if variants is None:
+        variants = [{"label": "path_mcp", "solver_name": "path_mcp_nplayer"}]
+        nfg_checkpoint_path = (hyperparameter_overrides or {}).get("nfg_checkpoint_path")
+        if nfg_checkpoint_path:
+            variants.append(
+                {"label": "nfg_transformer", "solver_name": "nfg_transformer_sre"}
+            )
     results = {}
     for variant_index, variant in enumerate(variants):
         label = variant["label"]

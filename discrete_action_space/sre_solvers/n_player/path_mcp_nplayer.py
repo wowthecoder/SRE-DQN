@@ -115,8 +115,35 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
             z[index["kappa"][player_id]] = 100.0 * self.rng.random() - 50.0
         return z
 
-    def _initial_starts(self, index, action_sizes, opponent_data, num_repeats, include_pure_starts):
+    @staticmethod
+    def _normalize_initial_policies(action_sizes, policies):
+        if policies is None or len(policies) != len(action_sizes):
+            return None
+        normalized = []
+        for action_size, policy in zip(action_sizes, policies):
+            p = _normalize_policy(policy)
+            if p is None or p.shape[0] != action_size:
+                return None
+            normalized.append(p)
+        return normalized
+
+    def _initial_starts(
+        self,
+        index,
+        action_sizes,
+        opponent_data,
+        num_repeats,
+        include_pure_starts,
+        initial_policies=None,
+    ):
         starts = []
+        initial_policies = self._normalize_initial_policies(
+            action_sizes, initial_policies
+        )
+        if initial_policies is not None:
+            starts.append(
+                self._make_start(index, action_sizes, opponent_data, initial_policies)
+            )
         if include_pure_starts:
             max_pure_starts = max(1, int(num_repeats))
             for profile_idx, pure_profile in enumerate(itertools.product(*[range(size) for size in action_sizes])):
@@ -253,12 +280,144 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
         return f, jac
 
     @staticmethod
-    def _fill_dense_csc(jac, col_start, col_len, row, data):
-        n = jac.shape[0]
-        col_start[:] = np.arange(n, dtype=col_start.dtype) * n + 1
-        col_len[:] = n
-        row[:] = np.tile(np.arange(1, n + 1, dtype=row.dtype), n)
-        data[:] = jac.T.ravel()
+    def _build_sparse_jacobian_pattern(index, action_sizes, opponent_data, distances_by_player):
+        n_vars = index["kappa"][-1] + 1
+        entries_by_col = [[] for _ in range(n_vars)]
+
+        def add(row, col, kind, payload):
+            entries_by_col[int(col)].append((int(row), kind, payload))
+
+        for player_id, action_size in enumerate(action_sizes):
+            prob_slice = index["prob"][player_id]
+            lambda_idx = index["lambda"][player_id]
+            xi_slice = index["xi"][player_id]
+            eta_slice = index["eta"][player_id]
+            kappa_idx = index["kappa"][player_id]
+            opponent_ids, profiles = opponent_data[player_id]
+            num_opp_profiles = len(profiles)
+            distance = distances_by_player[player_id]
+
+            for action_id in range(action_size):
+                row = prob_slice.start + action_id
+                add(row, kappa_idx, "const", -1.0)
+                for k in range(num_opp_profiles):
+                    for l in range(num_opp_profiles):
+                        col = eta_slice.start + k * num_opp_profiles + l
+                        add(row, col, "neg_payoff", (player_id, action_id, l))
+
+            for k in range(num_opp_profiles):
+                for l in range(num_opp_profiles):
+                    col = eta_slice.start + k * num_opp_profiles + l
+                    add(lambda_idx, col, "const", -float(distance[k, l]))
+
+            for profile_idx, profile in enumerate(profiles):
+                row = xi_slice.start + profile_idx
+                for local_idx, opponent_id in enumerate(opponent_ids):
+                    action_id = profile[local_idx]
+                    col = index["prob"][opponent_id].start + action_id
+                    add(
+                        row,
+                        col,
+                        "neg_profile_grad",
+                        (tuple(opponent_ids), tuple(profile), local_idx),
+                    )
+                for l in range(num_opp_profiles):
+                    col = eta_slice.start + profile_idx * num_opp_profiles + l
+                    add(row, col, "const", 1.0)
+
+            for k in range(num_opp_profiles):
+                for l in range(num_opp_profiles):
+                    row = eta_slice.start + k * num_opp_profiles + l
+                    for action_id in range(action_size):
+                        col = prob_slice.start + action_id
+                        add(row, col, "payoff", (player_id, action_id, l))
+                    add(row, lambda_idx, "const", float(distance[k, l]))
+                    add(row, xi_slice.start + k, "const", -1.0)
+
+            for action_id in range(action_size):
+                add(kappa_idx, prob_slice.start + action_id, "const", -1.0)
+
+        for col_entries in entries_by_col:
+            col_entries.sort(key=lambda entry: entry[0])
+        return entries_by_col
+
+    @staticmethod
+    def _fill_sparse_csc(z, payoffs_by_player, index, entries_by_col, col_start, col_len, row, data):
+        idx = 0
+        for col, entries in enumerate(entries_by_col):
+            col_start[col] = idx + 1
+            col_len[col] = len(entries)
+            for row_id, kind, payload in entries:
+                row[idx] = row_id + 1
+                if kind == "const":
+                    value = payload
+                elif kind == "payoff":
+                    player_id, action_id, opp_profile_id = payload
+                    value = payoffs_by_player[player_id][action_id, opp_profile_id]
+                elif kind == "neg_payoff":
+                    player_id, action_id, opp_profile_id = payload
+                    value = -payoffs_by_player[player_id][action_id, opp_profile_id]
+                elif kind == "neg_profile_grad":
+                    opponent_ids, profile, local_idx = payload
+                    partial = 1.0
+                    for other_idx, opponent_id in enumerate(opponent_ids):
+                        if other_idx == local_idx:
+                            continue
+                        action_id = profile[other_idx]
+                        partial *= z[index["prob"][opponent_id].start + action_id]
+                    value = -partial
+                else:
+                    raise ValueError(f"Unknown sparse Jacobian entry kind: {kind}.")
+                data[idx] = value
+                idx += 1
+        if idx != data.shape[0]:
+            raise ValueError(
+                f"Sparse Jacobian filled {idx} entries, expected {data.shape[0]}."
+            )
+
+    @staticmethod
+    def _result_from_candidate(
+        *,
+        q_tensor,
+        policies,
+        epsilon,
+        round_digits,
+        start,
+        metadata,
+        success_tol,
+    ):
+        exploitability, player_gaps, robust_values = robust_exploitability(
+            q_tensor, policies, epsilon
+        )
+        nominal = _expected_nominal_values(q_tensor, policies)
+        robust_policy_values = [
+            float(policy @ values) for policy, values in zip(policies, robust_values)
+        ]
+        success = bool(exploitability <= success_tol)
+        result_metadata = {
+            "solver": PathMcpNPlayerSreSolver.name,
+            "algorithm_family": "path_mcp_multilinear_complementarity",
+            "epsilon": float(epsilon),
+            "exploitability_tol": float(success_tol),
+            "num_agents": int(q_tensor.shape[-1]),
+            "action_sizes": [int(size) for size in q_tensor.shape[:-1]],
+            "wall_seconds": float(time.perf_counter() - start),
+            "robust_exploitability": float(exploitability),
+            "player_robust_gaps": [float(gap) for gap in player_gaps],
+            "robust_policy_values": robust_policy_values,
+            "nominal_values": [float(value) for value in nominal],
+            "joint_nominal_welfare": float(np.sum(nominal)),
+        }
+        result_metadata.update(metadata)
+        return SreSolveResult(
+            policies=policies,
+            solutions=[_solution_dict_from_policies(policies, round_digits=round_digits)],
+            utilities_sr=[robust_policy_values],
+            utilities_nominal=[[float(value) for value in nominal]],
+            success=success,
+            message="" if success else "Returned best PATH MCP candidate.",
+            metadata=result_metadata,
+        )
 
     @staticmethod
     def _dominant_action_policies(payoffs_by_player, tol=1e-12):
@@ -286,9 +445,14 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
         opponent_data,
         payoffs_by_player,
         distances_by_player=None,
+        sparse_pattern=None,
     ):
         n_vars = z.shape[0]
-        nnz = n_vars * n_vars
+        if sparse_pattern is None:
+            sparse_pattern = self._build_sparse_jacobian_pattern(
+                index, q_tensor.shape[:-1], opponent_data, distances_by_player
+            )
+        nnz = sum(len(entries) for entries in sparse_pattern)
         f = np.zeros(n_vars, dtype=np.float64)
         lb = np.full(n_vars, -INF, dtype=np.float64)
         ub = np.full(n_vars, INF, dtype=np.float64)
@@ -319,16 +483,16 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
             col_len = np.ctypeslib.as_array(col_len_ptr, shape=(n,))
             row = np.ctypeslib.as_array(row_ptr, shape=(nnz_in,))
             data = np.ctypeslib.as_array(data_ptr, shape=(nnz_in,))
-            _, jac = self._compute_f_and_jacobian(
+            self._fill_sparse_csc(
                 z_view,
-                q_tensor,
-                epsilon,
-                index,
-                opponent_data,
                 payoffs_by_player,
-                distances_by_player,
+                index,
+                sparse_pattern,
+                col_start,
+                col_len,
+                row,
+                data,
             )
-            self._fill_dense_csc(jac, col_start, col_len, row, data)
             return 0
 
         status = self.path_solver.solve(n_vars, nnz, z, f, lb, ub, func_eval, jac_eval)
@@ -342,6 +506,9 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
         num_repeats=20,
         round_digits=4,
         include_pure_starts=True,
+        initial_policies=None,
+        exploitability_tol=1e-4,
+        early_exit=True,
     ):
         start = time.perf_counter()
         q_tensor = validate_nplayer_q_tensor(q_tensor)
@@ -355,53 +522,64 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
             self._distance_matrix(len(opponent_data[player_id][1]))
             for player_id in range(q_tensor.shape[-1])
         ]
+        sparse_pattern = self._build_sparse_jacobian_pattern(
+            index, action_sizes, opponent_data, distances_by_player
+        )
+
+        initial_policies = self._normalize_initial_policies(
+            action_sizes, initial_policies
+        )
+        if initial_policies is not None and early_exit:
+            initial_gap, _, _ = robust_exploitability(
+                q_tensor, initial_policies, epsilon
+            )
+            if initial_gap <= exploitability_tol:
+                return self._result_from_candidate(
+                    q_tensor=q_tensor,
+                    policies=initial_policies,
+                    epsilon=epsilon,
+                    round_digits=round_digits,
+                    start=start,
+                    success_tol=exploitability_tol,
+                    metadata={
+                        "path_shortcut": "initial_policies_verified",
+                        "num_starts": 0,
+                        "num_candidates": 1,
+                        "early_exit": True,
+                    },
+                )
 
         dominant_policies = self._dominant_action_policies(payoffs_by_player)
         if dominant_policies is not None:
-            exploitability, player_gaps, robust_values = robust_exploitability(
-                q_tensor, dominant_policies, epsilon
-            )
-            nominal = _expected_nominal_values(q_tensor, dominant_policies)
-            robust_policy_values = [
-                float(policy @ values)
-                for policy, values in zip(dominant_policies, robust_values)
-            ]
-            return SreSolveResult(
+            return self._result_from_candidate(
+                q_tensor=q_tensor,
                 policies=dominant_policies,
-                solutions=[
-                    _solution_dict_from_policies(
-                        dominant_policies, round_digits=round_digits
-                    )
-                ],
-                utilities_sr=[robust_policy_values],
-                utilities_nominal=[[float(value) for value in nominal]],
-                success=bool(exploitability <= 1e-4),
-                message="" if exploitability <= 1e-4 else "Returned dominant-action candidate.",
+                epsilon=epsilon,
+                round_digits=round_digits,
+                start=start,
+                success_tol=exploitability_tol,
                 metadata={
-                    "solver": self.name,
-                    "algorithm_family": "path_mcp_multilinear_complementarity",
                     "path_shortcut": "dominant_actions",
-                    "epsilon": float(epsilon),
-                    "num_agents": int(q_tensor.shape[-1]),
-                    "action_sizes": [int(size) for size in action_sizes],
                     "num_starts": 0,
                     "num_candidates": 1,
-                    "wall_seconds": float(time.perf_counter() - start),
-                    "robust_exploitability": float(exploitability),
-                    "player_robust_gaps": [float(gap) for gap in player_gaps],
-                    "robust_policy_values": robust_policy_values,
-                    "nominal_values": [float(value) for value in nominal],
-                    "joint_nominal_welfare": float(np.sum(nominal)),
+                    "early_exit": True,
                 },
             )
 
         starts = self._initial_starts(
-            index, action_sizes, opponent_data, num_repeats, include_pure_starts
+            index,
+            action_sizes,
+            opponent_data,
+            num_repeats,
+            include_pure_starts,
+            initial_policies=initial_policies,
         )
         candidates = []
         messages = []
+        attempted_starts = 0
 
         for z0 in starts:
+            attempted_starts += 1
             try:
                 status, z_sol = self._solve_from_start(
                     z0,
@@ -411,6 +589,7 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
                     opponent_data,
                     payoffs_by_player,
                     distances_by_player,
+                    sparse_pattern,
                 )
             except Exception as exc:
                 messages.append(str(exc))
@@ -439,6 +618,22 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
                     "status": int(status),
                 }
             )
+            if early_exit and exploitability <= exploitability_tol:
+                return self._result_from_candidate(
+                    q_tensor=q_tensor,
+                    policies=policies,
+                    epsilon=epsilon,
+                    round_digits=round_digits,
+                    start=start,
+                    success_tol=exploitability_tol,
+                    metadata={
+                        "num_starts": int(len(starts)),
+                        "num_starts_attempted": int(attempted_starts),
+                        "num_candidates": int(len(candidates)),
+                        "path_status": int(status),
+                        "early_exit": True,
+                    },
+                )
 
         elapsed = time.perf_counter() - start
         if not candidates:
@@ -466,6 +661,7 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
                     "num_agents": int(q_tensor.shape[-1]),
                     "action_sizes": [int(size) for size in action_sizes],
                     "num_starts": int(len(starts)),
+                    "num_starts_attempted": int(attempted_starts),
                     "num_candidates": 0,
                     "wall_seconds": float(elapsed),
                     "robust_exploitability": float(exploitability),
@@ -489,15 +685,17 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
             solutions=[solution],
             utilities_sr=[best["robust_policy_values"]],
             utilities_nominal=[best["nominal_values"]],
-            success=bool(best["robust_exploitability"] <= 1e-4),
-            message="" if best["robust_exploitability"] <= 1e-4 else "Returned best PATH MCP candidate.",
+            success=bool(best["robust_exploitability"] <= exploitability_tol),
+            message="" if best["robust_exploitability"] <= exploitability_tol else "Returned best PATH MCP candidate.",
             metadata={
                 "solver": self.name,
                 "algorithm_family": "path_mcp_multilinear_complementarity",
                 "epsilon": float(epsilon),
+                "exploitability_tol": float(exploitability_tol),
                 "num_agents": int(q_tensor.shape[-1]),
                 "action_sizes": [int(size) for size in action_sizes],
                 "num_starts": int(len(starts)),
+                "num_starts_attempted": int(attempted_starts),
                 "num_candidates": int(len(candidates)),
                 "path_status": best["status"],
                 "wall_seconds": float(elapsed),
@@ -506,6 +704,7 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
                 "robust_policy_values": best["robust_policy_values"],
                 "nominal_values": best["nominal_values"],
                 "joint_nominal_welfare": best["joint_nominal_welfare"],
+                "early_exit": False,
             },
         )
 
@@ -534,6 +733,9 @@ def _path_mcp_nplayer_pool_solve_task(payload):
         num_repeats,
         round_digits,
         include_pure_starts,
+        initial_policies,
+        exploitability_tol,
+        early_exit,
         task_seed,
     ) = payload
     if task_seed is not None:
@@ -546,6 +748,9 @@ def _path_mcp_nplayer_pool_solve_task(payload):
         num_repeats=num_repeats,
         round_digits=round_digits,
         include_pure_starts=include_pure_starts,
+        initial_policies=initial_policies,
+        exploitability_tol=exploitability_tol,
+        early_exit=early_exit,
     )
     elapsed = time.perf_counter() - start
     result.metadata = dict(result.metadata)
@@ -606,6 +811,9 @@ class ProcessPoolPathMcpNPlayerSreSolver(SreStageGameSolver):
         num_repeats=20,
         round_digits=4,
         include_pure_starts=True,
+        initial_policies=None,
+        exploitability_tol=1e-4,
+        early_exit=True,
     ):
         return self.solve_batch(
             [q_tensor],
@@ -613,6 +821,9 @@ class ProcessPoolPathMcpNPlayerSreSolver(SreStageGameSolver):
             num_repeats=num_repeats,
             round_digits=round_digits,
             include_pure_starts=include_pure_starts,
+            initial_policies_batch=[initial_policies],
+            exploitability_tol=exploitability_tol,
+            early_exit=early_exit,
         )[0]
 
     def solve_batch(
@@ -623,10 +834,19 @@ class ProcessPoolPathMcpNPlayerSreSolver(SreStageGameSolver):
         num_repeats=20,
         round_digits=4,
         include_pure_starts=True,
+        initial_policies_batch=None,
+        exploitability_tol=1e-4,
+        early_exit=True,
     ):
         q_tensors = [validate_nplayer_q_tensor(q_tensor) for q_tensor in q_tensors]
         if not q_tensors:
             return []
+        if initial_policies_batch is None:
+            initial_policies_batch = [None] * len(q_tensors)
+        if len(initial_policies_batch) != len(q_tensors):
+            raise ValueError(
+                "initial_policies_batch must be None or match q_tensors length."
+            )
 
         payloads = [
             (
@@ -635,9 +855,14 @@ class ProcessPoolPathMcpNPlayerSreSolver(SreStageGameSolver):
                 int(num_repeats),
                 round_digits,
                 bool(include_pure_starts),
+                initial_policies,
+                float(exploitability_tol),
+                bool(early_exit),
                 self._task_seed(batch_offset),
             )
-            for batch_offset, q_tensor in enumerate(q_tensors)
+            for batch_offset, (q_tensor, initial_policies) in enumerate(
+                zip(q_tensors, initial_policies_batch)
+            )
         ]
         self._task_counter += len(payloads)
 

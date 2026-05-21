@@ -4,7 +4,7 @@
 
 Read `relevant_papers/core` folder contains summaries of the 3 research papers that lays the foundation to this project. 
 1. The `Strategically Robust Game Theory via Optimal Transport.md` paper is the main theoretical paper with all the important equations. The `strategically-robust-game-theory/` directory is the source code implementation of the theory paper.
-2. The `Nash DQN.md` paper is relevant for the `continuous_action_space` folder only. 
+2. The `Nash DQN.md` paper is relevant for the `continuous_action_space` folder only. The `Nash-DQN/` directory is the source code implementation of the paper. 
 3. The `Strategically Robust Q-Learning.md` paper is relevant for the `discrete_action_space` folder only. The `sre-sandbox/` directory is the source code implementation of the paper. 
 
 ---
