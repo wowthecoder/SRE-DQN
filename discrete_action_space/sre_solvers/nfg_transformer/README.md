@@ -24,6 +24,7 @@ source venv/bin/activate
 python -m discrete_action_space.sre_solvers.nfg_transformer.train \
   --output discrete_action_space/sre_solvers/nfg_transformer/nfg_sre_checkpoints/nfg_sre_lbf3.pt \
   --num-iterations 20000
+```
 
 For custom game shapes, call `train_checkpoint(...)` from Python/notebooks and
 pass tuples directly:
@@ -31,11 +32,28 @@ pass tuples directly:
 ```python
 train_checkpoint(
     output=CHECKPOINT,
+    final_output=CHECKPOINT.with_name("nfg_sre_lbf3_final.pt"),
     num_iterations=20_000,
     game_shapes=((6, 6), (6, 6, 6)),
 )
 ```
 
+`output` is the best-checkpoint path. `final_output` stores the latest logged
+model state during training and becomes the completed final model at the end; if
+omitted, it defaults to the same filename with `_final` appended. Both checkpoint
+files include optimizer and RNG state, so interrupted training can continue from
+either file:
+
+```python
+train_checkpoint(
+    output=CHECKPOINT,
+    resume_from=CHECKPOINT.with_name("nfg_sre_lbf3_final.pt"),
+    num_iterations=40_000,
+    game_shapes=((6, 6), (6, 6, 6)),
+)
+```
+
+```bash
 python -m discrete_action_space.sre_solvers.nfg_transformer.generate_dataset \
   --output discrete_action_space/sre_solvers/nfg_transformer/nfg_sre_data/val \
   --label-mode random \

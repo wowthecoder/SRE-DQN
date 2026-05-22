@@ -139,8 +139,8 @@ class LBFParallelEnv(ParallelEnv):
 
         return obs, rewards, terminations, truncations, infos
 
-    def render(self):
-        return self._inner.render()
+    def render(self, mode: str = "rgb_array"):
+        return self._inner.render(mode=mode)
 
     def close(self):
         self._inner.close()

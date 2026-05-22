@@ -111,34 +111,33 @@ def _training_return_keys(metrics: dict) -> list[tuple[str, str, str | None]]:
     return keys
 
 
-def _episode_axis(metrics: dict, steps, *, n_episodes: int, t_max: int) -> list[float]:
+def _episode_axis(steps, *, n_episodes: int, t_max: int) -> list[float]:
     steps_arr = np.asarray(steps, dtype=np.float64)
     if steps_arr.size == 0:
         return []
 
-    episode_steps = np.asarray(_metric_steps(metrics, "episode"), dtype=np.float64)
-    episode_values = np.asarray(_metric_values(metrics, "episode"), dtype=np.float64)
-    if episode_steps.size and episode_values.size:
-        if episode_steps[0] > 0:
-            episode_steps = np.concatenate(([0.0], episode_steps))
-            episode_values = np.concatenate(([0.0], episode_values))
-        return np.interp(steps_arr, episode_steps, episode_values).tolist()
-
-    ep_len_steps = np.asarray(_metric_steps(metrics, "ep_length_mean"), dtype=np.float64)
-    ep_lens = np.asarray(_metric_values(metrics, "ep_length_mean"), dtype=np.float64)
-    if ep_len_steps.size and ep_lens.size:
-        episodes = []
-        last_step = 0.0
-        total_episodes = 0.0
-        for step in steps_arr:
-            idx = np.searchsorted(ep_len_steps, step, side="right") - 1
-            ep_len = max(float(ep_lens[max(idx, 0)]), 1.0)
-            total_episodes += max(float(step) - last_step, 0.0) / ep_len
-            episodes.append(total_episodes)
-            last_step = float(step)
-        return episodes
-
+    # EPyMARL's logged "episode" counter is runner/batch-oriented for parallel
+    # runs, so it can undercount the user-requested scenario episode budget.
+    # The training budget we set is t_max = n_episodes * scenario_time_limit;
+    # use that invariant for notebook plots.
     return (steps_arr / max(float(t_max) / max(int(n_episodes), 1), 1.0)).tolist()
+
+
+def _align_curve_to_episode_budget(
+    steps,
+    values,
+    *,
+    n_episodes: int,
+    t_max: int,
+) -> tuple[list[float], list[float], bool]:
+    episodes = _episode_axis(steps, n_episodes=n_episodes, t_max=t_max)
+    values = list(values)
+    appended_final_budget_point = False
+    if episodes and values and episodes[-1] < float(n_episodes):
+        episodes = [*episodes, float(n_episodes)]
+        values = [*values, values[-1]]
+        appended_final_budget_point = True
+    return episodes, values, appended_final_budget_point
 
 
 def _save_reward_curve(curves: dict[str, list[float]], out_path: Path, *, title: str) -> None:
@@ -215,18 +214,26 @@ def _build_epymarl_reward_artifacts(
         steps = _metric_steps(metrics, mean_key)
         if not values:
             continue
-        if "episodes" not in curves:
-            curves["episodes"] = _episode_axis(
-                metrics,
+        episodes, aligned_values, appended_final_budget_point = (
+            _align_curve_to_episode_budget(
                 steps,
+                values,
                 n_episodes=n_episodes,
                 t_max=t_max,
             )
-        curves[label] = values
+        )
+        if "episodes" not in curves:
+            curves["episodes"] = episodes
+        curves[label] = aligned_values
         reward_statistics[label] = {
-            **_series_summary(values),
+            **_series_summary(aligned_values),
             "logged_steps": [int(step) for step in steps],
+            "episode_axis_source": "env_step_scaled_to_requested_episode_budget",
         }
+        if appended_final_budget_point:
+            reward_statistics[label]["final_budget_point"] = (
+                "last_logged_reward_repeated_at_requested_n_episodes"
+            )
         std_values = [] if std_key is None else _metric_values(metrics, std_key)
         if std_values:
             reward_statistics[label]["logged_std"] = std_values

@@ -104,8 +104,8 @@ class FfaEnvShim:
             return [0, 0, 0, 0]
         return self._env.act(self._state)
 
-    def render(self):
-        return self._env.render()
+    def render(self, *args, **kwargs):
+        return self._env.render(*args, **kwargs)
 
     def close(self):
         self._env.close()

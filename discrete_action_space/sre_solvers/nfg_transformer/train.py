@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import argparse
 from pathlib import Path
 
 import numpy as np
@@ -66,6 +65,78 @@ def sample_epsilon_torch(batch_size, *, device, dtype=torch.float32):
     return eps
 
 
+def _default_final_output(output):
+    output = Path(output)
+    return output.with_name(f"{output.stem}_final{output.suffix}")
+
+
+def _rng_state_payload(rng, data_generator=None):
+    state = {
+        "torch": torch.get_rng_state(),
+        "numpy": rng.bit_generator.state,
+    }
+    if torch.cuda.is_available():
+        state["torch_cuda"] = torch.cuda.get_rng_state_all()
+    if data_generator is not None:
+        state["data_generator"] = data_generator.get_state()
+    return state
+
+
+def _restore_rng_state(state, rng, data_generator=None):
+    if not state:
+        return
+    torch_state = state.get("torch")
+    if torch_state is not None:
+        torch.set_rng_state(
+            torch_state.cpu() if hasattr(torch_state, "cpu") else torch_state
+        )
+    cuda_state = state.get("torch_cuda")
+    if cuda_state is not None and torch.cuda.is_available():
+        torch.cuda.set_rng_state_all(cuda_state)
+    numpy_state = state.get("numpy")
+    if numpy_state is not None:
+        rng.bit_generator.state = numpy_state
+    generator_state = state.get("data_generator")
+    if generator_state is not None and data_generator is not None:
+        data_generator.set_state(
+            generator_state.cpu()
+            if hasattr(generator_state, "cpu")
+            else generator_state
+        )
+
+
+def _checkpoint_payload(
+    *,
+    config,
+    model,
+    optimizer,
+    rng,
+    data_generator,
+    best_gap,
+    iteration,
+    num_iterations,
+    training_mode,
+    game_shapes,
+    seed,
+    batch_size,
+    lr,
+):
+    return {
+        "config": config.to_dict(),
+        "model_state_dict": model.state_dict(),
+        "optimizer_state_dict": optimizer.state_dict(),
+        "rng_state": _rng_state_payload(rng, data_generator),
+        "best_train_robust_gap": float(best_gap),
+        "iteration": int(iteration),
+        "num_iterations": int(num_iterations),
+        "training_mode": training_mode,
+        "game_shapes": [list(shape) for shape in game_shapes],
+        "seed": int(seed),
+        "batch_size": int(batch_size),
+        "lr": float(lr),
+    }
+
+
 def train_checkpoint(
     *,
     output,
@@ -83,6 +154,9 @@ def train_checkpoint(
     game_shapes=((6, 6, 6),),
     seed=2025,
     use_gpu=True,
+    best_output=None,
+    final_output=None,
+    resume_from=None,
 ):
     torch.manual_seed(seed)
     device = torch.device("cuda" if use_gpu and torch.cuda.is_available() else "cpu")
@@ -108,6 +182,7 @@ def train_checkpoint(
         training_mode = f"offline_robust_gap:{data_dir}"
     else:
         loader = None
+        generator = None
         training_mode = "online_synthetic_robust_gap"
     rng = np.random.default_rng(seed)
 
@@ -122,17 +197,58 @@ def train_checkpoint(
 
     best_gap = float("inf")
     output = Path(output)
-    output.parent.mkdir(parents=True, exist_ok=True)
+    best_output = output if best_output is None else Path(best_output)
+    final_output = (
+        _default_final_output(output) if final_output is None else Path(final_output)
+    )
+    resume_from = None if resume_from is None else Path(resume_from)
+    best_output.parent.mkdir(parents=True, exist_ok=True)
+    final_output.parent.mkdir(parents=True, exist_ok=True)
+
+    start_iteration = 1
+    if resume_from is not None:
+        payload = torch.load(resume_from, map_location=device, weights_only=False)
+        raw_config = payload.get("config") or payload.get("model_config")
+        if raw_config is None:
+            raise ValueError("Resume checkpoint is missing a 'config' entry.")
+        checkpoint_config = NfgTransformerConfig(**raw_config)
+        if checkpoint_config.to_dict() != config.to_dict():
+            raise ValueError(
+                "Resume checkpoint model config does not match the requested training config."
+            )
+        state_dict = payload.get("model_state_dict") or payload.get("state_dict")
+        if state_dict is None:
+            raise ValueError("Resume checkpoint is missing model weights.")
+        model.load_state_dict(state_dict)
+        optimizer_state = payload.get("optimizer_state_dict")
+        if optimizer_state is None:
+            raise ValueError(
+                "Resume checkpoint is missing optimizer_state_dict; "
+                "older model-only checkpoints can be evaluated but not resumed exactly."
+            )
+        optimizer.load_state_dict(optimizer_state)
+        _restore_rng_state(payload.get("rng_state"), rng, generator)
+        best_gap = float(payload.get("best_train_robust_gap", best_gap))
+        start_iteration = int(payload.get("iteration", 0)) + 1
+        if start_iteration > num_iterations:
+            raise ValueError(
+                f"Resume checkpoint is already at iteration {start_iteration - 1}, "
+                f"which is not before requested num_iterations={num_iterations}."
+            )
+
     print(
         f"training_mode={training_mode} shapes={game_shapes} "
-        f"batch_size={batch_size} iterations={num_iterations} device={device}"
+        f"batch_size={batch_size} iterations={start_iteration}-{num_iterations} "
+        f"device={device}"
     )
+    print(f"best_checkpoint={best_output}")
+    print(f"final_checkpoint={final_output}")
     model.train()
     total_loss = 0.0
     total_gap = 0.0
     total_count = 0
     loader_iter = iter(loader) if loader is not None else None
-    pbar = tqdm(range(1, num_iterations + 1), desc="nfg-sre-train")
+    pbar = tqdm(range(start_iteration, num_iterations + 1), desc="nfg-sre-train")
     for iteration in pbar:
         if loader is None:
             shape = game_shapes[int(rng.integers(0, len(game_shapes)))]
@@ -168,20 +284,25 @@ def train_checkpoint(
                 f"robust_gap={mean_gap:.6f}"
             )
             pbar.set_postfix(loss=f"{mean_loss:.4f}", gap=f"{mean_gap:.4f}")
+            current_payload = _checkpoint_payload(
+                config=config,
+                model=model,
+                optimizer=optimizer,
+                rng=rng,
+                data_generator=generator,
+                best_gap=min(best_gap, mean_gap),
+                iteration=iteration,
+                num_iterations=num_iterations,
+                training_mode=training_mode,
+                game_shapes=game_shapes,
+                seed=seed,
+                batch_size=batch_size,
+                lr=lr,
+            )
+            torch.save(current_payload, final_output)
             if mean_gap < best_gap:
                 best_gap = mean_gap
-                torch.save(
-                    {
-                        "config": config.to_dict(),
-                        "model_state_dict": model.state_dict(),
-                        "best_train_robust_gap": best_gap,
-                        "iteration": iteration,
-                        "num_iterations": num_iterations,
-                        "training_mode": training_mode,
-                        "game_shapes": [list(shape) for shape in game_shapes],
-                    },
-                    output,
-                )
+                torch.save(current_payload, best_output)
             total_loss = 0.0
             total_gap = 0.0
             total_count = 0

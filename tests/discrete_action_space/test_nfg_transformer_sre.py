@@ -7,6 +7,7 @@ from sre_solvers.nfg_transformer.torch_utils import (
     robust_exploitability_torch,
 )
 from sre_solvers.nfg_transformer.train import sample_q_tensor_torch
+from sre_solvers.nfg_transformer.train import train_checkpoint
 from sre_solvers.nplayer_common import robust_exploitability
 
 
@@ -127,6 +128,59 @@ def test_synthetic_training_sampler_uses_global_payoff_normalization():
         torch.zeros(4, 3),
         atol=1e-6,
     )
+
+
+def test_train_checkpoint_saves_best_final_and_resumes(tmp_path):
+    best_checkpoint = tmp_path / "nfg_sre_best.pt"
+    final_checkpoint = tmp_path / "nfg_sre_final.pt"
+
+    train_checkpoint(
+        output=best_checkpoint,
+        final_output=final_checkpoint,
+        num_iterations=2,
+        log_every=1,
+        batch_size=2,
+        lr=1e-4,
+        embed_dim=16,
+        num_blocks=2,
+        num_heads=4,
+        game_shapes=((2, 2),),
+        seed=17,
+        use_gpu=False,
+    )
+
+    assert best_checkpoint.exists()
+    assert final_checkpoint.exists()
+    best_payload = torch.load(best_checkpoint, map_location="cpu", weights_only=False)
+    final_payload = torch.load(final_checkpoint, map_location="cpu", weights_only=False)
+    assert best_payload["iteration"] <= 2
+    assert final_payload["iteration"] == 2
+    assert "optimizer_state_dict" in final_payload
+    assert "rng_state" in final_payload
+    assert "model_state_dict" in final_payload
+
+    resumed_final = tmp_path / "nfg_sre_resumed_final.pt"
+    train_checkpoint(
+        output=best_checkpoint,
+        final_output=resumed_final,
+        resume_from=final_checkpoint,
+        num_iterations=3,
+        log_every=1,
+        batch_size=2,
+        lr=1e-4,
+        embed_dim=16,
+        num_blocks=2,
+        num_heads=4,
+        game_shapes=((2, 2),),
+        seed=17,
+        use_gpu=False,
+    )
+
+    resumed_payload = torch.load(resumed_final, map_location="cpu", weights_only=False)
+    assert resumed_payload["iteration"] == 3
+    assert resumed_payload["num_iterations"] == 3
+    assert "optimizer_state_dict" in resumed_payload
+    assert "rng_state" in resumed_payload
 
 
 def test_nfg_transformer_solver_factory_with_tiny_checkpoint(tmp_path):

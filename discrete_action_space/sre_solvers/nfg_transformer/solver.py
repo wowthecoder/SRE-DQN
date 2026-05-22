@@ -66,7 +66,11 @@ class NfgTransformerSreSolver(SreStageGameSolver):
             )
             state_dict = None
         else:
-            payload = torch.load(self.checkpoint_path, map_location=self.device)
+            payload = torch.load(
+                self.checkpoint_path,
+                map_location=self.device,
+                weights_only=False,
+            )
             raw_config = payload.get("config") or payload.get("model_config")
             if raw_config is None:
                 raise ValueError("Checkpoint is missing a 'config' entry.")

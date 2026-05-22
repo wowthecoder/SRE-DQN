@@ -36,7 +36,7 @@ def flatten_pommerman_obs(obs_dict: dict) -> np.ndarray:
 class PommermanParallelEnv(ParallelEnv):
     """Single-learner PettingZoo wrapper around Pommerman FFA."""
 
-    metadata = {"render_modes": ["human"], "name": "pommerman_ffa_v0"}
+    metadata = {"render_modes": ["human", "rgb_array"], "name": "pommerman_ffa_v0"}
     LEARNER_ID = "learner_0"
 
     def __init__(self, learner_slot: int = 0):
@@ -98,8 +98,8 @@ class PommermanParallelEnv(ParallelEnv):
             {self.LEARNER_ID: {}},
         )
 
-    def render(self):
-        return self._env.render()
+    def render(self, *args, **kwargs):
+        return self._env.render(*args, **kwargs)
 
     def close(self):
         self._env.close()
@@ -113,7 +113,7 @@ def make_pz_env(learner_slot: int = 0) -> PommermanParallelEnv:
 class PommermanFullParallelEnv(ParallelEnv):
     """Full-control four-agent PettingZoo wrapper around Pommerman FFA."""
 
-    metadata = {"render_modes": ["human"], "name": "pommerman_ffa_full_v0"}
+    metadata = {"render_modes": ["human", "rgb_array"], "name": "pommerman_ffa_full_v0"}
 
     def __init__(self):
         super().__init__()
@@ -211,8 +211,8 @@ class PommermanFullParallelEnv(ParallelEnv):
             {agent: info or {} for agent in self.possible_agents},
         )
 
-    def render(self):
-        return self._env.render()
+    def render(self, *args, **kwargs):
+        return self._env.render(*args, **kwargs)
 
     def close(self):
         self._env.close()

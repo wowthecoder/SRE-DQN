@@ -775,6 +775,8 @@ def evaluate_policy(
     episode_rewards = []
     episode_lengths = []
     first_cumulative = None
+    first_frames = []
+    render_error = None
     for episode in range(n_episodes):
         env = make_env()
         obs, _ = env.reset(seed=seed + episode)
@@ -782,6 +784,12 @@ def evaluate_policy(
         rewards_total = np.zeros(len(order), dtype=np.float64)
         cumulative = []
         steps = 0
+
+        if episode == 0:
+            frame, render_error = _try_render_frame(env)
+            if frame is not None:
+                first_frames.append(frame)
+
         while env.agents and steps < max_steps:
             actions = policy_fn(obs, order, episode, steps)
             obs, rewards, terms, truncs, _ = env.step(actions)
@@ -789,6 +797,10 @@ def evaluate_policy(
             rewards_total += reward_vec
             cumulative.append(rewards_total.copy())
             steps += 1
+            if episode == 0 and render_error is None:
+                frame, render_error = _try_render_frame(env)
+                if frame is not None:
+                    first_frames.append(frame)
             if all(bool(terms.get(a, False) or truncs.get(a, False)) for a in order):
                 break
         env.close()
@@ -802,11 +814,24 @@ def evaluate_policy(
         "episode_lengths": episode_lengths,
         "first_cumulative_rewards": [] if first_cumulative is None else first_cumulative.tolist(),
         "agent_labels": [f"Agent {i}" for i in range(DEFAULT_NUM_AGENTS)],
+        "first_rollout_frames": first_frames,
+        "render_error": render_error,
     }
     if output_dir:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
-        save_training_stats(output_dir / f"{label}_evaluation_stats.txt", stats)
+        if first_frames:
+            video_path = _save_rollout_video_if_possible(
+                first_frames,
+                output_dir / f"{label}_rollout.gif",
+                fps=4,
+                title=f"{label} rollout",
+            )
+            if video_path is not None:
+                stats["rollout_video_path"] = str(video_path)
+        saved_stats = dict(stats)
+        saved_stats.pop("first_rollout_frames", None)
+        save_training_stats(output_dir / f"{label}_evaluation_stats.txt", saved_stats)
         plot_evaluation_rewards(stats, out_path=output_dir / f"{label}_evaluation_rewards.png", show=False)
     return stats
 
@@ -820,16 +845,28 @@ def evaluate_random_reference(**kwargs):
     )
 
 
-def evaluate_simple_agent_reference(*, n_episodes=20, max_steps=200, seed=BASE_SEED + 20_000):
+def evaluate_simple_agent_reference(
+    *,
+    n_episodes=20,
+    max_steps=200,
+    seed=BASE_SEED + 20_000,
+    output_dir=None,
+):
     set_global_seed(seed)
     episode_rewards = []
     episode_lengths = []
+    first_frames = []
+    render_error = None
     for episode in range(n_episodes):
         env = make_simple_agent_ffa_env()
         obs = env.reset()
         rewards_total = np.zeros(DEFAULT_NUM_AGENTS, dtype=np.float64)
         steps = 0
         done = False
+        if episode == 0:
+            frame, render_error = _try_render_frame(env)
+            if frame is not None:
+                first_frames.append(frame)
         while not done and steps < max_steps:
             actions = env.act(obs)
             obs, rewards, done_raw, info = env.step(actions)
@@ -838,15 +875,42 @@ def evaluate_simple_agent_reference(*, n_episodes=20, max_steps=200, seed=BASE_S
             rewards_total += reward_vec
             done = all(done_raw) if isinstance(done_raw, (list, tuple, np.ndarray)) else bool(done_raw)
             steps += 1
+            if episode == 0 and render_error is None:
+                frame, render_error = _try_render_frame(env)
+                if frame is not None:
+                    first_frames.append(frame)
         env.close()
         episode_rewards.append(rewards_total.tolist())
         episode_lengths.append(steps)
-    return {
+    stats = {
         "label": "simple_agent",
         "episode_rewards": episode_rewards,
         "episode_lengths": episode_lengths,
         "agent_labels": [f"Agent {i}" for i in range(DEFAULT_NUM_AGENTS)],
+        "first_rollout_frames": first_frames,
+        "render_error": render_error,
     }
+    if output_dir:
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        if first_frames:
+            video_path = _save_rollout_video_if_possible(
+                first_frames,
+                output_dir / "simple_agent_rollout.gif",
+                fps=4,
+                title="simple_agent rollout",
+            )
+            if video_path is not None:
+                stats["rollout_video_path"] = str(video_path)
+        saved_stats = dict(stats)
+        saved_stats.pop("first_rollout_frames", None)
+        save_training_stats(output_dir / "simple_agent_evaluation_stats.txt", saved_stats)
+        plot_evaluation_rewards(
+            stats,
+            out_path=output_dir / "simple_agent_evaluation_rewards.png",
+            show=False,
+        )
+    return stats
 
 
 def policy_from_iql(agent):
@@ -894,30 +958,181 @@ def policy_from_deep_srq(agent):
     return _policy
 
 
-def plot_training_curves(stats, out_path=None, show=True, window=10):
-    rewards = np.asarray(stats["rewards"], dtype=np.float64)
-    episodes = np.arange(rewards.shape[1])
-    joint = rewards.sum(axis=0)
-    fig, axes = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
-    for idx in range(rewards.shape[0]):
-        axes[0].plot(episodes, rewards[idx], alpha=0.35, linewidth=1)
-        if rewards.shape[1] >= window:
-            smooth = np.convolve(rewards[idx], np.ones(window) / window, mode="valid")
-            axes[0].plot(episodes[window - 1 :], smooth, label=f"Agent {idx}")
-    axes[0].set_title(f"{stats.get('algorithm', 'Algorithm')} per-agent training return")
-    axes[0].set_ylabel("Episode return")
-    axes[0].grid(True, alpha=0.3)
-    axes[0].legend(loc="best")
+def _save_rollout_video_if_possible(frames, out_path, *, fps=4, title="Evaluation rollout"):
+    try:
+        return save_rollout_video(frames, out_path, fps=fps, title=title)
+    except Exception as exc:  # pragma: no cover - depends on local animation writers
+        print(f"[rollout video save skipped: {type(exc).__name__}: {exc}]")
+        return None
 
-    axes[1].plot(episodes, joint, color="black", alpha=0.4, linewidth=1, label="Joint return")
-    if joint.size >= window:
-        smooth_joint = np.convolve(joint, np.ones(window) / window, mode="valid")
-        axes[1].plot(episodes[window - 1 :], smooth_joint, color="tab:red", label="Rolling joint")
-    axes[1].set_title("Joint training return")
-    axes[1].set_xlabel("Episode")
-    axes[1].set_ylabel("Sum return")
-    axes[1].grid(True, alpha=0.3)
-    axes[1].legend(loc="best")
+
+def _try_render_frame(env, *, allow_human_render=False):
+    render_errors = []
+    render_calls = [
+        lambda: env.render("rgb_array"),
+        lambda: env.render(mode="rgb_array"),
+    ]
+    if allow_human_render:
+        render_calls.append(lambda: env.render())
+
+    frame = None
+    for render_call in render_calls:
+        try:
+            frame = render_call()
+            break
+        except TypeError as exc:
+            render_errors.append(f"{type(exc).__name__}: {exc}")
+        except Exception as exc:  # pragma: no cover - render backend depends on local install
+            return None, f"{type(exc).__name__}: {exc}"
+    else:
+        return None, "; ".join(render_errors) if render_errors else None
+
+    if frame is None:
+        return None, None
+    arr = np.asarray(frame)
+    if arr.ndim < 2:
+        return None, None
+    return arr, None
+
+
+def _agent_training_series(stats):
+    rewards = np.asarray(stats["rewards"], dtype=np.float64)
+    if rewards.ndim != 2 or rewards.size == 0:
+        return [], []
+    episodes = np.arange(1, rewards.shape[1] + 1)
+    labels = stats.get("agent_labels") or [f"Agent {idx}" for idx in range(rewards.shape[0])]
+    series = [
+        (str(labels[idx]), rewards[idx].astype(np.float64, copy=False))
+        for idx in range(rewards.shape[0])
+    ]
+    return episodes, series
+
+
+def plot_individual_agent_training_rewards(stats, *, title_prefix=None):
+    episodes, series = _agent_training_series(stats)
+    if len(episodes) == 0 or not series:
+        print(f"[no training rewards for {stats.get('algorithm', 'run')}]")
+        return []
+
+    run_label = title_prefix or stats.get("algorithm", "Algorithm")
+    figs = []
+    for label, values in series:
+        mean = float(values.mean())
+        std = float(values.std())
+        fig, ax = plt.subplots(figsize=(10, 3.6))
+        ax.scatter(episodes, values, s=10, alpha=0.45, label=label)
+        ax.plot(episodes, values, linewidth=1.0, alpha=0.6)
+        ax.axhline(mean, color="black", linestyle=":", linewidth=1.4)
+        ax.text(
+            0.99,
+            0.95,
+            f"mean={mean:.4f}\nstd={std:.4f}",
+            transform=ax.transAxes,
+            ha="right",
+            va="top",
+            bbox={"boxstyle": "round,pad=0.25", "facecolor": "white", "alpha": 0.8},
+        )
+        ax.set_title(f"{run_label} - {label}")
+        ax.set_xlabel("Episode")
+        ax.set_ylabel("Training reward")
+        ax.grid(True, alpha=0.3)
+        fig.tight_layout()
+        figs.append(fig)
+    return figs
+
+
+def plot_combined_agent_training_rewards(stats, *, title=None):
+    episodes, series = _agent_training_series(stats)
+    if len(episodes) == 0 or not series:
+        print(f"[no training rewards for {stats.get('algorithm', 'run')}]")
+        return None
+
+    fig, ax = plt.subplots(figsize=(10, 3.8))
+    for label, values in series:
+        ax.plot(episodes, values, linewidth=1.6, label=label)
+    ax.set_title(title or f"{stats.get('algorithm', 'Algorithm')} agent reward comparison")
+    ax.set_xlabel("Episode")
+    ax.set_ylabel("Training reward")
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc="best")
+    fig.tight_layout()
+    return fig
+
+
+def display_training_reward_plots(stats):
+    from IPython.display import display
+
+    figs = []
+    for fig in plot_individual_agent_training_rewards(stats):
+        display(fig)
+        figs.append(fig)
+    combined = plot_combined_agent_training_rewards(stats)
+    if combined is not None:
+        display(combined)
+        figs.append(combined)
+    return figs
+
+
+def _save_training_figures(figs, combined, out_path):
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    for idx, fig in enumerate(figs):
+        fig.savefig(
+            out_path.with_name(f"{out_path.stem}_agent_{idx}{out_path.suffix}"),
+            dpi=160,
+            bbox_inches="tight",
+        )
+    if combined is not None:
+        combined.savefig(out_path, dpi=160, bbox_inches="tight")
+
+
+def plot_training_curves(stats, out_path=None, show=True, window=10):
+    del window
+    figs = plot_individual_agent_training_rewards(stats)
+    combined = plot_combined_agent_training_rewards(stats)
+    if out_path:
+        _save_training_figures(figs, combined, out_path)
+    if show:
+        for fig in figs:
+            plt.figure(fig.number)
+            plt.show()
+        if combined is not None:
+            plt.figure(combined.number)
+            plt.show()
+    else:
+        for fig in figs:
+            plt.close(fig)
+        if combined is not None:
+            plt.close(combined)
+    return combined if combined is not None else (figs[0] if figs else None)
+
+
+def plot_evaluation_rewards(eval_stats, out_path=None, show=True):
+    rewards = np.asarray(eval_stats["episode_rewards"], dtype=np.float64)
+    if rewards.ndim == 1:
+        rewards = rewards.reshape(-1, 1)
+    labels = eval_stats.get("agent_labels") or [f"Agent {i}" for i in range(rewards.shape[1])]
+    if len(labels) != rewards.shape[1]:
+        labels = [f"Agent {i}" for i in range(rewards.shape[1])]
+
+    fig, ax = plt.subplots(figsize=(max(7, 1.4 * rewards.shape[1]), 4))
+    try:
+        ax.boxplot(
+            [rewards[:, i] for i in range(rewards.shape[1])],
+            tick_labels=labels,
+            showmeans=True,
+        )
+    except TypeError:  # matplotlib<3.9
+        ax.boxplot(
+            [rewards[:, i] for i in range(rewards.shape[1])],
+            labels=labels,
+            showmeans=True,
+        )
+    for i in range(rewards.shape[1]):
+        ax.scatter(np.full(rewards.shape[0], i + 1), rewards[:, i], s=12, alpha=0.55)
+    ax.set_title(f"{eval_stats.get('label', 'evaluation')} evaluation rewards")
+    ax.set_ylabel("Evaluation episode reward")
+    ax.grid(True, axis="y", alpha=0.3)
     fig.tight_layout()
     if out_path:
         out_path = Path(out_path)
@@ -928,42 +1143,96 @@ def plot_training_curves(stats, out_path=None, show=True, window=10):
     return fig
 
 
-def plot_evaluation_rewards(eval_stats, out_path=None, show=True):
-    rewards = np.asarray(eval_stats["episode_rewards"], dtype=np.float64)
-    fig, axes = plt.subplots(1, 3, figsize=(16, 4))
-    axes[0].boxplot(
-        [rewards[:, i] for i in range(rewards.shape[1])],
-        tick_labels=[f"A{i}" for i in range(rewards.shape[1])],
+def _rollout_animation(frames, *, fps=4, title="Evaluation rollout"):
+    if not frames:
+        raise ValueError("No rollout frames were captured.")
+
+    from matplotlib import animation
+
+    interval_ms = int(1000 / max(1, int(fps)))
+    fig, ax = plt.subplots(figsize=(5, 5))
+    ax.axis("off")
+    image = ax.imshow(frames[0])
+    ax.set_title(title)
+
+    def _update(frame):
+        image.set_data(frame)
+        return (image,)
+
+    anim = animation.FuncAnimation(
+        fig,
+        _update,
+        frames=frames,
+        interval=interval_ms,
+        blit=True,
     )
-    for i in range(rewards.shape[1]):
-        axes[0].scatter(np.full(rewards.shape[0], i + 1), rewards[:, i], s=12, alpha=0.55)
-    axes[0].set_title("Evaluation returns")
-    axes[0].set_ylabel("Episode return")
-    axes[0].grid(True, axis="y", alpha=0.3)
+    return fig, anim
 
-    im = axes[1].imshow(rewards.T, aspect="auto", cmap="viridis")
-    axes[1].set_title("Episode x agent returns")
-    axes[1].set_xlabel("Evaluation episode")
-    axes[1].set_ylabel("Agent")
-    fig.colorbar(im, ax=axes[1], fraction=0.046, pad=0.04)
 
-    cumulative = np.asarray(eval_stats.get("first_cumulative_rewards", []), dtype=np.float64)
-    if cumulative.size:
-        for i in range(cumulative.shape[1]):
-            axes[2].plot(cumulative[:, i], label=f"A{i}")
-        axes[2].legend(loc="best")
-    axes[2].set_title("First rollout cumulative reward")
-    axes[2].set_xlabel("Step")
-    axes[2].set_ylabel("Cumulative return")
-    axes[2].grid(True, alpha=0.3)
-    fig.suptitle(eval_stats.get("label", "evaluation"))
-    fig.tight_layout()
-    if out_path:
-        out_path = Path(out_path)
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(out_path, dpi=160, bbox_inches="tight")
-    if show:
-        plt.show()
+def rollout_video_html(frames, *, fps=4, title="Evaluation rollout"):
+    if not frames:
+        print("[rollout video skipped: no render frames captured]")
+        return None
+
+    from IPython.display import HTML
+
+    fig, anim = _rollout_animation(frames, fps=fps, title=title)
+    html = HTML(anim.to_jshtml())
+    plt.close(fig)
+    return html
+
+
+def save_rollout_video(frames, out_path, *, fps=4, title="Evaluation rollout"):
+    from matplotlib import animation
+
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig, anim = _rollout_animation(frames, fps=fps, title=title)
+    try:
+        if out_path.suffix.lower() == ".gif":
+            writer = animation.PillowWriter(fps=max(1, int(fps)))
+            anim.save(out_path, writer=writer)
+        else:
+            anim.save(out_path, fps=max(1, int(fps)))
+    finally:
+        plt.close(fig)
+    return out_path
+
+
+def display_evaluation_rollout(eval_stats, *, fps=4, output_path=None):
+    from IPython.display import FileLink, display
+
+    frames = eval_stats.get("first_rollout_frames") or []
+    saved_path = eval_stats.get("rollout_video_path")
+    if saved_path:
+        display(FileLink(saved_path))
+        print(f"[rollout video saved: {saved_path}]")
+    elif frames:
+        if output_path is not None:
+            saved_path = save_rollout_video(
+                frames,
+                output_path,
+                fps=fps,
+                title=f"{eval_stats.get('label', 'evaluation')} rollout",
+            )
+            display(FileLink(str(saved_path)))
+            print(f"[rollout video saved: {saved_path}]")
+        else:
+            html = rollout_video_html(
+                frames,
+                fps=fps,
+                title=f"{eval_stats.get('label', 'evaluation')} rollout",
+            )
+            if html is not None:
+                display(html)
+    else:
+        reason = eval_stats.get("render_error")
+        suffix = f" ({reason})" if reason else ""
+        print(f"[rollout video skipped: no render frames captured{suffix}]")
+
+    fig = plot_evaluation_rewards(eval_stats, show=False)
+    if fig is not None:
+        display(fig)
     return fig
 
 
