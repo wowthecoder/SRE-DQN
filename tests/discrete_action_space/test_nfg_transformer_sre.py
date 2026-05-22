@@ -2,7 +2,11 @@ import numpy as np
 import torch
 
 from sre_solvers import NfgTransformerConfig, NfgTransformerSreNet, make_sre_solver
-from sre_solvers.nfg_transformer.torch_utils import robust_exploitability_torch
+from sre_solvers.nfg_transformer.torch_utils import (
+    normalize_payoffs,
+    robust_exploitability_torch,
+)
+from sre_solvers.nfg_transformer.train import sample_q_tensor_torch
 from sre_solvers.nplayer_common import robust_exploitability
 
 
@@ -108,6 +112,23 @@ def test_torch_robust_exploitability_matches_numpy_rectangular():
     assert np.allclose(gap_t.detach().numpy()[0], gap_np, atol=1e-6)
 
 
+def test_synthetic_training_sampler_uses_global_payoff_normalization():
+    torch.manual_seed(13)
+    sampled = sample_q_tensor_torch(4, (2, 3, 2), device="cpu")
+
+    torch.manual_seed(13)
+    raw = torch.randn(4, 2, 3, 2, 3)
+    expected = normalize_payoffs(raw)
+
+    assert torch.allclose(sampled, expected)
+    action_dims = tuple(range(1, sampled.ndim - 1))
+    assert torch.allclose(
+        sampled.mean(dim=action_dims),
+        torch.zeros(4, 3),
+        atol=1e-6,
+    )
+
+
 def test_nfg_transformer_solver_factory_with_tiny_checkpoint(tmp_path):
     model = _tiny_model(num_players=3, num_actions=2)
     checkpoint = tmp_path / "nfg_sre.pt"
@@ -135,3 +156,43 @@ def test_nfg_transformer_solver_factory_with_tiny_checkpoint(tmp_path):
     assert result.metadata["used_fallback"] is False
     assert len(result.policies) == 3
     assert all(np.allclose(policy.sum(), 1.0) for policy in result.policies)
+
+
+def test_nfg_transformer_solver_torch_batch_matches_numpy_path(tmp_path):
+    model = _tiny_model(num_players=3, num_actions=2)
+    checkpoint = tmp_path / "nfg_sre.pt"
+    torch.save(
+        {
+            "config": model.config.to_dict(),
+            "model_state_dict": model.state_dict(),
+        },
+        checkpoint,
+    )
+
+    solver = make_sre_solver(
+        "nfg_transformer_sre",
+        checkpoint_path=checkpoint,
+        device="cpu",
+        fallback_enabled=False,
+    )
+    try:
+        q = torch.randn(4, 2, 2, 2, 3)
+        torch_results = solver.solve_batch_torch(
+            q, epsilon=torch.full((4,), 0.2), round_digits=None
+        )
+        numpy_results = solver.solve_batch(
+            q.detach().numpy(), epsilon=np.full(4, 0.2), round_digits=None
+        )
+    finally:
+        solver.close()
+
+    assert len(torch_results) == len(numpy_results) == 4
+    for torch_result, numpy_result in zip(torch_results, numpy_results):
+        assert torch_result.metadata["used_fallback"] is False
+        assert np.isclose(
+            torch_result.metadata["neural_robust_exploitability"],
+            numpy_result.metadata["neural_robust_exploitability"],
+            atol=1e-6,
+        )
+        for torch_policy, numpy_policy in zip(torch_result.policies, numpy_result.policies):
+            assert np.allclose(torch_policy, numpy_policy, atol=1e-6)

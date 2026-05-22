@@ -6,10 +6,13 @@ venv/
 
 # BenchMARL / notebook run artifacts
 **/benchmarl_runs/
+/discrete_action_space/mean_field_dsrq/runs/
 /iql_simple_tag_*/
 
 **/__pycache__/
 **/.ipynb_checkpoints/
+**/nfg_sre_checkpoints/
+**/nfg_sre_data/
 
 # reference repositories
 strategically-robust-game-theory/

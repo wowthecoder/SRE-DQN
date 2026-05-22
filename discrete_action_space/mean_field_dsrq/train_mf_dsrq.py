@@ -20,6 +20,7 @@ import yaml
 
 _THIS_DIR = Path(__file__).resolve().parent
 _DISCRETE_DIR = _THIS_DIR.parent
+_DEFAULT_RUNS_DIR = _THIS_DIR / "runs"
 if str(_DISCRETE_DIR) not in sys.path:
     sys.path.insert(0, str(_DISCRETE_DIR))
 
@@ -128,7 +129,7 @@ def train(cfg: dict):
     eps_explore_end = cfg.get("epsilon_explore_end", 0.05)
     eps_explore_decay_frac = cfg.get("epsilon_explore_decay_frac", 0.2)
 
-    run_dir = Path(cfg.get("output_dir", "runs")) / cfg["env_name"] / f"mf_dsrq_seed{seed}"
+    run_dir = Path(cfg.get("output_dir", _DEFAULT_RUNS_DIR)) / cfg["env_name"] / f"mf_dsrq_seed{seed}"
     run_dir.mkdir(parents=True, exist_ok=True)
     with open(run_dir / "config.json", "w") as f:
         json.dump(cfg, f, indent=2)

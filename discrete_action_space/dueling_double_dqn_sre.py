@@ -675,6 +675,34 @@ class DuelingDoubleDqnSreAgent:
                 if not removed:
                     raise
 
+    def _call_sre_solver_batch_torch(self, q_tensors, *, initial_policies_batch=None):
+        kwargs = {
+            "epsilon": self.config.epsilon_robust,
+            "num_repeats": self.config.sre_num_repeats,
+            "include_pure_starts": self.config.sre_include_pure_starts,
+            "exploitability_tol": self.config.sre_solver_exploitability_tol,
+            "early_exit": self.config.sre_solver_early_exit,
+        }
+        if initial_policies_batch is not None:
+            kwargs["initial_policies_batch"] = initial_policies_batch
+        while True:
+            try:
+                return self.sre_solver.solve_batch_torch(q_tensors, **kwargs)
+            except TypeError as exc:
+                message = str(exc)
+                removed = False
+                for key in (
+                    "initial_policies_batch",
+                    "exploitability_tol",
+                    "early_exit",
+                    "include_pure_starts",
+                ):
+                    if key in kwargs and key in message:
+                        kwargs.pop(key, None)
+                        removed = True
+                if not removed:
+                    raise
+
     def _policies_from_sre_result(self, result):
         if result is None or not result.success or not result.policies:
             self.sre_uniform_fallback_count += 1
@@ -724,39 +752,48 @@ class DuelingDoubleDqnSreAgent:
         allow_solver=True,
         allow_cache_reuse=True,
     ):
-        q_tensors = np.asarray(q_tensors, dtype=np.float32)
+        q_tensors_torch = q_tensors if isinstance(q_tensors, torch.Tensor) else None
+        if q_tensors_torch is not None:
+            q_tensors_np = q_tensors_torch.detach().cpu().numpy().astype(
+                np.float32, copy=False
+            )
+        else:
+            q_tensors_np = np.asarray(q_tensors, dtype=np.float32)
         expected_ndim = self.config.num_agents + 2
-        if q_tensors.ndim != expected_ndim:
+        if q_tensors_np.ndim != expected_ndim:
             raise ValueError(
                 "Expected q_tensors with shape [B, A1, ..., AN, N], "
-                f"got {q_tensors.shape}."
+                f"got {q_tensors_np.shape}."
             )
-        if tuple(q_tensors.shape[1:]) != self.q_tensor_shape:
+        if tuple(q_tensors_np.shape[1:]) != self.q_tensor_shape:
             raise ValueError(
                 f"Expected per-sample Q tensor shape {self.q_tensor_shape}, "
-                f"got {q_tensors.shape[1:]}."
+                f"got {q_tensors_np.shape[1:]}."
             )
 
         if states is not None:
             states = np.asarray(states, dtype=np.float32)
-            if states.shape[0] != q_tensors.shape[0]:
+            if states.shape[0] != q_tensors_np.shape[0]:
                 raise ValueError(
                     "states must be None or have the same leading dimension as q_tensors."
                 )
 
-        policies_by_index = [None] * q_tensors.shape[0]
+        policies_by_index = [None] * q_tensors_np.shape[0]
         unique_q_tensors = []
+        unique_q_tensors_torch = []
         unique_keys = []
         unique_state_keys = []
         key_to_unique_index = {}
 
-        for batch_index, q_tensor in enumerate(q_tensors):
+        for batch_index, q_tensor in enumerate(q_tensors_np):
             batch_key = self._sre_batch_key(q_tensor)
             unique_index = key_to_unique_index.get(batch_key)
             if unique_index is None:
                 unique_index = len(unique_q_tensors)
                 key_to_unique_index[batch_key] = unique_index
                 unique_q_tensors.append(q_tensor)
+                if q_tensors_torch is not None:
+                    unique_q_tensors_torch.append(q_tensors_torch[batch_index])
                 unique_keys.append(batch_key)
                 state_key = None
                 if states is not None:
@@ -781,7 +818,10 @@ class DuelingDoubleDqnSreAgent:
                 if cached_policies is not None:
                     unique_policies[unique_index] = cached_policies
                 else:
-                    pending_q_tensors.append(q_tensor)
+                    if q_tensors_torch is not None:
+                        pending_q_tensors.append(unique_q_tensors_torch[unique_index])
+                    else:
+                        pending_q_tensors.append(q_tensor)
                     pending_indices.append(unique_index)
                     pending_warm_policies.append(warm_policies)
 
@@ -801,7 +841,12 @@ class DuelingDoubleDqnSreAgent:
         if pending_q_tensors:
             solve_start = time.perf_counter()
             try:
-                if hasattr(self.sre_solver, "solve_batch"):
+                if q_tensors_torch is not None and hasattr(self.sre_solver, "solve_batch_torch"):
+                    results = self._call_sre_solver_batch_torch(
+                        torch.stack(pending_q_tensors, dim=0),
+                        initial_policies_batch=pending_warm_policies,
+                    )
+                elif hasattr(self.sre_solver, "solve_batch"):
                     results = self._call_sre_solver_batch(
                         pending_q_tensors,
                         initial_policies_batch=pending_warm_policies,
@@ -953,7 +998,7 @@ class DuelingDoubleDqnSreAgent:
 
         with torch.no_grad():
             # Double-DQN style: choose policy from online net, evaluate with target net.
-            next_online = self.q_net(next_states_t).detach().cpu().numpy()
+            next_online = self.q_net(next_states_t).detach()
             next_target = self.target_net(next_states_t).detach().cpu().numpy()
 
             gradient_step_index = len(self.update_times) + 1

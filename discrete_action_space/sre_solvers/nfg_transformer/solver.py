@@ -16,6 +16,7 @@ from ..nplayer_common import (
     validate_nplayer_q_tensor,
 )
 from .model import NfgTransformerConfig, NfgTransformerSreNet
+from .torch_utils import robust_exploitability_torch
 
 
 class NfgTransformerSreSolver(SreStageGameSolver):
@@ -128,8 +129,18 @@ class NfgTransformerSreSolver(SreStageGameSolver):
         metadata,
         success=None,
         message=None,
+        robust_gap=None,
+        player_gaps=None,
+        robust_values=None,
     ):
-        gap, player_gaps, robust_values = robust_exploitability(q_tensor, policies, epsilon)
+        if robust_gap is None or player_gaps is None or robust_values is None:
+            gap, player_gaps, robust_values = robust_exploitability(q_tensor, policies, epsilon)
+        else:
+            gap = float(robust_gap)
+            player_gaps = [float(g) for g in player_gaps]
+            robust_values = [
+                np.asarray(values, dtype=np.float64) for values in robust_values
+            ]
         nominal = _expected_nominal_values(q_tensor, policies)
         robust_policy_values = [
             float(policy @ values) for policy, values in zip(policies, robust_values)
@@ -162,25 +173,36 @@ class NfgTransformerSreSolver(SreStageGameSolver):
         )
 
     @torch.no_grad()
-    def _predict_batch(self, q_tensors, epsilons):
-        self._ensure_model(q_tensors[0])
-        q_batch = torch.as_tensor(
-            np.stack(q_tensors, axis=0), dtype=torch.float32, device=self.device
-        )
-        epsilon_batch = torch.as_tensor(
-            epsilons, dtype=torch.float32, device=self.device
-        )
+    def _predict_batch_torch(self, q_batch, epsilon_batch):
+        self._ensure_model(q_batch[0])
+        q_batch = q_batch.to(device=self.device, dtype=torch.float32)
+        epsilon_batch = epsilon_batch.to(device=self.device, dtype=torch.float32)
+        return self.model(q_batch, epsilon_batch)
+
+    @staticmethod
+    def _policies_torch_to_numpy_batch(policies_by_player):
         policies_by_player = [
-            policy.detach().cpu().numpy()
-            for policy in self.model(q_batch, epsilon_batch)
+            policy.detach().cpu().numpy() for policy in policies_by_player
         ]
         return [
             [
                 policies_by_player[player_id][batch_id].astype(np.float64)
                 for player_id in range(len(policies_by_player))
             ]
-            for batch_id in range(q_batch.shape[0])
+            for batch_id in range(policies_by_player[0].shape[0])
         ]
+
+    @torch.no_grad()
+    def _predict_batch(self, q_tensors, epsilons):
+        q_batch = torch.as_tensor(
+            np.stack(q_tensors, axis=0), dtype=torch.float32, device=self.device
+        )
+        epsilon_batch = torch.as_tensor(
+            epsilons, dtype=torch.float32, device=self.device
+        )
+        return self._policies_torch_to_numpy_batch(
+            self._predict_batch_torch(q_batch, epsilon_batch)
+        )
 
     @staticmethod
     def _epsilon_batch(epsilon, batch_size):
@@ -218,45 +240,46 @@ class NfgTransformerSreSolver(SreStageGameSolver):
             early_exit=early_exit,
         )[0]
 
-    def solve_batch(
+    def _solve_batch_core(
         self,
-        q_tensors,
-        epsilon,
         *,
-        num_repeats=20,
-        round_digits=4,
-        include_pure_starts=True,
-        initial_policies_batch=None,
-        exploitability_tol=1e-4,
-        early_exit=True,
+        q_tensors,
+        q_batch,
+        epsilons,
+        initial_policies_batch,
+        num_repeats,
+        round_digits,
+        include_pure_starts,
+        exploitability_tol,
+        start,
     ):
-        del early_exit
-        start = time.perf_counter()
-        q_tensors = [validate_nplayer_q_tensor(q_tensor) for q_tensor in q_tensors]
-        if not q_tensors:
-            return []
-        if initial_policies_batch is None:
-            initial_policies_batch = [None] * len(q_tensors)
-        if len(initial_policies_batch) != len(q_tensors):
-            raise ValueError("initial_policies_batch must match q_tensors length.")
-        if any(tuple(q.shape[:-1]) != q_tensors[0].shape[:-1] for q in q_tensors):
-            raise ValueError("NfgTransformerSreSolver batches must share one game shape.")
-        epsilons = self._epsilon_batch(epsilon, len(q_tensors))
-
         accept_tol = (
             float(exploitability_tol)
             if self.accept_exploitability_tol is None
             else float(self.accept_exploitability_tol)
         )
-        neural_policies_batch = self._predict_batch(q_tensors, epsilons)
+        epsilon_batch = torch.as_tensor(
+            epsilons, dtype=torch.float32, device=self.device
+        )
+        neural_policies_torch = self._predict_batch_torch(q_batch, epsilon_batch)
+        neural_gaps_torch, player_gaps_torch, robust_values_torch = (
+            robust_exploitability_torch(q_batch, neural_policies_torch, epsilon_batch)
+        )
+        neural_policies_batch = self._policies_torch_to_numpy_batch(
+            neural_policies_torch
+        )
+        neural_gaps = neural_gaps_torch.detach().cpu().numpy()
+        player_gaps_batch = player_gaps_torch.detach().cpu().numpy()
+        robust_values_batch = [
+            values.detach().cpu().numpy() for values in robust_values_torch
+        ]
+
         results = []
-        for q_tensor, epsilon_value, neural_policies, warm_policies in zip(
-            q_tensors, epsilons, neural_policies_batch, initial_policies_batch
+        for batch_id, (q_tensor, epsilon_value, neural_policies, warm_policies) in enumerate(
+            zip(q_tensors, epsilons, neural_policies_batch, initial_policies_batch)
         ):
             neural_policies = self._normalize_policies(neural_policies, q_tensor)
-            neural_gap, _, _ = robust_exploitability(
-                q_tensor, neural_policies, epsilon_value
-            )
+            neural_gap = float(neural_gaps[batch_id])
             if neural_gap <= accept_tol or not self.fallback_enabled:
                 results.append(
                     self._result_from_policies(
@@ -273,6 +296,11 @@ class NfgTransformerSreSolver(SreStageGameSolver):
                                 None if self.checkpoint_path is None else str(self.checkpoint_path)
                             ),
                         },
+                        robust_gap=neural_gap,
+                        player_gaps=player_gaps_batch[batch_id],
+                        robust_values=[
+                            values[batch_id] for values in robust_values_batch
+                        ],
                     )
                 )
                 continue
@@ -310,7 +338,110 @@ class NfgTransformerSreSolver(SreStageGameSolver):
             )
             results.append(fallback_result)
 
+        return results
+
+    def solve_batch(
+        self,
+        q_tensors,
+        epsilon,
+        *,
+        num_repeats=20,
+        round_digits=4,
+        include_pure_starts=True,
+        initial_policies_batch=None,
+        exploitability_tol=1e-4,
+        early_exit=True,
+    ):
+        del early_exit
+        start = time.perf_counter()
+        q_tensors = [validate_nplayer_q_tensor(q_tensor) for q_tensor in q_tensors]
+        if not q_tensors:
+            return []
+        if initial_policies_batch is None:
+            initial_policies_batch = [None] * len(q_tensors)
+        if len(initial_policies_batch) != len(q_tensors):
+            raise ValueError("initial_policies_batch must match q_tensors length.")
+        if any(tuple(q.shape[:-1]) != q_tensors[0].shape[:-1] for q in q_tensors):
+            raise ValueError("NfgTransformerSreSolver batches must share one game shape.")
+        epsilons = self._epsilon_batch(epsilon, len(q_tensors))
+        q_batch = torch.as_tensor(
+            np.stack(q_tensors, axis=0), dtype=torch.float32, device=self.device
+        )
+        results = self._solve_batch_core(
+            q_tensors=q_tensors,
+            q_batch=q_batch,
+            epsilons=epsilons,
+            initial_policies_batch=initial_policies_batch,
+            num_repeats=num_repeats,
+            round_digits=round_digits,
+            include_pure_starts=include_pure_starts,
+            exploitability_tol=exploitability_tol,
+            start=start,
+        )
+
         self._record_solve_time(time.perf_counter() - start, count=len(q_tensors))
+        return results
+
+    def solve_batch_torch(
+        self,
+        q_tensors,
+        epsilon,
+        *,
+        num_repeats=20,
+        round_digits=4,
+        include_pure_starts=True,
+        initial_policies_batch=None,
+        exploitability_tol=1e-4,
+        early_exit=True,
+    ):
+        """Torch-native batch entrypoint for DeepSRQ GPU handoff.
+
+        The neural proposal and robust-gap validation stay on ``self.device``.
+        Results and PATH fallback still use NumPy because the shared solver
+        interface and PATH backend are CPU/NumPy based.
+        """
+        if isinstance(q_tensors, torch.Tensor):
+            q_batch = q_tensors.detach().to(device=self.device, dtype=torch.float32)
+        else:
+            q_batch = torch.stack(
+                [
+                    torch.as_tensor(q_tensor, dtype=torch.float32, device=self.device)
+                    for q_tensor in q_tensors
+                ],
+                dim=0,
+            )
+        q_tensors_np = [
+            validate_nplayer_q_tensor(q_tensor)
+            for q_tensor in q_batch.detach().cpu().numpy()
+        ]
+        if not q_tensors_np:
+            return []
+        if q_batch.ndim != len(q_tensors_np[0].shape) + 1:
+            raise ValueError(
+                "Expected q_tensors with shape [B, A1, ..., AN, N], "
+                f"got {tuple(q_batch.shape)}."
+            )
+        if any(tuple(q.shape[:-1]) != q_tensors_np[0].shape[:-1] for q in q_tensors_np):
+            raise ValueError("NfgTransformerSreSolver batches must share one game shape.")
+        if initial_policies_batch is None:
+            initial_policies_batch = [None] * len(q_tensors_np)
+        if len(initial_policies_batch) != len(q_tensors_np):
+            raise ValueError("initial_policies_batch must match q_tensors length.")
+        epsilons = self._epsilon_batch(epsilon, len(q_tensors_np))
+
+        start = time.perf_counter()
+        results = self._solve_batch_core(
+            q_tensors=q_tensors_np,
+            q_batch=q_batch,
+            epsilons=epsilons,
+            initial_policies_batch=initial_policies_batch,
+            num_repeats=num_repeats,
+            round_digits=round_digits,
+            include_pure_starts=include_pure_starts,
+            exploitability_tol=exploitability_tol,
+            start=start,
+        )
+        self._record_solve_time(time.perf_counter() - start, count=len(q_tensors_np))
         return results
 
     def get_solve_time_summary(self):

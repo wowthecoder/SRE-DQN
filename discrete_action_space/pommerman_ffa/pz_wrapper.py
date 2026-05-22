@@ -19,6 +19,20 @@ from pettingzoo import ParallelEnv
 from .env import FfaEnvShim
 
 
+OBS_KEYS = ["board", "bomb_blast_strength", "bomb_life", "position", "ammo", "blast_strength"]
+
+
+def flatten_pommerman_obs(obs_dict: dict) -> np.ndarray:
+    """Flatten the stable numeric fields from a Pommerman observation dict."""
+    board = np.array(obs_dict.get("board", []), dtype=np.float32).flatten()
+    bomb_bs = np.array(obs_dict.get("bomb_blast_strength", []), dtype=np.float32).flatten()
+    bomb_life = np.array(obs_dict.get("bomb_life", []), dtype=np.float32).flatten()
+    position = np.array(obs_dict.get("position", [0, 0]), dtype=np.float32).flatten()
+    ammo = np.array([obs_dict.get("ammo", 0)], dtype=np.float32)
+    blast = np.array([obs_dict.get("blast_strength", 0)], dtype=np.float32)
+    return np.concatenate([board, bomb_bs, bomb_life, position, ammo, blast])
+
+
 class PommermanParallelEnv(ParallelEnv):
     """Single-learner PettingZoo wrapper around Pommerman FFA."""
 
@@ -36,21 +50,13 @@ class PommermanParallelEnv(ParallelEnv):
         # Observation: flat array of the learner's dict observation.
         # Pommerman obs is a dict; we flatten the most important keys
         # into a 1-D float vector.
-        self._obs_keys = ["board", "bomb_blast_strength", "bomb_life", "position", "ammo", "blast_strength"]
+        self._obs_keys = OBS_KEYS
         # board is 11×11, others are 11×11 or scalar; defer shape derivation to first reset
         self._obs_space = None
         self._act_space = spaces.Discrete(self._env.N_ACTIONS)
 
     def _flatten_obs(self, obs_dict: dict) -> np.ndarray:
-        parts = []
-        board = np.array(obs_dict.get("board", []), dtype=np.float32).flatten()
-        bomb_bs = np.array(obs_dict.get("bomb_blast_strength", []), dtype=np.float32).flatten()
-        bomb_life = np.array(obs_dict.get("bomb_life", []), dtype=np.float32).flatten()
-        position = np.array(obs_dict.get("position", [0, 0]), dtype=np.float32).flatten()
-        ammo = np.array([obs_dict.get("ammo", 0)], dtype=np.float32)
-        blast = np.array([obs_dict.get("blast_strength", 0)], dtype=np.float32)
-        parts = np.concatenate([board, bomb_bs, bomb_life, position, ammo, blast])
-        return parts
+        return flatten_pommerman_obs(obs_dict)
 
     def observation_space(self, agent):
         if self._obs_space is None:
@@ -61,7 +67,7 @@ class PommermanParallelEnv(ParallelEnv):
         return self._act_space
 
     def reset(self, seed=None, options=None):
-        obs_list, info = self._env.reset()
+        obs_list, info = self._env.reset(seed=seed)
         self.agents = list(self.possible_agents)
         learner_obs = self._flatten_obs(obs_list[self.learner_slot])
         if self._obs_space is None:
@@ -102,3 +108,116 @@ class PommermanParallelEnv(ParallelEnv):
 def make_pz_env(learner_slot: int = 0) -> PommermanParallelEnv:
     """Factory for PettingZoo-style Pommerman experiments."""
     return PommermanParallelEnv(learner_slot=learner_slot)
+
+
+class PommermanFullParallelEnv(ParallelEnv):
+    """Full-control four-agent PettingZoo wrapper around Pommerman FFA."""
+
+    metadata = {"render_modes": ["human"], "name": "pommerman_ffa_full_v0"}
+
+    def __init__(self):
+        super().__init__()
+        self._env = FfaEnvShim(full_control=True)
+        self.possible_agents = [f"agent_{idx}" for idx in range(self._env.n_agents)]
+        self.agents = list(self.possible_agents)
+        self._act_space = spaces.Discrete(self._env.N_ACTIONS)
+        self._obs_space = None
+        self._last_raw_obs = None
+
+    def _obs_dict(self, obs_list):
+        return {
+            agent: flatten_pommerman_obs(obs_list[idx])
+            for idx, agent in enumerate(self.possible_agents)
+        }
+
+    def observation_space(self, agent):
+        if self._obs_space is None:
+            raise RuntimeError("Call reset() first to infer observation shape.")
+        return self._obs_space
+
+    def action_space(self, agent):
+        return self._act_space
+
+    @property
+    def last_raw_observations(self):
+        return self._last_raw_obs
+
+    def reset(self, seed=None, options=None):
+        obs_list, _ = self._env.reset(seed=seed)
+        self._last_raw_obs = obs_list
+        self.agents = list(self.possible_agents)
+        obs = self._obs_dict(obs_list)
+        if self._obs_space is None:
+            first_obs = next(iter(obs.values()))
+            self._obs_space = spaces.Box(
+                low=-np.inf,
+                high=np.inf,
+                shape=first_obs.shape,
+                dtype=np.float32,
+            )
+        return obs, {agent: {} for agent in self.possible_agents}
+
+    def step(self, actions: Dict):
+        all_actions = [
+            int(actions.get(agent, 0))
+            for agent in self.possible_agents
+        ]
+        obs_list, rewards, done, truncated, info = self._env.step(all_actions)
+        self._last_raw_obs = obs_list
+        obs = self._obs_dict(obs_list)
+
+        if isinstance(rewards, (list, tuple, np.ndarray)):
+            reward_dict = {
+                agent: float(rewards[idx])
+                for idx, agent in enumerate(self.possible_agents)
+            }
+        else:
+            reward_dict = {agent: float(rewards) for agent in self.possible_agents}
+
+        if isinstance(done, (list, tuple, np.ndarray)):
+            term_dict = {
+                agent: bool(done[idx])
+                for idx, agent in enumerate(self.possible_agents)
+            }
+            all_done = all(term_dict.values())
+        else:
+            all_done = bool(done)
+            term_dict = {agent: all_done for agent in self.possible_agents}
+
+        if isinstance(truncated, (list, tuple, np.ndarray)):
+            trunc_dict = {
+                agent: bool(truncated[idx])
+                for idx, agent in enumerate(self.possible_agents)
+            }
+            all_truncated = all(trunc_dict.values())
+        else:
+            all_truncated = bool(truncated)
+            trunc_dict = {agent: all_truncated for agent in self.possible_agents}
+
+        if all_done or all_truncated:
+            self.agents = []
+        else:
+            self.agents = [
+                agent
+                for agent in self.possible_agents
+                if not (term_dict[agent] or trunc_dict[agent])
+            ]
+
+        return (
+            obs,
+            reward_dict,
+            term_dict,
+            trunc_dict,
+            {agent: info or {} for agent in self.possible_agents},
+        )
+
+    def render(self):
+        return self._env.render()
+
+    def close(self):
+        self._env.close()
+
+
+def make_full_pz_env() -> PommermanFullParallelEnv:
+    """Factory for full-control four-agent Pommerman FFA experiments."""
+    return PommermanFullParallelEnv()

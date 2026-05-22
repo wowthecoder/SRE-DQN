@@ -44,6 +44,7 @@ SRQ (Brand 2025)                     SRE-DQN (this project)
 - `discrete_action_space` folder is to extend the Strategically Robust Q-Learning paper which is a tabular Q-learning algorithm to a deep Q-learning version. It wraps around a stage game equilibrium solver. 2 main cases: bimatrix game (2 player) and N player general sum games. Several approaches currently:
     - DuelingDoubleDQN with `PathLCPBimatrixSolver` as the SRE stage game solver. A pooled version where multiple PATH workers run as parallel processes is also implemented. `PathMcpNPlayerSreSolver` is the N player version. 
     - `sre_solvers` folder contains all the different solvers for 2 players and N players. 
+    - Right now I am focuses on NfgTransformer as a Neural Equilibrium solver to tackle the bottlenect of PATH solver in the loop. The research paper is at `relevant_papers/better_solvers/NfgTransformer.md`. The original source code implementation of the paper is at `nfg_transformer_ref` folder. 
 
 - `relevant_papers` folder contains the research papers with interesting ideas that can be tried to improve the existing algorithms. It contains a README detailing which papers are implemented and which are not. 
 

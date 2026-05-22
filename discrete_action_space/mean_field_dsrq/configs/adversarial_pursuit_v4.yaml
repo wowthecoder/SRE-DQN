@@ -50,7 +50,7 @@ num_envs: 8
 seed: 42
 
 # Logging
-output_dir: runs
+output_dir: discrete_action_space/mean_field_dsrq/runs
 log_interval: 5000
 save_interval: 50000
 

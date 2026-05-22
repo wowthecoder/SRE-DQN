@@ -20,6 +20,7 @@ from .train_mf_dsrq import train
 DEFAULT_CONFIG_PATH = (
     Path(__file__).resolve().parent / "configs" / "adversarial_pursuit_v4.yaml"
 )
+RUNS_DIR = Path(__file__).resolve().parent / "runs"
 
 
 def load_mfdsrq_config(
@@ -41,7 +42,7 @@ def notebook_mfdsrq_config(
     num_envs: int = 2,
     map_size: int = DEFAULT_TASK_CONFIG["map_size"],
     max_cycles: int = DEFAULT_TASK_CONFIG["max_cycles"],
-    output_dir: str = "runs/mean_field_dsrq_notebooks",
+    output_dir: str | Path = RUNS_DIR / "mean_field_dsrq_notebooks",
     seed: int = 42,
     extra_overrides: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -54,7 +55,7 @@ def notebook_mfdsrq_config(
         "total_steps": int(total_steps),
         "num_envs": int(num_envs),
         "seed": int(seed),
-        "output_dir": output_dir,
+        "output_dir": str(output_dir),
         "log_interval": max(int(num_envs), min(1_000, int(total_steps))),
         "save_interval": max(int(num_envs), int(total_steps)),
         "learning_starts": min(1_000, max(128, int(total_steps) // 10)),
@@ -96,7 +97,7 @@ def run_baseline_from_notebook(
     total_frames: int = 20_000,
     frames_per_batch: int = 1_000,
     n_envs_per_worker: int = 1,
-    save_folder: str | Path = "runs/benchmarl_magent2_notebooks",
+    save_folder: str | Path = RUNS_DIR / "benchmarl_magent2_notebooks",
     sampling_device: str = "cpu",
     train_device: str = "cpu",
     buffer_device: str = "cpu",

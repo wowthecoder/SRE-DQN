@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 
 from .model import NfgTransformerConfig, NfgTransformerSreNet
-from .torch_utils import robust_exploitability_torch
+from .torch_utils import normalize_payoffs, robust_exploitability_torch
 
 
 def load_npz_dir(data_dir):
@@ -41,23 +41,6 @@ def load_npz_dir(data_dir):
     )
 
 
-def parse_game_shapes(value):
-    shapes = []
-    for raw_shape in str(value).split(","):
-        raw_shape = raw_shape.strip()
-        if not raw_shape:
-            continue
-        shape = tuple(int(part) for part in raw_shape.lower().split("x"))
-        if len(shape) < 2:
-            raise ValueError(f"Game shape must have at least two players, got {raw_shape!r}.")
-        if any(size < 2 for size in shape):
-            raise ValueError(f"Each player needs at least two actions, got {shape}.")
-        shapes.append(shape)
-    if not shapes:
-        raise ValueError("At least one game shape is required.")
-    return shapes
-
-
 def sample_q_tensor_torch(batch_size, action_sizes, *, device, dtype=torch.float32):
     num_players = len(action_sizes)
     q = torch.randn(
@@ -65,13 +48,7 @@ def sample_q_tensor_torch(batch_size, action_sizes, *, device, dtype=torch.float
         device=device,
         dtype=dtype,
     )
-    action_dims = tuple(range(1, num_players + 1))
-    for player_id in range(num_players):
-        payoff = q[..., player_id]
-        centered = payoff - payoff.mean(dim=player_id + 1, keepdim=True)
-        scale = centered.square().mean(dim=action_dims, keepdim=True).sqrt()
-        q[..., player_id] = centered / scale.clamp_min(1e-8)
-    return q
+    return normalize_payoffs(q)
 
 
 def sample_epsilon_torch(batch_size, *, device, dtype=torch.float32):
@@ -93,21 +70,30 @@ def train_checkpoint(
     *,
     output,
     data_dir=None,
-    epochs=20,
-    batches_per_epoch=100,
+    num_iterations=None,
+    epochs=None,
+    batches_per_epoch=None,
+    log_every=1000,
     batch_size=64,
     lr=3e-4,
     embed_dim=64,
     num_blocks=8,
     num_heads=8,
     num_self_attend_per_block=1,
-    game_shapes="6x6x6",
+    game_shapes=((6, 6, 6),),
     seed=2025,
     use_gpu=True,
 ):
     torch.manual_seed(seed)
     device = torch.device("cuda" if use_gpu and torch.cuda.is_available() else "cpu")
-    game_shapes = parse_game_shapes(game_shapes)
+    if num_iterations is None:
+        epoch_count = 20 if epochs is None else int(epochs)
+        batches = 100 if batches_per_epoch is None else int(batches_per_epoch)
+        num_iterations = epoch_count * batches
+    num_iterations = int(num_iterations)
+    if num_iterations <= 0:
+        raise ValueError("num_iterations must be positive.")
+    log_every = max(1, int(log_every))
 
     if data_dir is not None:
         q_np, eps_np, policies_np = load_npz_dir(data_dir)
@@ -139,77 +125,63 @@ def train_checkpoint(
     output.parent.mkdir(parents=True, exist_ok=True)
     print(
         f"training_mode={training_mode} shapes={game_shapes} "
-        f"batch_size={batch_size} device={device}"
+        f"batch_size={batch_size} iterations={num_iterations} device={device}"
     )
-    for epoch in range(1, epochs + 1):
-        model.train()
-        total_loss = 0.0
-        total_gap = 0.0
-        total_count = 0
+    model.train()
+    total_loss = 0.0
+    total_gap = 0.0
+    total_count = 0
+    loader_iter = iter(loader) if loader is not None else None
+    pbar = tqdm(range(1, num_iterations + 1), desc="nfg-sre-train")
+    for iteration in pbar:
         if loader is None:
-            batches = range(int(batches_per_epoch))
+            shape = game_shapes[int(rng.integers(0, len(game_shapes)))]
+            q_b = sample_q_tensor_torch(batch_size, shape, device=device)
+            eps_b = sample_epsilon_torch(batch_size, device=device)
         else:
-            batches = loader
-        for batch in tqdm(batches, desc=f"nfg-sre-train:{epoch}"):
-            if loader is None:
-                shape = game_shapes[int(rng.integers(0, len(game_shapes)))]
-                q_b = sample_q_tensor_torch(batch_size, shape, device=device)
-                eps_b = sample_epsilon_torch(batch_size, device=device)
-            else:
-                q_b = batch[0].to(device)
-                eps_b = batch[1].to(device)
-            pred = model(q_b, eps_b)
-            gaps, _, _ = robust_exploitability_torch(q_b, pred, eps_b)
-            gap_loss = gaps.mean()
-            loss = gap_loss
-            optimizer.zero_grad()
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 10.0)
-            optimizer.step()
+            try:
+                batch = next(loader_iter)
+            except StopIteration:
+                loader_iter = iter(loader)
+                batch = next(loader_iter)
+            q_b = batch[0].to(device)
+            eps_b = batch[1].to(device)
+        pred = model(q_b, eps_b)
+        gaps, _, _ = robust_exploitability_torch(q_b, pred, eps_b)
+        gap_loss = gaps.mean()
+        loss = gap_loss
+        optimizer.zero_grad()
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 10.0)
+        optimizer.step()
 
-            batch_count = q_b.shape[0]
-            total_loss += float(loss.item()) * batch_count
-            total_gap += float(gap_loss.item()) * batch_count
-            total_count += batch_count
+        batch_count = q_b.shape[0]
+        total_loss += float(loss.item()) * batch_count
+        total_gap += float(gap_loss.item()) * batch_count
+        total_count += batch_count
 
-        mean_loss = total_loss / max(1, total_count)
-        mean_gap = total_gap / max(1, total_count)
-        print(f"epoch={epoch} loss={mean_loss:.6f} robust_gap={mean_gap:.6f}")
-        if mean_gap < best_gap:
-            best_gap = mean_gap
-            torch.save(
-                {
-                    "config": config.to_dict(),
-                    "model_state_dict": model.state_dict(),
-                    "best_train_robust_gap": best_gap,
-                    "epoch": epoch,
-                    "training_mode": training_mode,
-                    "game_shapes": [list(shape) for shape in game_shapes],
-                },
-                output,
+        if iteration % log_every == 0 or iteration == num_iterations:
+            mean_loss = total_loss / max(1, total_count)
+            mean_gap = total_gap / max(1, total_count)
+            print(
+                f"iteration={iteration} loss={mean_loss:.6f} "
+                f"robust_gap={mean_gap:.6f}"
             )
-
-
-def main(argv=None):
-    parser = argparse.ArgumentParser(description="Train an NfgTransformer SRE checkpoint.")
-    parser.add_argument("--data-dir", default=None)
-    parser.add_argument("--output", required=True)
-    parser.add_argument("--epochs", type=int, default=20)
-    parser.add_argument("--batches-per-epoch", type=int, default=100)
-    parser.add_argument("--batch-size", type=int, default=64)
-    parser.add_argument("--lr", type=float, default=3e-4)
-    parser.add_argument("--embed-dim", type=int, default=64)
-    parser.add_argument("--num-blocks", type=int, default=8)
-    parser.add_argument("--num-heads", type=int, default=8)
-    parser.add_argument("--num-self-attend-per-block", type=int, default=1)
-    parser.add_argument("--game-shapes", default="6x6x6")
-    parser.add_argument("--seed", type=int, default=2025)
-    parser.add_argument("--no-gpu", action="store_true")
-    args = parser.parse_args(argv)
-    values = vars(args)
-    values["use_gpu"] = not values.pop("no_gpu")
-    train_checkpoint(**values)
-
-
-if __name__ == "__main__":
-    main()
+            pbar.set_postfix(loss=f"{mean_loss:.4f}", gap=f"{mean_gap:.4f}")
+            if mean_gap < best_gap:
+                best_gap = mean_gap
+                torch.save(
+                    {
+                        "config": config.to_dict(),
+                        "model_state_dict": model.state_dict(),
+                        "best_train_robust_gap": best_gap,
+                        "iteration": iteration,
+                        "num_iterations": num_iterations,
+                        "training_mode": training_mode,
+                        "game_shapes": [list(shape) for shape in game_shapes],
+                    },
+                    output,
+                )
+            total_loss = 0.0
+            total_gap = 0.0
+            total_count = 0

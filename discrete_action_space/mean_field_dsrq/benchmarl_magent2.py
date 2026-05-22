@@ -27,6 +27,7 @@ DEFAULT_TASK_CONFIG: dict[str, Any] = {
 }
 
 ALGORITHM_NAMES = ("mappo", "ippo", "qmix", "vdn", "iql")
+RUNS_DIR = Path(__file__).resolve().parent / "runs"
 
 
 class ParallelEnvApiCompat:
@@ -260,7 +261,7 @@ def make_experiment_config(
     total_frames: int = 20_000,
     frames_per_batch: int = 1_000,
     n_envs_per_worker: int = 1,
-    save_folder: str | Path = "runs/benchmarl_magent2_notebooks",
+    save_folder: str | Path = RUNS_DIR / "benchmarl_magent2_notebooks",
     sampling_device: str = "cpu",
     train_device: str = "cpu",
     buffer_device: str = "cpu",
@@ -322,7 +323,7 @@ def make_benchmarl_experiment(
     total_frames: int = 20_000,
     frames_per_batch: int = 1_000,
     n_envs_per_worker: int = 1,
-    save_folder: str | Path = "runs/benchmarl_magent2_notebooks",
+    save_folder: str | Path = RUNS_DIR / "benchmarl_magent2_notebooks",
     sampling_device: str = "cpu",
     train_device: str = "cpu",
     buffer_device: str = "cpu",
@@ -361,7 +362,7 @@ def run_benchmarl_algorithm(
     total_frames: int = 20_000,
     frames_per_batch: int = 1_000,
     n_envs_per_worker: int = 1,
-    save_folder: str | Path = "runs/benchmarl_magent2_notebooks",
+    save_folder: str | Path = RUNS_DIR / "benchmarl_magent2_notebooks",
     sampling_device: str = "cpu",
     train_device: str = "cpu",
     buffer_device: str = "cpu",

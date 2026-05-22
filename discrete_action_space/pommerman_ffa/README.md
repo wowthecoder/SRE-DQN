@@ -48,8 +48,15 @@ env.close()
 The learner's Pommerman observation dictionary is flattened into a 1-D float32
 vector containing: `board` (11×11), `bomb_blast_strength` (11×11),
 `bomb_life` (11×11), `position` (2), `ammo` (1), `blast_strength` (1).
-Total dimension: 365.
+Total dimension: 367.
+
+For full four-agent self-play experiments, use `make_full_pz_env()`. It exposes
+`agent_0` through `agent_3` and expects a full joint action dictionary each
+step. The original `make_pz_env(learner_slot=0)` learner-vs-SimpleAgents wrapper
+is still available for quick single-learner smoke tests.
 
 ## See also
 
-`pommerman_example.ipynb` — environment validation and IQL training demo.
+`pommerman_example.ipynb` — environment validation and legacy smoke checks.
+`pommerman_baselines.ipynb` — Random/SimpleAgent references plus IQL-DQN/IPPO.
+`pommerman_sr_algorithms.ipynb` — SR-ADIDAS and Deep SRQ with NfgTransformer SRE.

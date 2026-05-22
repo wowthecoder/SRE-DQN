@@ -60,7 +60,7 @@ python -m discrete_action_space.mean_field_dsrq.train_mf_dsrq \
 # Evaluation
 python -m discrete_action_space.mean_field_dsrq.eval_mf_dsrq \
     --config discrete_action_space/mean_field_dsrq/configs/battle_v4.yaml \
-    --checkpoint_dir runs/battle_v4/mf_dsrq_seed42 \
+    --checkpoint_dir discrete_action_space/mean_field_dsrq/runs/battle_v4/mf_dsrq_seed42 \
     --num_episodes 100 \
     --obs_noise_sigmas 0,0.05,0.10,0.20
 ```

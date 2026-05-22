@@ -4,6 +4,7 @@ import argparse
 from pathlib import Path
 
 import numpy as np
+from tqdm import tqdm
 
 from ..nplayer_common import robust_exploitability
 from .solver import NfgTransformerSreSolver
@@ -29,7 +30,7 @@ def evaluate_checkpoint(
     gaps = []
     accepted = 0
     try:
-        for sample_idx in range(q.shape[0]):
+        for sample_idx in tqdm(range(q.shape[0]), desc="nfg-sre-eval", unit="game"):
             result = solver.solve(
                 q[sample_idx],
                 epsilon=float(eps[sample_idx]),
@@ -48,7 +49,14 @@ def evaluate_checkpoint(
     print(f"samples={gaps.size}")
     print(f"mean_gap={float(gaps.mean()):.6f}")
     print(f"p95_gap={float(np.quantile(gaps, 0.95)):.6f}")
+    print(f"accept_tol={float(exploitability_tol):.6f}")
     print(f"accept_rate={accepted / max(1, gaps.size):.4f}")
+    for threshold in (0.1, 0.05, 0.01):
+        if abs(float(threshold) - float(exploitability_tol)) > 1e-12:
+            print(
+                f"accept_rate@{threshold:g}="
+                f"{float(np.mean(gaps <= threshold)):.4f}"
+            )
 
 
 def main(argv=None):

@@ -111,10 +111,20 @@ def to_State_mesh_sre(t_list, q_list, p, net, nump, other_inv, i_val, norm_mean,
         return _first_agent_action_mesh(mu_sr, q_list, t_list, nump)
 
 
-def find_latest_model_dir(prefix, root_dir='pt_files'):
-    """Return the latest timestamped model directory matching a prefix."""
+def find_latest_model_dir(prefix, root_dir='pt_files', seed=None):
+    """Return a saved model directory matching a prefix and optional seed."""
     if not os.path.isdir(root_dir):
         raise FileNotFoundError(f"Model root directory not found: {root_dir}")
+
+    if seed is not None:
+        model_dir = os.path.join(root_dir, f"{prefix}_seed_{int(seed)}")
+        checkpoint_path = os.path.join(model_dir, 'best_checkpoint', 'checkpoint.pt')
+        if not os.path.isfile(checkpoint_path):
+            raise FileNotFoundError(
+                f"No checkpoint found for prefix {prefix!r} and seed {int(seed)} under {root_dir!r}: "
+                f"expected {checkpoint_path!r}"
+            )
+        return model_dir
 
     candidates = []
     for name in os.listdir(root_dir):
@@ -127,7 +137,10 @@ def find_latest_model_dir(prefix, root_dir='pt_files'):
         raise FileNotFoundError(
             f"No saved model directory with checkpoint found for prefix {prefix!r} under {root_dir!r}"
         )
-    return max(candidates, key=lambda path: os.path.basename(path))
+    return max(
+        candidates,
+        key=lambda path: os.path.getmtime(os.path.join(path, 'best_checkpoint', 'checkpoint.pt')),
+    )
 
 
 def load_best_checkpoint_into_agent(agent, model_dir):

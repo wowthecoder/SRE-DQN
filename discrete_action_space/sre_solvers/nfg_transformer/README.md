@@ -22,21 +22,30 @@ From the repository root:
 source venv/bin/activate
 
 python -m discrete_action_space.sre_solvers.nfg_transformer.train \
-  --output nfg_sre_checkpoints/nfg_sre_lbf3.pt \
-  --epochs 5 \
-  --batches-per-epoch 100 \
-  --game-shapes 6x6x6,4x5x6
+  --output discrete_action_space/sre_solvers/nfg_transformer/nfg_sre_checkpoints/nfg_sre_lbf3.pt \
+  --num-iterations 20000
+
+For custom game shapes, call `train_checkpoint(...)` from Python/notebooks and
+pass tuples directly:
+
+```python
+train_checkpoint(
+    output=CHECKPOINT,
+    num_iterations=20_000,
+    game_shapes=((6, 6), (6, 6, 6)),
+)
+```
 
 python -m discrete_action_space.sre_solvers.nfg_transformer.generate_dataset \
-  --output nfg_sre_data/val \
+  --output discrete_action_space/sre_solvers/nfg_transformer/nfg_sre_data/val \
   --label-mode random \
   --num-samples 64 \
   --game-shape 6x6x6 \
   --seed 2026
 
 python -m discrete_action_space.sre_solvers.nfg_transformer.evaluate \
-  --checkpoint nfg_sre_checkpoints/nfg_sre_lbf3.pt \
-  --data-dir nfg_sre_data/val
+  --checkpoint discrete_action_space/sre_solvers/nfg_transformer/nfg_sre_checkpoints/nfg_sre_lbf3.pt \
+  --data-dir discrete_action_space/sre_solvers/nfg_transformer/nfg_sre_data/val
 ```
 
 The model can be trained on multiple game shapes because the checkpoint
@@ -49,7 +58,7 @@ For slow PATH-labeled comparison data, `generate_dataset` still supports
 
 ```bash
 python -m discrete_action_space.sre_solvers.nfg_transformer.generate_dataset \
-  --output nfg_sre_data/path_train \
+  --output discrete_action_space/sre_solvers/nfg_transformer/nfg_sre_data/path_train \
   --label-mode path \
   --num-samples 64 \
   --num-players 3 \
@@ -65,7 +74,7 @@ from discrete_action_space.lbf_grid.deep_srq_lbf import train_lbf_deep_srq_exper
 stats = train_lbf_deep_srq_experiment(
     solver_name="nfg_transformer_sre",
     hyperparameter_overrides={
-        "nfg_checkpoint_path": "nfg_sre_checkpoints/nfg_sre_lbf3.pt",
+        "nfg_checkpoint_path": "discrete_action_space/sre_solvers/nfg_transformer/nfg_sre_checkpoints/nfg_sre_lbf3.pt",
         "nfg_accept_gap": 1e-3,
         "nfg_fallback_enabled": True,
     },
@@ -79,6 +88,9 @@ stats = train_lbf_deep_srq_experiment(
   objective but replacing NE gap with SRE robust gap.
 - The model receives `epsilon` as an input, so one checkpoint can represent
   different robustness radii for the same payoff tensor.
+- The default notebook run is a smoke-quality run. If `mean_gap` is around
+  `1e-1`, then `accept_rate` at `1e-3` can be zero; use it as a warm start with
+  fallback, train longer, or raise `nfg_accept_gap` intentionally.
 - `--label-mode path` calls PATH MCP for labels and is intended for comparison
   or diagnostics, not default training.
 - If the neural policy has robust exploitability above `nfg_accept_gap`, the

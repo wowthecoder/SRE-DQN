@@ -423,3 +423,58 @@ class SrAdidasAgent:
         with torch.no_grad():
             policies = self.pi_net(s)
         return [p.squeeze(0).cpu().numpy() for p in policies]
+
+    def save_checkpoint(self, path):
+        """Save enough state for notebook evaluation and training inspection."""
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(
+            {
+                "obs_dim": self.obs_dim,
+                "num_agents": self.num_agents,
+                "num_actions": self.num_actions,
+                "gamma": self.gamma,
+                "batch_size": self.batch_size,
+                "learning_starts": self.learning_starts,
+                "grad_clip": self.grad_clip,
+                "target_update_steps": self.target_update_steps,
+                "train_every": self.train_every,
+                "eta_y": self.eta_y,
+                "q_net": self.q_net.state_dict(),
+                "q_target": self.q_target.state_dict(),
+                "pi_net": self.pi_net.state_dict(),
+                "q_optimizer": self.q_optimizer.state_dict(),
+                "pi_optimizer": self.pi_optimizer.state_dict(),
+                "tau": self.tau_schedule.tau,
+                "action_epsilon_step": self.action_eps_schedule._step,
+                "robust_epsilon_step": self.robust_eps_schedule._step,
+                "train_losses_q": self.train_losses_q,
+                "train_losses_pi": self.train_losses_pi,
+                "adi_estimates": self.adi_estimates,
+                "train_times": self.train_times,
+            },
+            path,
+        )
+
+    def load_checkpoint(self, path, map_location=None):
+        """Load a checkpoint saved by :meth:`save_checkpoint`."""
+        checkpoint = torch.load(path, map_location=map_location or self.device)
+        self.q_net.load_state_dict(checkpoint["q_net"])
+        self.q_target.load_state_dict(checkpoint["q_target"])
+        self.pi_net.load_state_dict(checkpoint["pi_net"])
+        if "q_optimizer" in checkpoint:
+            self.q_optimizer.load_state_dict(checkpoint["q_optimizer"])
+        if "pi_optimizer" in checkpoint:
+            self.pi_optimizer.load_state_dict(checkpoint["pi_optimizer"])
+        self.tau_schedule.tau = float(checkpoint.get("tau", self.tau_schedule.tau))
+        self.action_eps_schedule._step = int(
+            checkpoint.get("action_epsilon_step", self.action_eps_schedule._step)
+        )
+        self.robust_eps_schedule._step = int(
+            checkpoint.get("robust_epsilon_step", self.robust_eps_schedule._step)
+        )
+        self.train_losses_q = list(checkpoint.get("train_losses_q", self.train_losses_q))
+        self.train_losses_pi = list(checkpoint.get("train_losses_pi", self.train_losses_pi))
+        self.adi_estimates = list(checkpoint.get("adi_estimates", self.adi_estimates))
+        self.train_times = list(checkpoint.get("train_times", self.train_times))
+        return checkpoint
