@@ -121,15 +121,67 @@ def robust_action_values(q_tensor, policies, epsilon, player_id, *, validated=Fa
     return values
 
 
-def robust_exploitability(q_tensor, policies, epsilon):
+def robust_policy_value(q_tensor, policies, epsilon, player_id, *, validated=False):
+    """Worst-case value of a mixed policy over the opponents' TV ball.
+
+    ``robust_action_values`` evaluates every pure action separately and is useful
+    for pure-deviation diagnostics. This helper evaluates the mixed policy as a
+    single commitment, then lets the adversary choose one worst-case opponent
+    joint-action distribution for that mixture.
+    """
+    if not validated:
+        q_tensor = validate_nplayer_q_tensor(q_tensor)
+    else:
+        q_tensor = np.asarray(q_tensor, dtype=np.float64)
+    action_sizes = q_tensor.shape[:-1]
+    own_policy = np.asarray(policies[player_id], dtype=np.float64)
+    own_total = float(own_policy.sum())
+    if own_total <= 0.0:
+        own_policy = np.full(action_sizes[player_id], 1.0 / action_sizes[player_id])
+    else:
+        own_policy = np.clip(own_policy / own_total, 0.0, None)
+    opponent_policies = [
+        policies[j] for j in range(len(action_sizes)) if j != player_id
+    ]
+    opponent_distribution = _joint_distribution(opponent_policies)
+    payoff_matrix = _payoff_matrix_for_player(q_tensor, player_id)
+    mixed_values = own_policy @ payoff_matrix
+    return _tv_worst_case_value(opponent_distribution, mixed_values, epsilon)
+
+
+def robust_policy_values(q_tensor, policies, epsilon, *, validated=False):
+    if not validated:
+        q_tensor = validate_nplayer_q_tensor(q_tensor)
+    else:
+        q_tensor = np.asarray(q_tensor, dtype=np.float64)
+    return [
+        robust_policy_value(q_tensor, policies, epsilon, player_id, validated=True)
+        for player_id in range(q_tensor.shape[-1])
+    ]
+
+
+def robust_exploitability(q_tensor, policies, epsilon, *, value_mode="mixed_policy"):
     q_tensor = validate_nplayer_q_tensor(q_tensor)
+    if value_mode not in {"mixed_policy", "action_value_mix"}:
+        raise ValueError(
+            "value_mode must be 'mixed_policy' or 'action_value_mix', "
+            f"got {value_mode!r}."
+        )
     robust_values = [
         robust_action_values(q_tensor, policies, epsilon, player_id, validated=True)
         for player_id in range(q_tensor.shape[-1])
     ]
     gaps = []
-    for policy, action_values in zip(policies, robust_values):
-        current_value = float(np.asarray(policy, dtype=np.float64) @ action_values)
+    if value_mode == "mixed_policy":
+        current_values = robust_policy_values(
+            q_tensor, policies, epsilon, validated=True
+        )
+    else:
+        current_values = [
+            float(np.asarray(policy, dtype=np.float64) @ action_values)
+            for policy, action_values in zip(policies, robust_values)
+        ]
+    for current_value, action_values in zip(current_values, robust_values):
         gaps.append(max(0.0, float(np.max(action_values) - current_value)))
     return float(max(gaps) if gaps else 0.0), gaps, robust_values
 

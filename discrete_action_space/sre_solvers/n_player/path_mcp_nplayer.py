@@ -22,6 +22,7 @@ from ..nplayer_common import (
     _solution_dict_from_policies,
     _uniform_nplayer_policies,
     robust_exploitability,
+    robust_policy_values,
     validate_nplayer_q_tensor,
 )
 
@@ -424,9 +425,7 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
             q_tensor, policies, epsilon
         )
         nominal = _expected_nominal_values(q_tensor, policies)
-        robust_policy_values = [
-            float(policy @ values) for policy, values in zip(policies, robust_values)
-        ]
+        robust_policy_values_result = robust_policy_values(q_tensor, policies, epsilon)
         success = bool(exploitability <= success_tol)
         result_metadata = {
             "solver": PathMcpNPlayerSreSolver.name,
@@ -438,7 +437,9 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
             "wall_seconds": float(time.perf_counter() - start),
             "robust_exploitability": float(exploitability),
             "player_robust_gaps": [float(gap) for gap in player_gaps],
-            "robust_policy_values": robust_policy_values,
+            "robust_policy_values": [
+                float(value) for value in robust_policy_values_result
+            ],
             "nominal_values": [float(value) for value in nominal],
             "joint_nominal_welfare": float(np.sum(nominal)),
         }
@@ -446,7 +447,7 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
         return SreSolveResult(
             policies=policies,
             solutions=[_solution_dict_from_policies(policies, round_digits=round_digits)],
-            utilities_sr=[robust_policy_values],
+            utilities_sr=[[float(value) for value in robust_policy_values_result]],
             utilities_nominal=[[float(value) for value in nominal]],
             success=success,
             message="" if success else "Returned best PATH MCP candidate.",
@@ -646,15 +647,15 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
                 q_tensor, policies, epsilon
             )
             nominal = _expected_nominal_values(q_tensor, policies)
-            robust_policy_values = [
-                float(policy @ values) for policy, values in zip(policies, robust_values)
-            ]
+            robust_policy_values_result = robust_policy_values(q_tensor, policies, epsilon)
             candidates.append(
                 {
                     "policies": policies,
                     "robust_exploitability": float(exploitability),
                     "player_robust_gaps": [float(gap) for gap in player_gaps],
-                    "robust_policy_values": robust_policy_values,
+                    "robust_policy_values": [
+                        float(value) for value in robust_policy_values_result
+                    ],
                     "nominal_values": [float(value) for value in nominal],
                     "joint_nominal_welfare": float(np.sum(nominal)),
                     "status": int(status),
@@ -684,13 +685,11 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
                 q_tensor, policies, epsilon
             )
             nominal = _expected_nominal_values(q_tensor, policies)
-            robust_policy_values = [
-                float(policy @ values) for policy, values in zip(policies, robust_values)
-            ]
+            robust_policy_values_result = robust_policy_values(q_tensor, policies, epsilon)
             return SreSolveResult(
                 policies=policies,
                 solutions=[_solution_dict_from_policies(policies, round_digits=round_digits)],
-                utilities_sr=[robust_policy_values],
+                utilities_sr=[[float(value) for value in robust_policy_values_result]],
                 utilities_nominal=[[float(value) for value in nominal]],
                 success=False,
                 message="PATH MCP failed to return a candidate. " + "; ".join(messages[:3]),
@@ -708,7 +707,9 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
                     "wall_seconds": float(elapsed),
                     "robust_exploitability": float(exploitability),
                     "player_robust_gaps": [float(gap) for gap in player_gaps],
-                    "robust_policy_values": robust_policy_values,
+                    "robust_policy_values": [
+                        float(value) for value in robust_policy_values_result
+                    ],
                     "nominal_values": [float(value) for value in nominal],
                     "joint_nominal_welfare": float(np.sum(nominal)),
                 },

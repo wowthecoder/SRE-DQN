@@ -20,7 +20,7 @@ Two-player bimatrix solvers expect `q_tensor.shape == (A1, A2, 2)`. N-player sol
 
 ## Shared SRE Model
 
-The finite-action solvers use a total-variation transport ball, implemented as a Wasserstein-1 ball with 0/1 ground distance. For a fixed player action, the helper `robust_action_values(...)` computes the worst-case value over opponent joint-action distributions within the `epsilon` ball by moving probability mass from high-payoff opponent outcomes to low-payoff opponent outcomes.
+The finite-action solvers use a total-variation transport ball, implemented as a Wasserstein-1 ball with 0/1 ground distance. For a fixed player action, the helper `robust_action_values(...)` computes the worst-case value over opponent joint-action distributions within the `epsilon` ball by moving probability mass from high-payoff opponent outcomes to low-payoff opponent outcomes. For a mixed policy commitment, `robust_policy_value(...)` and `robust_policy_values(...)` compute the true worst-case value of the mixture itself.
 
 An SRE policy profile is evaluated by robust exploitability: for each player, compare the robust value of the current mixed policy against the best robust action value. A profile is close to SRE when no player has a profitable robust unilateral deviation.
 
@@ -36,6 +36,7 @@ An SRE policy profile is evaluated by robust exploitability: for each player, co
 | `lemkelcp_pool` | `ProcessPoolLemkeLcpBimatrixSreSolver` | 2-player | Parallel batch wrapper around `lemkelcp`. |
 | `path_mcp_nplayer`, `path_nplayer`, `path_mcp` | `PathMcpNPlayerSreSolver` | N-player | PATH-backed multilinear MCP formulation. |
 | `path_mcp_nplayer_pool`, `path_nplayer_pool`, `path_mcp_pool` | `ProcessPoolPathMcpNPlayerSreSolver` | N-player | Parallel batch wrapper around `path_mcp_nplayer`. |
+| `sr_adidas_sre`, `sr_adidas` | `SrAdidasSreSolver` | N-player | Approximate full-tensor SR-ADIDAS homotopy solver for Deep SRQ inner loops. |
 
 ## Bimatrix Solvers
 

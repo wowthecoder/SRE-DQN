@@ -81,6 +81,14 @@ DEEP_SRQ_LBF_HYPERPARAMS = {
     "nfg_device": None,
     "nfg_fallback_enabled": True,
     "nfg_accept_gap": None,
+    "sre_target_value_mode": "robust",
+    "sr_adidas_max_iters": 200,
+    "sr_adidas_lr": 0.2,
+    "sr_adidas_tau_init": 10.0,
+    "sr_adidas_tau_min": 1e-3,
+    "sr_adidas_tau_threshold": 1e-4,
+    "sr_adidas_exploitability_tol": None,
+    "sr_adidas_device": None,
 }
 
 DEFAULT_LBF_CONFIG = basic_lbf_config()
@@ -236,6 +244,17 @@ def _make_solver(solver_name, hp, seed):
             fallback_enabled=hp.get("nfg_fallback_enabled", True),
             accept_exploitability_tol=hp.get("nfg_accept_gap"),
         )
+    if solver_name in {"sr_adidas_sre", "sr_adidas"}:
+        return make_sre_solver(
+            solver_name,
+            random_seed=seed,
+            max_iters=hp.get("sr_adidas_max_iters", 200),
+            lr=hp.get("sr_adidas_lr", 0.2),
+            tau_init=hp.get("sr_adidas_tau_init", 10.0),
+            tau_min=hp.get("sr_adidas_tau_min", 1e-3),
+            tau_threshold=hp.get("sr_adidas_tau_threshold", 1e-4),
+            device=hp.get("sr_adidas_device"),
+        )
     return make_sre_solver(
         solver_name,
         random_seed=seed,
@@ -308,9 +327,15 @@ def train_lbf_deep_srq_experiment(
             sre_state_cache_round_digits=hp.get("sre_state_cache_round_digits", 4),
             sre_approx_cache_enabled=hp.get("sre_approx_cache_enabled", True),
             sre_cache_exploitability_tol=hp.get("sre_cache_exploitability_tol", 1e-3),
-            sre_solver_exploitability_tol=hp.get("sre_solver_exploitability_tol", 1e-4),
+            sre_solver_exploitability_tol=(
+                hp.get("sr_adidas_exploitability_tol")
+                if solver_name in {"sr_adidas_sre", "sr_adidas"}
+                and hp.get("sr_adidas_exploitability_tol") is not None
+                else hp.get("sre_solver_exploitability_tol", 1e-4)
+            ),
             sre_approx_accept_tol=hp.get("sre_approx_accept_tol", 1e-2),
             sre_solver_early_exit=hp.get("sre_solver_early_exit", True),
+            sre_target_value_mode=hp.get("sre_target_value_mode", "robust"),
         )
     )
 

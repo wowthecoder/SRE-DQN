@@ -5,6 +5,7 @@ from .n_player.path_mcp_nplayer import (
 )
 from .nfg_transformer import NfgTransformerSreSolver
 from .path_c import PathCBimatrixSreSolver, ProcessPoolPathCBimatrixSreSolver
+from .sr_adidas import SrAdidasSreSolver
 
 
 def make_sre_solver(
@@ -56,4 +57,9 @@ def make_sre_solver(
         if pathwrap_path is not None:
             solver_kwargs["pathwrap_path"] = pathwrap_path
         return NfgTransformerSreSolver(**solver_kwargs)
+    if solver_name in {"sr_adidas_sre", "sr_adidas"}:
+        solver_kwargs = dict(kwargs)
+        if random_seed is not None and "random_seed" not in solver_kwargs:
+            solver_kwargs["random_seed"] = random_seed
+        return SrAdidasSreSolver(**solver_kwargs)
     raise ValueError(f"Unknown SRE solver: {solver_name}")

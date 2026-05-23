@@ -28,8 +28,16 @@ for _path in (str(_DISCRETE_DIR), str(_BIMATRIX_DIR)):
 from stats_utils import save_training_stats
 
 from dueling_double_dqn_sre import DuelingDoubleDqnSreAgent, DuelingDoubleDqnSreAgentConfig
-from sr_adidas.sr_adidas_agent import SrAdidasAgent
 from sre_solvers import make_sre_solver
+
+SrAdidasAgent = None
+
+
+def _raise_standalone_sr_adidas_removed():
+    raise RuntimeError(
+        "Standalone SR-ADIDAS training was removed. Use Deep SRQ with "
+        "solver_name='sr_adidas_sre' to run SR-ADIDAS as a stage-game solver."
+    )
 
 try:
     from .deep_srq_lbf import (
@@ -243,7 +251,7 @@ def write_training_reward_plots(stats: dict, output_dir: str | Path) -> dict:
     plot_paths = {}
     for idx, values in enumerate(rewards):
         fig, ax = plt.subplots(figsize=(10, 3.8))
-        ax.scatter(episodes, values, s=13, alpha=0.65, label=str(labels[idx]))
+        ax.plot(episodes, values, linewidth=1.4, alpha=0.85, marker="", label=str(labels[idx]))
         mean = float(values.mean())
         std = float(values.std())
         ax.axhline(mean, color="black", linestyle=":", linewidth=1.3)
@@ -535,6 +543,23 @@ def train_lbf_sr_adidas_experiment(
 ) -> dict:
     if torch is None:
         raise ImportError("SR-ADIDAS LBF training requires torch.")
+    hp = dict(hyperparameter_overrides or {})
+    return train_lbf_deep_srq_experiment(
+        n_episodes=n_episodes,
+        solver_name="sr_adidas_sre",
+        epsilon_robust_initial=float(epsilon),
+        epsilon_schedule="constant",
+        seed=seed,
+        run_dir=run_dir,
+        lbf_config_overrides=scenario.config,
+        hyperparameter_overrides=hp,
+        use_gpu=use_gpu,
+        write_plots=False,
+        include_replay_buffer=True,
+        eval_interval=eval_interval,
+        eval_episodes=eval_episodes,
+        print_full_stats=False,
+    )
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -917,8 +942,13 @@ def load_deepsrq_policy(
     *,
     repo_root: str | Path | None = None,
     use_gpu: bool = True,
+    run_dir_override: str | Path | None = None,
 ) -> DeepSrqPolicyAdapter:
-    run_dir = deepsrq_training_dir(scenario.key, epsilon, repo_root=repo_root)
+    run_dir = (
+        Path(run_dir_override)
+        if run_dir_override is not None
+        else deepsrq_training_dir(scenario.key, epsilon, repo_root=repo_root)
+    )
     stats_path = run_dir / "training_stats.json"
     stats = json.loads(stats_path.read_text(encoding="utf-8"))
     checkpoint = run_dir / "shared_deepsrq_best.pt"
@@ -926,14 +956,26 @@ def load_deepsrq_policy(
         checkpoint = run_dir / "shared_deepsrq_final.pt"
     hp = dict(stats.get("hyperparameters", {}))
     solver_name = stats.get("solver_name", "nfg_transformer_sre")
-    solver = make_sre_solver(
-        solver_name,
-        random_seed=int(stats.get("seed", BASE_SEED)),
-        checkpoint_path=hp.get("nfg_checkpoint_path"),
-        device=hp.get("nfg_device"),
-        fallback_enabled=hp.get("nfg_fallback_enabled", True),
-        accept_exploitability_tol=hp.get("nfg_accept_gap"),
-    )
+    if solver_name in {"sr_adidas_sre", "sr_adidas"}:
+        solver = make_sre_solver(
+            solver_name,
+            random_seed=int(stats.get("seed", BASE_SEED)),
+            max_iters=hp.get("sr_adidas_max_iters", 200),
+            lr=hp.get("sr_adidas_lr", 0.2),
+            tau_init=hp.get("sr_adidas_tau_init", 10.0),
+            tau_min=hp.get("sr_adidas_tau_min", 1e-3),
+            tau_threshold=hp.get("sr_adidas_tau_threshold", 1e-4),
+            device=hp.get("sr_adidas_device"),
+        )
+    else:
+        solver = make_sre_solver(
+            solver_name,
+            random_seed=int(stats.get("seed", BASE_SEED)),
+            checkpoint_path=hp.get("nfg_checkpoint_path"),
+            device=hp.get("nfg_device"),
+            fallback_enabled=hp.get("nfg_fallback_enabled", True),
+            accept_exploitability_tol=hp.get("nfg_accept_gap"),
+        )
     agent = DuelingDoubleDqnSreAgent(
         DuelingDoubleDqnSreAgentConfig(
             agent_id=0,
@@ -960,6 +1002,7 @@ def load_deepsrq_policy(
                 "target_equilibrium_update_steps",
                 DEEP_SRQ_LBF_HYPERPARAMS["target_equilibrium_update_steps"],
             ),
+            sre_target_value_mode=hp.get("sre_target_value_mode", "robust"),
         )
     )
     agent.load_checkpoint(checkpoint, map_location=None if use_gpu else "cpu")
@@ -1047,36 +1090,15 @@ def load_sr_adidas_policy(
     repo_root: str | Path | None = None,
     use_gpu: bool = True,
 ) -> SrAdidasPolicyAdapter:
-    run_dir = sr_adidas_training_dir(scenario.key, epsilon, repo_root=repo_root)
-    stats_path = run_dir / "training_stats.json"
-    stats = json.loads(stats_path.read_text(encoding="utf-8"))
-    checkpoint = run_dir / "shared_sr_adidas_best.pt"
-    if not checkpoint.exists():
-        checkpoint = run_dir / "shared_sr_adidas_final.pt"
-    hp = dict(stats.get("hyperparameters", {}))
-    agent = SrAdidasAgent(
-        obs_dim=int(stats["obs_dim"]),
-        num_agents=int(stats["num_agents"]),
-        num_actions=int(stats["num_actions"]),
-        epsilon_robust=float(epsilon),
-        epsilon_robust_end=float(epsilon),
-        total_steps=1,
+    return load_deepsrq_policy(
+        scenario,
+        epsilon,
+        repo_root=repo_root,
         use_gpu=use_gpu,
-        lr_q=hp.get("lr_q", 3e-4),
-        lr_pi=hp.get("lr_pi", 1e-3),
-        gamma=hp.get("gamma", 0.99),
-        buffer_size=hp.get("buffer_size", 5000),
-        batch_size=hp.get("batch_size", 16),
-        learning_starts=hp.get("learning_starts", 100),
-        grad_clip=hp.get("grad_clip", 10.0),
-        target_update_steps=hp.get("target_update_steps", 250),
-        train_every=hp.get("train_every", 4),
-        network_type=hp.get("network_type", "shared_trunk_separate_heads"),
+        run_dir_override=sr_adidas_training_dir(
+            scenario.key, epsilon, repo_root=repo_root
+        ),
     )
-    agent.load_checkpoint(checkpoint, map_location=None if use_gpu else "cpu")
-    return SrAdidasPolicyAdapter(agent)
-
-
 def load_baseline_policy(
     algorithm: str,
     scenario: LbfNotebookScenario,

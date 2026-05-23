@@ -328,6 +328,48 @@ def test_dueling_double_dqn_robust_values_are_used_for_targets():
         agent.close()
 
 
+def test_dueling_double_dqn_target_value_mode_switches_between_robust_and_nominal():
+    pytest.importorskip("torch")
+    from dueling_double_dqn_sre import DuelingDoubleDqnSreAgent, DuelingDoubleDqnSreAgentConfig
+
+    q_tensor = np.zeros((2, 2, 2), dtype=np.float32)
+    q_tensor[:, :, 0] = np.array([[0.0, 3.0], [1.0, 1.0]], dtype=np.float32)
+    policies = [
+        np.array([0.5, 0.5], dtype=np.float32),
+        np.array([0.5, 0.5], dtype=np.float32),
+    ]
+
+    robust_agent = DuelingDoubleDqnSreAgent(
+        DuelingDoubleDqnSreAgentConfig(
+            obs_dim=4,
+            num_agents=2,
+            num_actions=2,
+            epsilon_robust=0.5,
+            use_gpu=False,
+            sre_solver=_FakeSolver(),
+            sre_target_value_mode="robust",
+        )
+    )
+    nominal_agent = DuelingDoubleDqnSreAgent(
+        DuelingDoubleDqnSreAgentConfig(
+            obs_dim=4,
+            num_agents=2,
+            num_actions=2,
+            epsilon_robust=0.5,
+            use_gpu=False,
+            sre_solver=_FakeSolver(),
+            sre_target_value_mode="nominal",
+        )
+    )
+    try:
+        robust = robust_agent._sre_target_values_batch([q_tensor], [policies])
+        nominal = nominal_agent._sre_target_values_batch([q_tensor], [policies])
+        assert robust[0, 0] != pytest.approx(nominal[0, 0])
+    finally:
+        robust_agent.close()
+        nominal_agent.close()
+
+
 def test_dueling_double_dqn_skips_sre_solves_for_terminal_targets():
     pytest.importorskip("torch")
     from dueling_double_dqn_sre import DuelingDoubleDqnSreAgent, DuelingDoubleDqnSreAgentConfig

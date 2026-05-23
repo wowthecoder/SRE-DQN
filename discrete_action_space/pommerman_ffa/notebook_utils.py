@@ -620,7 +620,20 @@ def train_pommerman_sr_adidas(
     batch_size=32,
     verbose=True,
 ):
-    from discrete_action_space.sr_adidas.train import train_sr_adidas
+    return train_pommerman_deep_srq(
+        n_episodes=n_episodes,
+        max_steps=max_steps,
+        seed=seed,
+        output_root=output_root,
+        output_dir=output_dir,
+        use_gpu=use_gpu,
+        epsilon_robust_initial=epsilon_robust,
+        epsilon_schedule="constant",
+        solver_name="sr_adidas_sre",
+        batch_size=batch_size,
+        include_replay_buffer=True,
+        verbose=verbose,
+    )
 
     set_global_seed(seed)
     probe = make_env()
@@ -770,6 +783,14 @@ def train_pommerman_deep_srq(
     nfg_checkpoint_path=None,
     nfg_accept_gap=None,
     nfg_fallback_enabled=True,
+    solver_name="nfg_transformer_sre",
+    sre_target_value_mode="robust",
+    sr_adidas_max_iters=200,
+    sr_adidas_lr=0.2,
+    sr_adidas_tau_init=10.0,
+    sr_adidas_tau_min=1e-3,
+    sr_adidas_exploitability_tol=None,
+    sr_adidas_device=None,
     batch_size=32,
     include_replay_buffer=True,
     verbose=True,
@@ -785,13 +806,25 @@ def train_pommerman_deep_srq(
     num_actions = int(probe.action_space(order[0]).n)
     probe.close()
 
-    if nfg_checkpoint_path:
+    if solver_name in {"sr_adidas_sre", "sr_adidas"}:
+        solver = make_sre_solver(
+            solver_name,
+            random_seed=seed,
+            max_iters=sr_adidas_max_iters,
+            lr=sr_adidas_lr,
+            tau_init=sr_adidas_tau_init,
+            tau_min=sr_adidas_tau_min,
+            device=sr_adidas_device,
+        )
+        solver_record_name = solver_name
+    elif nfg_checkpoint_path:
         solver = make_sre_solver(
             "nfg_transformer_sre",
             checkpoint_path=nfg_checkpoint_path,
             accept_exploitability_tol=nfg_accept_gap,
             fallback_enabled=nfg_fallback_enabled,
         )
+        solver_record_name = "nfg_transformer_sre"
     else:
         print("Warning: no NfgTransformer checkpoint supplied; using solver fallback/smoke path.")
         solver = make_sre_solver(
@@ -800,6 +833,7 @@ def train_pommerman_deep_srq(
             fallback_enabled=True,
             accept_exploitability_tol=nfg_accept_gap,
         )
+        solver_record_name = "nfg_transformer_sre"
 
     agent = DuelingDoubleDqnSreAgent(
         DuelingDoubleDqnSreAgentConfig(
@@ -825,7 +859,14 @@ def train_pommerman_deep_srq(
             network_type="shared_trunk_separate_heads",
             use_gpu=use_gpu,
             sre_solver=solver,
-            sre_solver_name="nfg_transformer_sre",
+            sre_solver_name=solver_record_name,
+            sre_solver_exploitability_tol=(
+                sr_adidas_exploitability_tol
+                if solver_name in {"sr_adidas_sre", "sr_adidas"}
+                and sr_adidas_exploitability_tol is not None
+                else 1e-4
+            ),
+            sre_target_value_mode=sre_target_value_mode,
         )
     )
 
@@ -907,7 +948,7 @@ def train_pommerman_deep_srq(
         seed=seed,
         output_dir=output_dir,
         extra={
-            "solver_name": "nfg_transformer_sre",
+            "solver_name": solver_record_name,
             "nfg_checkpoint_path": None if nfg_checkpoint_path is None else str(nfg_checkpoint_path),
             "nfg_accept_gap": nfg_accept_gap,
             "nfg_fallback_enabled": bool(nfg_fallback_enabled),
@@ -1160,6 +1201,9 @@ def policy_from_ippo(agent):
 
 
 def policy_from_sr_adidas(agent):
+    if hasattr(agent, "act_joint") and hasattr(agent, "config"):
+        return policy_from_deep_srq(agent)
+
     def _policy(obs, order, episode, step):
         state = _central_state(obs, order)
         if torch is None:
@@ -1277,7 +1321,8 @@ def load_pommerman_sr_adidas_agent(
 ):
     if torch is None:
         raise ImportError("SR-ADIDAS checkpoint loading requires torch.")
-    from discrete_action_space.sr_adidas.sr_adidas_agent import SrAdidasAgent
+    from dueling_double_dqn_sre import DuelingDoubleDqnSreAgent, DuelingDoubleDqnSreAgentConfig
+    from sre_solvers import make_sre_solver
 
     run_dir = sr_adidas_training_dir(epsilon, repo_root=repo_root)
     stats = _load_stats(run_dir / "training_stats.txt")
@@ -1291,19 +1336,25 @@ def load_pommerman_sr_adidas_agent(
     if not checkpoint.is_file():
         raise FileNotFoundError(f"No SR-ADIDAS checkpoint found in {run_dir}.")
 
-    agent = SrAdidasAgent(
-        obs_dim=int(stats["obs_dim"]),
-        num_agents=int(stats.get("num_agents", DEFAULT_NUM_AGENTS)),
-        num_actions=int(stats.get("num_actions", DEFAULT_NUM_ACTIONS)),
-        epsilon_robust=float(epsilon),
-        epsilon_robust_end=float(epsilon),
-        total_steps=1,
-        use_gpu=use_gpu,
-        batch_size=int(stats.get("batch_size", 32)),
+    solver_name = stats.get("solver_name", "sr_adidas_sre")
+    solver = make_sre_solver(solver_name, random_seed=int(stats.get("seed", BASE_SEED)))
+    agent = DuelingDoubleDqnSreAgent(
+        DuelingDoubleDqnSreAgentConfig(
+            obs_dim=int(stats["obs_dim"]),
+            num_agents=int(stats.get("num_agents", DEFAULT_NUM_AGENTS)),
+            num_actions=int(stats.get("num_actions", DEFAULT_NUM_ACTIONS)),
+            epsilon_robust=float(epsilon),
+            epsilon_robust_initial=float(epsilon),
+            epsilon_explore=0.0,
+            network_type="shared_trunk_separate_heads",
+            use_gpu=use_gpu,
+            sre_solver=solver,
+            sre_solver_name=solver_name,
+        )
     )
     agent.load_checkpoint(checkpoint, map_location=None if use_gpu else "cpu")
-    agent.action_eps_schedule.start = 0.0
-    agent.action_eps_schedule.end = 0.0
+    agent.config.epsilon_explore = 0.0
+    agent.config.epsilon_robust = float(epsilon)
     return agent
 
 

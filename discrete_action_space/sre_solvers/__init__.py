@@ -17,9 +17,12 @@ from .nfg_transformer import (
 from .nplayer_common import (
     robust_action_values,
     robust_exploitability,
+    robust_policy_value,
+    robust_policy_values,
     validate_nplayer_q_tensor,
 )
 from .path_c import PathCBimatrixSreSolver, ProcessPoolPathCBimatrixSreSolver
+from .sr_adidas import SrAdidasSreSolver
 
 __all__ = [
     "SreSolveResult",
@@ -28,6 +31,8 @@ __all__ = [
     "validate_nplayer_q_tensor",
     "robust_action_values",
     "robust_exploitability",
+    "robust_policy_value",
+    "robust_policy_values",
     "PathCBimatrixSreSolver",
     "ProcessPoolPathCBimatrixSreSolver",
     "PathMcpNPlayerSreSolver",
@@ -35,6 +40,7 @@ __all__ = [
     "NfgTransformerConfig",
     "NfgTransformerSreNet",
     "NfgTransformerSreSolver",
+    "SrAdidasSreSolver",
     "LemkeLcpBimatrixSreSolver",
     "ProcessPoolLemkeLcpBimatrixSreSolver",
     "make_sre_solver",

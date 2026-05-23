@@ -518,6 +518,7 @@ def plot_combined_agent_training_rewards(record: dict, *, title: str | None = No
 
 def display_training_reward_plots(records: Iterable[dict]):
     """Display the requested per-agent and combined training plots for each run."""
+    import matplotlib.pyplot as plt
     from IPython.display import display
 
     displayed = []

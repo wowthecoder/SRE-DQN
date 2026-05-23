@@ -43,22 +43,8 @@ def test_robust_artifact_paths_use_requested_layout(tmp_path):
 
 def test_constant_epsilon_schedules_stay_constant():
     from lbf_grid.deep_srq_lbf import robust_epsilon_value
-    from sr_adidas.schedules import EpsilonSchedule
 
     assert robust_epsilon_value(0.5, "constant", 50, 100) == 0.5
-
-    schedule = EpsilonSchedule(
-        start=0.5,
-        end=0.5,
-        decay_fraction=1.0,
-        total_steps=100,
-        mode="linear",
-    )
-    values = []
-    for _ in range(25):
-        schedule.step()
-        values.append(schedule.value())
-    assert values == [0.5] * 25
 
 
 def test_rotated_episode_counts_allocate_all_episodes():
@@ -88,32 +74,6 @@ def test_nfg_transformer_usage_summary_reports_fallback_rate():
     assert summary["neural_accept_rate"] == pytest.approx(0.75)
     assert summary["fallback_rate"] == pytest.approx(0.25)
     assert summary["neural_robust_exploitability"]["count"] == 4
-
-
-def test_sr_adidas_full_resume_checkpoint_contains_replay_and_state(tmp_path):
-    torch = pytest.importorskip("torch")
-    from sr_adidas.sr_adidas_agent import SrAdidasAgent
-
-    agent = SrAdidasAgent(
-        obs_dim=4,
-        num_agents=2,
-        num_actions=2,
-        buffer_size=10,
-        batch_size=2,
-        learning_starts=2,
-        total_steps=10,
-        use_gpu=False,
-    )
-    agent.push([0, 0, 0, 0], [0, 1], [1.0, 0.0], [0, 0, 0, 1], False)
-    path = tmp_path / "sr_adidas.pt"
-    agent.save_checkpoint(path, include_replay_buffer=True, metadata={"scenario_key": "tiny"})
-
-    payload = torch.load(path, map_location="cpu", weights_only=False)
-    assert "replay_buffer" in payload
-    assert "y_cache" in payload
-    assert "update_calls" in payload
-    assert "train_step_calls" in payload
-    assert payload["metadata"]["scenario_key"] == "tiny"
 
 
 def test_deepsrq_full_resume_checkpoint_contains_replay(tmp_path):

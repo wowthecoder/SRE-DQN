@@ -4,6 +4,7 @@ from .torch_utils import (
     normalize_payoffs,
     robust_action_values_torch,
     robust_exploitability_torch,
+    robust_policy_values_torch,
 )
 
 __all__ = [
@@ -13,4 +14,5 @@ __all__ = [
     "normalize_payoffs",
     "robust_action_values_torch",
     "robust_exploitability_torch",
+    "robust_policy_values_torch",
 ]

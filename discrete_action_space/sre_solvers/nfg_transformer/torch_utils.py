@@ -122,6 +122,33 @@ def robust_action_values_torch(
     return values_by_player
 
 
+def robust_policy_values_torch(
+    q_tensor: torch.Tensor,
+    policies,
+    epsilon: float | torch.Tensor,
+) -> list[torch.Tensor]:
+    policies = _as_policy_list(policies)
+    if q_tensor.ndim != len(policies) + 2:
+        raise ValueError("q_tensor rank does not match number of players in policies")
+    batch_size = q_tensor.shape[0]
+    num_players = len(policies)
+    action_sizes = tuple(policy.shape[-1] for policy in policies)
+    if tuple(q_tensor.shape[1:-1]) != action_sizes:
+        raise ValueError("q_tensor action dimensions must match policies")
+
+    values_by_player = []
+    for player_id in range(num_players):
+        opponent_ids, profiles, opponent_dist = _opponent_distribution(policies, player_id)
+        payoff_tensor = q_tensor[..., player_id]
+        perm = [0, player_id + 1] + [idx + 1 for idx in opponent_ids]
+        payoff_matrix = payoff_tensor.permute(*perm).reshape(
+            batch_size, action_sizes[player_id], len(profiles)
+        )
+        mixed_values = (policies[player_id].unsqueeze(-1) * payoff_matrix).sum(dim=1)
+        values_by_player.append(tv_worst_case_batch(opponent_dist, mixed_values, epsilon))
+    return values_by_player
+
+
 def robust_exploitability_torch(
     q_tensor: torch.Tensor,
     policies,
@@ -129,9 +156,9 @@ def robust_exploitability_torch(
 ):
     policies = _as_policy_list(policies)
     robust_values = robust_action_values_torch(q_tensor, policies, epsilon)
+    current_policy_values = robust_policy_values_torch(q_tensor, policies, epsilon)
     player_gaps = []
-    for policy, action_values in zip(policies, robust_values):
-        current_values = (policy * action_values).sum(dim=-1)
+    for current_values, action_values in zip(current_policy_values, robust_values):
         best_values = action_values.max(dim=-1).values
         player_gaps.append((best_values - current_values).clamp_min(0.0))
     player_gaps = torch.stack(player_gaps, dim=-1)

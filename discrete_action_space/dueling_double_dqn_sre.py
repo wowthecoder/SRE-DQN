@@ -18,8 +18,8 @@ if str(_THIS_DIR) not in sys.path:
 from sre_solvers import (
     PathCBimatrixSreSolver,
     PathMcpNPlayerSreSolver,
-    robust_action_values,
     robust_exploitability,
+    robust_policy_values,
 )
 
 
@@ -92,6 +92,7 @@ class DuelingDoubleDqnSreAgentConfig:
     sre_solver_exploitability_tol: float = 1e-4
     sre_approx_accept_tol: float = 1e-2
     sre_solver_early_exit: bool = True
+    sre_target_value_mode: str = "robust"
 
 
 def _make_feature_mlp(input_dim, hidden_dims):
@@ -475,6 +476,7 @@ class DuelingDoubleDqnSreAgent:
             "approx_exploitability_tol": float(self.config.sre_cache_exploitability_tol),
             "solver_exploitability_tol": float(self.config.sre_solver_exploitability_tol),
             "solver_approx_accept_tol": float(self.config.sre_approx_accept_tol),
+            "target_value_mode": str(self.config.sre_target_value_mode),
             "target_equilibrium_update_steps": int(self.config.target_equilibrium_update_steps),
             "target_equilibrium_refreshes": int(self.target_equilibrium_refresh_count),
             "target_equilibrium_cache_only_steps": int(self.target_equilibrium_cache_only_count),
@@ -1080,24 +1082,27 @@ class DuelingDoubleDqnSreAgent:
 
     def _sre_robust_values(self, q_tensor, policies):
         q_tensor = np.asarray(q_tensor, dtype=np.float32)
-        values = np.zeros(self.config.num_agents, dtype=np.float32)
-        for player_id in range(self.config.num_agents):
-            action_values = robust_action_values(
-                q_tensor,
-                policies,
-                self.config.epsilon_robust,
-                player_id,
-            )
-            values[player_id] = float(
-                np.asarray(policies[player_id], dtype=np.float64) @ action_values
-            )
-        return values
+        return np.asarray(
+            robust_policy_values(q_tensor, policies, self.config.epsilon_robust),
+            dtype=np.float32,
+        )
 
     def _sre_robust_values_batch(self, q_tensors, policies_batch):
         values = []
         for q_tensor, policies in zip(q_tensors, policies_batch):
             values.append(self._sre_robust_values(q_tensor, policies))
         return np.stack(values, axis=0).astype(np.float32)
+
+    def _sre_target_values_batch(self, q_tensors, policies_batch):
+        mode = str(self.config.sre_target_value_mode).lower()
+        if mode == "robust":
+            return self._sre_robust_values_batch(q_tensors, policies_batch)
+        if mode == "nominal":
+            return self._sre_expected_values_batch(q_tensors, policies_batch)
+        raise ValueError(
+            "sre_target_value_mode must be 'robust' or 'nominal', "
+            f"got {self.config.sre_target_value_mode!r}."
+        )
 
     def act(self, state, agent_id=None):
         if agent_id is None:
@@ -1232,7 +1237,7 @@ class DuelingDoubleDqnSreAgent:
                     allow_solver=refresh_target_equilibria,
                     allow_cache_reuse=not refresh_target_equilibria,
                 )
-                next_values[nonterminal_indices] = self._sre_robust_values_batch(
+                next_values[nonterminal_indices] = self._sre_target_values_batch(
                     next_target[nonterminal_indices],
                     policies_batch,
                 )
@@ -1310,6 +1315,7 @@ class DuelingDoubleDqnSreAgent:
             "sre_solver_exploitability_tol": self.config.sre_solver_exploitability_tol,
             "sre_approx_accept_tol": self.config.sre_approx_accept_tol,
             "sre_solver_early_exit": self.config.sre_solver_early_exit,
+            "sre_target_value_mode": self.config.sre_target_value_mode,
             "target_equilibrium_update_steps": self.config.target_equilibrium_update_steps,
             "update_calls": self._update_calls,
             "buffer_size": self.replay_buffer.buffer.maxlen,
@@ -1335,7 +1341,14 @@ class DuelingDoubleDqnSreAgent:
     def load_checkpoint(self, path, map_location=None):
         if map_location is None:
             map_location = self.device
-        checkpoint = torch.load(path, map_location=map_location)
+        try:
+            checkpoint = torch.load(
+                path,
+                map_location=map_location,
+                weights_only=False,
+            )
+        except TypeError:
+            checkpoint = torch.load(path, map_location=map_location)
 
         if (s := checkpoint.get("q_net")) is not None:
             self.q_net.load_state_dict(s)
@@ -1366,6 +1379,7 @@ class DuelingDoubleDqnSreAgent:
         cfg.sre_solver_exploitability_tol = float(checkpoint.get("sre_solver_exploitability_tol", cfg.sre_solver_exploitability_tol))
         cfg.sre_approx_accept_tol = float(checkpoint.get("sre_approx_accept_tol", cfg.sre_approx_accept_tol))
         cfg.sre_solver_early_exit = bool(checkpoint.get("sre_solver_early_exit", cfg.sre_solver_early_exit))
+        cfg.sre_target_value_mode = checkpoint.get("sre_target_value_mode", cfg.sre_target_value_mode)
         cfg.target_equilibrium_update_steps = max(1, int(checkpoint.get("target_equilibrium_update_steps", cfg.target_equilibrium_update_steps)))
         self.q_tensor_shape = tuple([cfg.num_actions] * cfg.num_agents + [cfg.num_agents])
         self._update_calls = int(checkpoint.get("update_calls", self._update_calls))

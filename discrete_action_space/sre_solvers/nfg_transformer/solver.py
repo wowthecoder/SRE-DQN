@@ -13,6 +13,7 @@ from ..nplayer_common import (
     _solution_dict_from_policies,
     _uniform_nplayer_policies,
     robust_exploitability,
+    robust_policy_values,
     validate_nplayer_q_tensor,
 )
 from .model import NfgTransformerConfig, NfgTransformerSreNet
@@ -160,9 +161,7 @@ class NfgTransformerSreSolver(SreStageGameSolver):
                 np.asarray(values, dtype=np.float64) for values in robust_values
             ]
         nominal = _expected_nominal_values(q_tensor, policies)
-        robust_policy_values = [
-            float(policy @ values) for policy, values in zip(policies, robust_values)
-        ]
+        robust_policy_values_result = robust_policy_values(q_tensor, policies, epsilon)
         if success is None:
             success = bool(gap <= success_tol)
         result_metadata = {
@@ -175,7 +174,9 @@ class NfgTransformerSreSolver(SreStageGameSolver):
             "wall_seconds": float(time.perf_counter() - start),
             "robust_exploitability": float(gap),
             "player_robust_gaps": [float(g) for g in player_gaps],
-            "robust_policy_values": robust_policy_values,
+            "robust_policy_values": [
+                float(value) for value in robust_policy_values_result
+            ],
             "nominal_values": [float(value) for value in nominal],
             "joint_nominal_welfare": float(np.sum(nominal)),
         }
@@ -183,7 +184,7 @@ class NfgTransformerSreSolver(SreStageGameSolver):
         return SreSolveResult(
             policies=policies,
             solutions=[_solution_dict_from_policies(policies, round_digits=round_digits)],
-            utilities_sr=[robust_policy_values],
+            utilities_sr=[[float(value) for value in robust_policy_values_result]],
             utilities_nominal=[[float(value) for value in nominal]],
             success=bool(success),
             message=message if message is not None else ("" if success else "Neural SRE gap exceeded tolerance."),
