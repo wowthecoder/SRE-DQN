@@ -50,6 +50,7 @@ try:
     from .notebook_eval import (
         plot_evaluation_agent_reward_boxplot,
         sample_lbf_rollouts,
+        sample_lbf_rollouts_vectorized,
         save_rollout_video,
     )
     from .pz_wrapper import make_pz_env
@@ -64,6 +65,7 @@ except ImportError:  # Script/notebook import from the lbf_grid directory
     from notebook_eval import (  # type: ignore
         plot_evaluation_agent_reward_boxplot,
         sample_lbf_rollouts,
+        sample_lbf_rollouts_vectorized,
         save_rollout_video,
     )
     from pz_wrapper import make_pz_env  # type: ignore
@@ -82,6 +84,7 @@ DEFAULT_NFG_TRANSFORMER_CHECKPOINT = (
 )
 DEEPSRQ_NFGTRANSFORMER_FAMILY = "deepsrq_nfgtransformer"
 DEEPSRQ_PATH_MCP_NPLAYER_POOL_FAMILY = "deepsrq_path_mcp_nplayer_pool"
+PATH_C_POOL_SOLVER = "path_c_pool"
 PATH_MCP_NPLAYER_POOL_SOLVER = "path_mcp_nplayer_pool"
 DEFAULT_PATH_MCP_NPLAYER_POOL_WORKERS = 8
 
@@ -117,6 +120,17 @@ def robust_lbf_scenarios() -> tuple[LbfNotebookScenario, ...]:
         )
         for scenario in EPYMARL_LBF_SCENARIOS.values()
     )
+
+
+def scenario_num_agents(scenario: LbfNotebookScenario) -> int:
+    if "players" in scenario.config:
+        return int(scenario.config["players"])
+    _, num_agents, _, _ = probe_lbf(scenario.config, seed=BASE_SEED)
+    return int(num_agents)
+
+
+def deepsrq_path_pool_solver_for_scenario(scenario: LbfNotebookScenario) -> str:
+    return PATH_C_POOL_SOLVER if scenario_num_agents(scenario) == 2 else PATH_MCP_NPLAYER_POOL_SOLVER
 
 
 def lbf_grid_dir(repo_root: str | Path | None = None) -> Path:
@@ -235,6 +249,26 @@ def probe_lbf(config: dict, *, seed: int = BASE_SEED) -> tuple[int, int, int, li
         env.close()
 
 
+def _rolling_mean(values, window: int):
+    values = np.asarray(values, dtype=np.float64)
+    if values.size == 0:
+        return values
+    window = max(1, min(int(window), int(values.size)))
+    prefix = np.concatenate(([0.0], np.cumsum(values)))
+    ends = np.arange(1, values.size + 1)
+    starts = np.maximum(0, ends - window)
+    sums = prefix[ends] - prefix[starts]
+    counts = ends - starts
+    return sums / counts
+
+
+def _reward_smoothing_window(stats: dict, n_episodes: int) -> int:
+    configured = stats.get("training_reward_smoothing_window")
+    if configured is not None:
+        return max(1, min(int(configured), int(n_episodes)))
+    return max(5, min(100, max(1, int(n_episodes) // 20)))
+
+
 def write_training_reward_plots(stats: dict, output_dir: str | Path) -> dict:
     import matplotlib.pyplot as plt
 
@@ -247,11 +281,27 @@ def write_training_reward_plots(stats: dict, output_dir: str | Path) -> dict:
     labels = stats.get("agent_labels") or [
         f"Agent {idx + 1}" for idx in range(rewards.shape[0])
     ]
+    smoothing_window = _reward_smoothing_window(stats, rewards.shape[1])
 
     plot_paths = {}
     for idx, values in enumerate(rewards):
+        smoothed = _rolling_mean(values, smoothing_window)
         fig, ax = plt.subplots(figsize=(10, 3.8))
-        ax.plot(episodes, values, linewidth=1.4, alpha=0.85, marker="", label=str(labels[idx]))
+        ax.scatter(
+            episodes,
+            values,
+            s=10,
+            alpha=0.28,
+            linewidths=0,
+            label="episode reward",
+        )
+        ax.plot(
+            episodes,
+            smoothed,
+            linewidth=2.0,
+            alpha=0.95,
+            label=f"{smoothing_window}-episode rolling mean",
+        )
         mean = float(values.mean())
         std = float(values.std())
         ax.axhline(mean, color="black", linestyle=":", linewidth=1.3)
@@ -268,6 +318,7 @@ def write_training_reward_plots(stats: dict, output_dir: str | Path) -> dict:
         ax.set_xlabel("Episode")
         ax.set_ylabel("Training reward")
         ax.grid(alpha=0.25)
+        ax.legend(loc="upper left")
         fig.tight_layout()
         path = output_dir / f"agent_{idx + 1}_training_reward.png"
         fig.savefig(path, dpi=150)
@@ -276,10 +327,23 @@ def write_training_reward_plots(stats: dict, output_dir: str | Path) -> dict:
 
     fig, ax = plt.subplots(figsize=(10, 3.8))
     for idx, values in enumerate(rewards):
-        ax.plot(episodes, values, linewidth=1.5, label=str(labels[idx]))
+        smoothed = _rolling_mean(values, smoothing_window)
+        ax.scatter(
+            episodes,
+            values,
+            s=8,
+            alpha=0.18,
+            linewidths=0,
+        )
+        ax.plot(
+            episodes,
+            smoothed,
+            linewidth=1.9,
+            label=f"{labels[idx]} rolling mean",
+        )
     ax.set_title(f"{stats.get('scenario_key', 'scenario')} - agent reward comparison")
     ax.set_xlabel("Episode")
-    ax.set_ylabel("Training reward")
+    ax.set_ylabel(f"Training reward ({smoothing_window}-episode rolling mean)")
     ax.grid(alpha=0.25)
     ax.legend()
     fig.tight_layout()
@@ -377,6 +441,8 @@ def train_deepsrq_nfgtransformer_for_epsilon(
             eval_interval=eval_interval,
             eval_episodes=eval_episodes,
             print_full_stats=False,
+            scenario_key=scenario.key,
+            scenario_name=scenario.name,
         )
         stats.update(
             {
@@ -426,12 +492,13 @@ def train_deepsrq_path_mcp_pool_for_epsilon(
             epsilon,
             repo_root=repo_root,
         )
+        solver_name = deepsrq_path_pool_solver_for_scenario(scenario)
         hp = dict(hyperparameter_overrides or {})
         hp["sre_solver_workers"] = int(sre_solver_workers)
         seed = int(base_seed + scenario_index)
         stats = train_lbf_deep_srq_experiment(
             n_episodes=n_episodes,
-            solver_name=PATH_MCP_NPLAYER_POOL_SOLVER,
+            solver_name=solver_name,
             epsilon_robust_initial=float(epsilon),
             epsilon_schedule="constant",
             seed=seed,
@@ -444,6 +511,8 @@ def train_deepsrq_path_mcp_pool_for_epsilon(
             eval_interval=eval_interval,
             eval_episodes=eval_episodes,
             print_full_stats=False,
+            scenario_key=scenario.key,
+            scenario_name=scenario.name,
         )
         stats.update(
             {
@@ -453,6 +522,7 @@ def train_deepsrq_path_mcp_pool_for_epsilon(
                 "gym_id": scenario.gym_id,
                 "time_limit": scenario.time_limit,
                 "epsilon_schedule": "constant",
+                "solver_name": solver_name,
                 "sre_solver_workers": int(sre_solver_workers),
             }
         )
@@ -460,14 +530,17 @@ def train_deepsrq_path_mcp_pool_for_epsilon(
         stats["summary_path"] = str(write_training_summary(stats, run_dir))
         save_training_stats(run_dir / "training_stats.json", stats)
         _print_live_training_status(
-            f"DeepSRQ PATH pool {scenario.key} eps={epsilon_slug(epsilon)}",
+            f"DeepSRQ PATH pool {scenario.key} solver={solver_name} eps={epsilon_slug(epsilon)}",
             n_episodes,
             stats,
         )
         results[scenario.key] = stats
     manifest = {
         "algorithm": DEEPSRQ_PATH_MCP_NPLAYER_POOL_FAMILY,
-        "solver_name": PATH_MCP_NPLAYER_POOL_SOLVER,
+        "solver_selection": {
+            "2_player": PATH_C_POOL_SOLVER,
+            "n_player": PATH_MCP_NPLAYER_POOL_SOLVER,
+        },
         "sre_solver_workers": int(sre_solver_workers),
         "epsilon": float(epsilon),
         "results": results,
@@ -559,6 +632,8 @@ def train_lbf_sr_adidas_experiment(
         eval_interval=eval_interval,
         eval_episodes=eval_episodes,
         print_full_stats=False,
+        scenario_key=scenario.key,
+        scenario_name=scenario.name,
     )
     random.seed(seed)
     np.random.seed(seed)
@@ -603,7 +678,6 @@ def train_lbf_sr_adidas_experiment(
 
     rewards_history = [[] for _ in range(num_agents)]
     episode_lengths = []
-    loss_history = []
     eval_history = []
     best_joint_reward = -float("inf")
     best_eval_joint_reward = -float("inf")
@@ -641,17 +715,6 @@ def train_lbf_sr_adidas_experiment(
                     update = agent.maybe_train()
                     if update is not None:
                         latest_loss = float(update.get("q_loss", 0.0) + update.get("pi_loss", 0.0))
-                        loss_history.append(
-                            {
-                                "episode": int(episode + 1),
-                                "global_step": int(global_step),
-                                "gradient_step": int(len(agent.train_losses_q)),
-                                "q_loss": float(update.get("q_loss", np.nan)),
-                                "pi_loss": float(update.get("pi_loss", np.nan)),
-                                "adi": float(update.get("adi", np.nan)),
-                                "loss": latest_loss,
-                            }
-                        )
                         if best_loss is None or latest_loss < best_loss:
                             best_loss = latest_loss
                     ep_rewards += reward_vec
@@ -738,7 +801,6 @@ def train_lbf_sr_adidas_experiment(
         "train_losses_q": list(agent.train_losses_q),
         "train_losses_pi": list(agent.train_losses_pi),
         "adi_estimates": list(agent.adi_estimates),
-        "loss_history": loss_history,
         "best_loss": best_loss,
         "latest_loss": latest_loss,
         "periodic_eval": eval_history,
@@ -807,6 +869,12 @@ class RandomPolicyAdapter:
     def act_all(self, *, env, agent_order, **_kwargs):
         return [int(env.action_space(agent).sample()) for agent in agent_order]
 
+    def act_all_batch(self, contexts):
+        return [
+            self.act_all(env=context["env"], agent_order=context["agent_order"])
+            for context in contexts
+        ]
+
     def close(self):
         return None
 
@@ -819,6 +887,49 @@ class DeepSrqPolicyAdapter:
 
     def act_all(self, *, state, **_kwargs):
         return self.agent.act_joint(state)
+
+    def act_all_batch(self, contexts):
+        states_arr = np.stack(
+            [self.agent._state_to_vector(context["state"]) for context in contexts],
+            axis=0,
+        )
+        batch_size = int(states_arr.shape[0])
+        explore_mask = (
+            np.random.rand(batch_size, self.agent.config.num_agents)
+            < self.agent.config.epsilon_explore
+        )
+        actions = np.empty(
+            (batch_size, self.agent.config.num_agents), dtype=np.int64
+        )
+        random_entries = np.argwhere(explore_mask)
+        for batch_idx, agent_id in random_entries:
+            actions[int(batch_idx), int(agent_id)] = np.random.choice(
+                self.agent.config.num_actions
+            )
+
+        pending_indices = np.flatnonzero(~np.all(explore_mask, axis=1))
+        if pending_indices.size:
+            states_t = torch.as_tensor(
+                states_arr[pending_indices],
+                dtype=torch.float32,
+                device=self.agent.device,
+            )
+            with torch.no_grad():
+                q_tensors = self.agent.q_net(states_t).detach()
+            policies_batch = self.agent._solve_sre_batch(
+                q_tensors,
+                states=states_arr[pending_indices],
+            )
+            for local_idx, batch_idx in enumerate(pending_indices):
+                policies = policies_batch[local_idx]
+                for agent_id in range(self.agent.config.num_agents):
+                    if not explore_mask[batch_idx, agent_id]:
+                        policy = self.agent._normalize_policy(policies[agent_id])
+                        actions[batch_idx, agent_id] = np.random.choice(
+                            self.agent.config.num_actions,
+                            p=policy,
+                        )
+        return actions.astype(int).tolist()
 
     def close(self):
         self.agent.close()
@@ -835,6 +946,9 @@ class SrAdidasPolicyAdapter:
 
     def act_all(self, *, state, **_kwargs):
         return self.agent.act_all(state)
+
+    def act_all_batch(self, contexts):
+        return [self.act_all(state=context["state"]) for context in contexts]
 
     def close(self):
         self.agent.action_eps_schedule.start, self.agent.action_eps_schedule.end = self._old_eps
@@ -882,6 +996,7 @@ class EpymarlPolicyAdapter:
         self.model.load_state_dict(state)
         self.model.eval()
         self.hidden = None
+        self.hidden_by_episode = {}
         self.n_actions = n_actions
         self.input_shape = input_shape
 
@@ -911,8 +1026,47 @@ class EpymarlPolicyAdapter:
             logits, self.hidden = self.model(self._inputs(obs_dict, agent_order), self.hidden)
             return logits.argmax(dim=-1).detach().cpu().numpy().astype(int).tolist()
 
+    def act_all_batch(self, contexts):
+        if not contexts:
+            return []
+        input_chunks = []
+        hidden_chunks = []
+        env_agent_counts = []
+        episode_keys = []
+        for context in contexts:
+            agent_order = context["agent_order"]
+            episode_key = int(context.get("episode_idx", len(episode_keys)))
+            if (
+                context.get("step", 0) == 0
+                or episode_key not in self.hidden_by_episode
+                or self.hidden_by_episode[episode_key].shape[0] != len(agent_order)
+            ):
+                self.hidden_by_episode[episode_key] = self.model.init_hidden(
+                    len(agent_order),
+                    self.device,
+                )
+            input_chunks.append(self._inputs(context["obs_dict"], agent_order))
+            hidden_chunks.append(self.hidden_by_episode[episode_key])
+            env_agent_counts.append(len(agent_order))
+            episode_keys.append(episode_key)
+
+        with torch.no_grad():
+            inputs = torch.cat(input_chunks, dim=0)
+            hidden = torch.cat(hidden_chunks, dim=0)
+            logits, next_hidden = self.model(inputs, hidden)
+            actions = logits.argmax(dim=-1).detach().cpu().numpy().astype(int)
+
+        results = []
+        offset = 0
+        for episode_key, count in zip(episode_keys, env_agent_counts):
+            self.hidden_by_episode[episode_key] = next_hidden[offset : offset + count]
+            results.append(actions[offset : offset + count].tolist())
+            offset += count
+        return results
+
     def close(self):
         self.hidden = None
+        self.hidden_by_episode = {}
 
 
 def resolve_epymarl_checkpoint(
@@ -1035,8 +1189,9 @@ def load_deepsrq_path_mcp_pool_policy(
         if sre_solver_workers is not None
         else hp.get("sre_solver_workers", DEFAULT_PATH_MCP_NPLAYER_POOL_WORKERS)
     )
+    solver_name = deepsrq_path_pool_solver_for_scenario(scenario)
     solver = make_sre_solver(
-        PATH_MCP_NPLAYER_POOL_SOLVER,
+        solver_name,
         random_seed=int(stats.get("seed", BASE_SEED)),
         max_workers=workers,
     )
@@ -1062,6 +1217,7 @@ def load_deepsrq_path_mcp_pool_policy(
             network_type=hp.get("network_type", DEEP_SRQ_LBF_HYPERPARAMS["network_type"]),
             use_gpu=use_gpu,
             sre_solver=solver,
+            sre_solver_name=solver_name,
             target_equilibrium_update_steps=hp.get(
                 "target_equilibrium_update_steps",
                 DEEP_SRQ_LBF_HYPERPARAMS["target_equilibrium_update_steps"],
@@ -1117,7 +1273,7 @@ def load_baseline_policy(
     )
 
 
-def _policy_actions(policy, *, state, obs_dict, agent_order, env, step):
+def _policy_actions(policy, *, state, obs_dict, agent_order, env, step, **_kwargs):
     return policy.act_all(
         state=state,
         obs_dict=obs_dict,
@@ -1125,6 +1281,12 @@ def _policy_actions(policy, *, state, obs_dict, agent_order, env, step):
         env=env,
         step=step,
     )
+
+
+def _policy_actions_batch(policy, contexts):
+    if hasattr(policy, "act_all_batch"):
+        return policy.act_all_batch(contexts)
+    return [_policy_actions(policy, **context) for context in contexts]
 
 
 def rotated_episode_counts(total_episodes: int, num_agents: int) -> list[int]:
@@ -1144,6 +1306,8 @@ def evaluate_policy_matchup(
     n_episodes: int = DEFAULT_EVAL_EPISODES,
     seed: int = BASE_SEED,
     video_fps: int = DEFAULT_EVAL_VIDEO_FPS,
+    show_progress: bool = True,
+    num_envs: int = 1,
 ) -> dict:
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1157,6 +1321,10 @@ def evaluate_policy_matchup(
     for focal_slot, count in enumerate(slot_counts):
         if count <= 0:
             continue
+        matchup_label = primary_label if opponent_policy is None else f"{primary_label} vs {opponent_label}"
+        progress_label = f"{scenario.key} | {matchup_label}"
+        if opponent_policy is not None:
+            progress_label = f"{progress_label} | focal slot {focal_slot + 1}/{num_agents}"
 
         def policy_fn(**kwargs):
             primary_actions = _policy_actions(primary_policy, **kwargs)
@@ -1167,13 +1335,45 @@ def evaluate_policy_matchup(
             actions[focal_slot] = int(primary_actions[focal_slot])
             return actions
 
-        rollouts = sample_lbf_rollouts(
-            make_env=lambda: make_pz_env(**scenario.config, render_mode="rgb_array"),
-            policy_fn=policy_fn,
-            seed=seed + 1000 * focal_slot,
-            n_episodes=count,
-            max_steps=scenario.time_limit,
-        )
+        def policy_batch_fn(contexts):
+            primary_actions_batch = _policy_actions_batch(primary_policy, contexts)
+            if opponent_policy is None:
+                return primary_actions_batch
+            opponent_actions_batch = _policy_actions_batch(opponent_policy, contexts)
+            actions_batch = []
+            for primary_actions, opponent_actions in zip(
+                primary_actions_batch,
+                opponent_actions_batch,
+            ):
+                actions = list(opponent_actions)
+                actions[focal_slot] = int(primary_actions[focal_slot])
+                actions_batch.append(actions)
+            return actions_batch
+
+        rollout_kwargs = {
+            "make_env": lambda capture_frames=True: make_pz_env(
+                **scenario.config,
+                render_mode="rgb_array" if capture_frames else None,
+            ),
+            "seed": seed + 1000 * focal_slot,
+            "n_episodes": count,
+            "max_steps": scenario.time_limit,
+            "progress_label": progress_label,
+            "show_progress": show_progress,
+            "capture_first_episode_frames": not first_frames,
+        }
+        if int(num_envs) > 1:
+            rollouts = sample_lbf_rollouts_vectorized(
+                policy_batch_fn=policy_batch_fn,
+                policy_fn=policy_fn,
+                num_envs=int(num_envs),
+                **rollout_kwargs,
+            )
+        else:
+            rollouts = sample_lbf_rollouts(
+                policy_fn=policy_fn,
+                **rollout_kwargs,
+            )
         all_episode_rewards.extend(rollouts["episode_rewards"])
         all_joint_rewards.extend(rollouts["joint_rewards"])
         if not first_frames and rollouts.get("frames"):
@@ -1325,6 +1525,7 @@ def evaluate_deepsrq_path_mcp_pool_suite_for_epsilon(
     repo_root: str | Path | None = None,
     use_gpu: bool = True,
     sre_solver_workers: int = DEFAULT_PATH_MCP_NPLAYER_POOL_WORKERS,
+    num_envs: int = 1,
 ) -> dict[str, dict]:
     scenarios = scenarios or robust_lbf_scenarios()
     results = {}
@@ -1350,6 +1551,7 @@ def evaluate_deepsrq_path_mcp_pool_suite_for_epsilon(
                     output_dir=base_dir / "self_play",
                     primary_label=primary_label,
                     n_episodes=n_episodes,
+                    num_envs=num_envs,
                 )
             }
             for baseline in BASELINE_ALGORITHMS:
@@ -1365,6 +1567,7 @@ def evaluate_deepsrq_path_mcp_pool_suite_for_epsilon(
                             primary_label=primary_label,
                             opponent_label=baseline,
                             n_episodes=n_episodes,
+                            num_envs=num_envs,
                         )
                     finally:
                         opponent.close()
@@ -1388,6 +1591,7 @@ def evaluate_deepsrq_path_mcp_pool_suite_for_epsilon(
                         primary_label=primary_label,
                         opponent_label="sr_adidas",
                         n_episodes=n_episodes,
+                        num_envs=num_envs,
                     )
                 finally:
                     opponent.close()
@@ -1409,8 +1613,12 @@ def evaluate_deepsrq_path_mcp_pool_suite_for_epsilon(
         / f"manifest_eps_{epsilon_slug(epsilon)}.json",
         {
             "algorithm": DEEPSRQ_PATH_MCP_NPLAYER_POOL_FAMILY,
-            "solver_name": PATH_MCP_NPLAYER_POOL_SOLVER,
+            "solver_selection": {
+                "2_player": PATH_C_POOL_SOLVER,
+                "n_player": PATH_MCP_NPLAYER_POOL_SOLVER,
+            },
             "sre_solver_workers": int(sre_solver_workers),
+            "num_envs": int(num_envs),
             "epsilon": float(epsilon),
             "results": results,
         },

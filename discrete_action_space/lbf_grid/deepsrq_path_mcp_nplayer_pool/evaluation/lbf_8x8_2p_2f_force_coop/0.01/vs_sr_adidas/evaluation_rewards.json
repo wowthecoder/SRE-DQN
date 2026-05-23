@@ -1,0 +1,9 @@
+{
+  "status": "skipped",
+  "scenario_key": "lbf_8x8_2p_2f_force_coop",
+  "primary_label": "deepsrq_path_mcp_nplayer_pool",
+  "opponent_label": "sr_adidas",
+  "error_type": "FileNotFoundError",
+  "error_message": "[Errno 2] No such file or directory: '/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/sr_adidas/training/lbf_8x8_2p_2f_force_coop/0.01/training_stats.json'",
+  "artifact_dir": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/evaluation/lbf_8x8_2p_2f_force_coop/0.01/vs_sr_adidas"
+}

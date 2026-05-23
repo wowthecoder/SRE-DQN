@@ -255,6 +255,19 @@ def _make_solver(solver_name, hp, seed):
             tau_threshold=hp.get("sr_adidas_tau_threshold", 1e-4),
             device=hp.get("sr_adidas_device"),
         )
+    if solver_name in {"sred_gradient_sre", "sred_gd_sre", "sred_gd"}:
+        return make_sre_solver(
+            solver_name,
+            random_seed=seed,
+            max_iters=hp.get("sred_max_iters", 250),
+            lr=hp.get("sred_lr", 0.05),
+            optimizer=hp.get("sred_optimizer", "adam"),
+            br_temperature=hp.get("sred_br_temperature", 0.05),
+            gap_temperature=hp.get("sred_gap_temperature", 0.01),
+            gradient_clip_norm=hp.get("sred_gradient_clip_norm", 10.0),
+            eval_every=hp.get("sred_eval_every", 10),
+            device=hp.get("sred_device"),
+        )
     return make_sre_solver(
         solver_name,
         random_seed=seed,
@@ -281,6 +294,8 @@ def train_lbf_deep_srq_experiment(
     eval_seed_offset=50_000,
     run_name_suffix=None,
     print_full_stats=True,
+    scenario_key=None,
+    scenario_name=None,
 ):
     set_global_seed(seed)
     hp = deep_srq_lbf_hyperparams(hyperparameter_overrides)
@@ -291,6 +306,8 @@ def train_lbf_deep_srq_experiment(
     num_agents = len(agent_order)
     num_actions = int(env.action_space(agent_order[0]).n)
     obs_dim = int(_central_state(obs_dict, agent_order).shape[0])
+    scenario_key = scenario_key or f"lbf_{num_agents}p"
+    scenario_name = scenario_name or f"LBF {num_agents}-player"
 
     run_name = f"{_slugify(solver_name)}_eps{epsilon_robust_initial:g}_{epsilon_schedule}"
     if run_name_suffix:
@@ -341,7 +358,6 @@ def train_lbf_deep_srq_experiment(
 
     rewards_history = [[] for _ in range(num_agents)]
     episode_lengths = []
-    loss_history = []
     eval_history = []
     global_step = 0
     gradient_steps = 0
@@ -407,14 +423,6 @@ def train_lbf_deep_srq_experiment(
                 if loss is not None:
                     gradient_steps += 1
                     latest_loss = float(loss)
-                    loss_history.append(
-                        {
-                            "episode": int(episode + 1),
-                            "global_step": int(global_step),
-                            "gradient_step": int(gradient_steps),
-                            "loss": latest_loss,
-                        }
-                    )
                     if best_loss is None or latest_loss < best_loss:
                         best_loss = latest_loss
                     if hp["target_tau"] is not None:
@@ -499,12 +507,12 @@ def train_lbf_deep_srq_experiment(
         agent.close()
         env.close()
 
-    stats_path = run_dir / "training_stats.txt"
+    stats_path = run_dir / "training_stats.json"
     plot_path = run_dir / "training_plot.png"
     stats = {
         "environment": "lbf_grid",
-        "scenario_key": "lbf_3p_basic",
-        "scenario_name": "LBF 3-player basic",
+        "scenario_key": str(scenario_key),
+        "scenario_name": str(scenario_name),
         "pairing": ["DeepSRQ" for _ in range(num_agents)],
         "pair_label": "DeepSRQ self-play",
         "pair_slug": run_name,
@@ -522,7 +530,6 @@ def train_lbf_deep_srq_experiment(
         "total_environment_steps": int(global_step),
         "gradient_steps": int(gradient_steps),
         "episode_lengths": episode_lengths,
-        "loss_history": loss_history,
         "best_loss": best_loss,
         "latest_loss": latest_loss,
         "periodic_eval": eval_history,

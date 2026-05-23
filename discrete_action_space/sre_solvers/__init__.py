@@ -23,6 +23,7 @@ from .nplayer_common import (
 )
 from .path_c import PathCBimatrixSreSolver, ProcessPoolPathCBimatrixSreSolver
 from .sr_adidas import SrAdidasSreSolver
+from .sred_gradient import SredGradientSreSolver
 
 __all__ = [
     "SreSolveResult",
@@ -41,6 +42,7 @@ __all__ = [
     "NfgTransformerSreNet",
     "NfgTransformerSreSolver",
     "SrAdidasSreSolver",
+    "SredGradientSreSolver",
     "LemkeLcpBimatrixSreSolver",
     "ProcessPoolLemkeLcpBimatrixSreSolver",
     "make_sre_solver",

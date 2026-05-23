@@ -37,6 +37,7 @@ An SRE policy profile is evaluated by robust exploitability: for each player, co
 | `path_mcp_nplayer`, `path_nplayer`, `path_mcp` | `PathMcpNPlayerSreSolver` | N-player | PATH-backed multilinear MCP formulation. |
 | `path_mcp_nplayer_pool`, `path_nplayer_pool`, `path_mcp_pool` | `ProcessPoolPathMcpNPlayerSreSolver` | N-player | Parallel batch wrapper around `path_mcp_nplayer`. |
 | `sr_adidas_sre`, `sr_adidas` | `SrAdidasSreSolver` | N-player | Approximate full-tensor SR-ADIDAS homotopy solver for Deep SRQ inner loops. |
+| `sred_gradient_sre`, `sred_gd_sre`, `sred_gd` | `SredGradientSreSolver` | N-player | Direct smoothed SRE-distance gradient solver inspired by NashD. |
 
 ## Bimatrix Solvers
 
@@ -133,6 +134,22 @@ Factory aliases:
 - `path_mcp_nplayer_pool`
 - `path_nplayer_pool`
 - `path_mcp_pool`
+
+### `SredGradientSreSolver`
+
+File: `sred_gradient/solver.py`
+
+This solver adapts the "distance to equilibrium" idea from NashD gradient descent to SRE. Instead of minimizing nominal Nash regret, it minimizes a smoothed SRE distance, or SRED: for each player, compare a smoothed robust best-response value against the smoothed robust value of the player's current mixed-policy commitment. A SRED gap of zero matches the finite-action SRE fixed-point condition under the repository's robust exploitability metric.
+
+The optimization is over unconstrained logits with `softmax(logits)` producing one mixed policy per player. The smooth torch objective uses `logsumexp` for the best-response max and `softplus` for positive-gap smoothing. Final candidate selection and reporting still use the exact helpers from `nplayer_common.py`: `robust_exploitability(..., value_mode="mixed_policy")` and `robust_policy_values(...)`. This keeps value semantics aligned with PATH MCP, NfgTransformer, and SR-ADIDAS.
+
+This is an approximate direct solver, not an amortized neural model and not a replacement for the PATH MCP default. It is useful as an opt-in inner-loop solver or warm-start experiment when PATH runtime is the bottleneck.
+
+Factory aliases:
+
+- `sred_gradient_sre`
+- `sred_gd_sre`
+- `sred_gd`
 
 ## Support Modules
 

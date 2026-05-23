@@ -368,7 +368,7 @@ def run_training_loop(
     eval_reward_every=None,
     eval_episodes=None,
     action_update_every=1,
-    checkpoint_every=1000,
+    checkpoint_every=None,
     diagnostic_log_every=None,
     diagnostic_batch_size=256,
     log_best_updates=False,
@@ -394,7 +394,9 @@ def run_training_loop(
     :param action_update_every:
                              Update the action/actor network every N iterations.
                              Value/critic network is still updated every iteration.
-    :param checkpoint_every: Save periodic weight snapshots every N iterations. Use None or 0 to disable.
+    :param checkpoint_every: Deprecated compatibility argument. Periodic raw weight
+                            snapshots during training are disabled; best/final
+                            resumable checkpoints are still saved.
     :param diagnostic_log_every:
                             Print optional agent diagnostics every N iterations when the
                             agent implements compute_training_diagnostics().
@@ -404,7 +406,7 @@ def run_training_loop(
     :param log_best_updates: Print every new best checkpoint event when True.
     :param log_best_every:   Print best loss so far every N iterations. Defaults to loss_log_every.
                               Use None or 0 to disable.
-    :param log_weight_saves: Print periodic/final weight-save messages when True.
+    :param log_weight_saves: Print final weight-save messages when True.
     :param desc:              tqdm progress-bar description string.
     :return:                  (agent, sum_loss array)
     """
@@ -589,19 +591,6 @@ def run_training_loop(
                 tqdm.write("{} Diagnostics | Episode {} | {}".format(desc, k, diagnostic_text))
             except Exception as exc:
                 tqdm.write("{} Diagnostics failed at episode {}: {}".format(desc, k, exc))
-
-        checkpoint_flag = (
-            checkpoint_every is not None
-            and checkpoint_every > 0
-            and not ((k + 1) % checkpoint_every)
-        )
-        if checkpoint_flag:
-            if log_weight_saves:
-                tqdm.write("Saving weights to disk")
-            torch.save(agent.action_net.state_dict(), AN_file_name + "_" + str(k) + ".pt")
-            torch.save(agent.value_net.state_dict(), VN_file_name + "_" + str(k) + ".pt")
-            if log_weight_saves:
-                tqdm.write("Weights saved")
 
         if best_loss is None or total_loss_item < best_loss:
             if log_best_updates:

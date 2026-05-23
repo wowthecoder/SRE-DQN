@@ -55,6 +55,7 @@ env.close()
 | `max_food_level` | 3 | Maximum random food level when `food_levels` is not set |
 | `force_coop` | `False` | Native lb-foraging cooperative loading constraint |
 | `normalize_reward` | `True` | Use native normalized lb-foraging rewards |
+| `penalty` | `0.0` in wrapper | Penalty subtracted from each failed loader |
 
 `food_levels` must have length `max_food`. For example, `max_food=5,
 food_levels=[1, 1, 2, 2, 3]` keeps food positions random but fixes the spawned
@@ -70,6 +71,414 @@ food-level multiset.
 | 3 | WEST |
 | 4 | EAST |
 | 5 | LOAD |
+
+## Rewards and Penalties
+
+The wrapper uses the upstream `lb-foraging` reward rules without extra shaping.
+Agents receive reward only when a `LOAD` action successfully collects adjacent
+food.
+
+- Movement actions, `NONE`, invalid actions converted to `NONE`, and movement
+  collisions have reward `0`.
+- A load is considered with the set of loading agents adjacent to the same food.
+  If their summed player level is less than the food level, the load fails.
+- Failed loaders receive `-penalty`; the project wrapper default is
+  `penalty=0.0`, so failed loads have no penalty unless explicitly overridden.
+- If the adjacent loaders can collect the food, each participating loader
+  receives `player_level * food_level`.
+- With `normalize_reward=True` (the default), that successful-load reward is
+  divided by `sum_loading_player_levels * total_spawned_food_level`.
+- Non-participating agents receive `0` for that load event.
+- The food is removed after a successful load. An episode ends when all food is
+  collected or `max_episode_steps` is reached.
+
+For example, if two level-1 agents load a level-2 food and the episode spawned
+two level-2 foods in total, then `total_spawned_food_level=4`; each loader gets
+`1 * 2 / (2 * 4) = 0.25`. The joint reward for collecting that food is `0.5`.
+
+## Deep SRQ PATH Pool Training Metrics
+
+`deepsrq_path_pool_training.ipynb` trains Deep SRQ for each configured
+scenario and robust epsilon through `train_deepsrq_path_mcp_pool_for_epsilon`.
+Artifacts are persisted under:
+
+```text
+discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/training/<scenario_key>/<epsilon>/
+```
+
+The notebook writes the following files for each scenario/epsilon run:
+
+- `training_stats.json`: JSON stats emitted by `train_lbf_deep_srq_experiment`
+  and then overwritten by the notebook wrapper after it adds scenario/family
+  metadata and plot paths.
+- `training_summary.txt`: compact human-readable summary.
+- `agent_<n>_training_reward.png` and `combined_agent_training_rewards.png`.
+- `shared_deepsrq_best.pt` and `shared_deepsrq_final.pt`.
+
+It also writes an epsilon-level manifest at:
+
+```text
+discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/training/manifest_eps_<epsilon>.json
+```
+
+The manifest stores `algorithm`, `solver_name`, `sre_solver_workers`,
+`epsilon`, and a `results` map keyed by scenario. Each result is the full
+per-scenario `training_stats.json` payload.
+
+The full top-level stats payload persisted in `training_stats.json` contains:
+
+```text
+environment
+scenario_key
+scenario_name
+pairing
+pair_label
+pair_slug
+rewards
+n_episodes
+seed
+solver_name
+epsilon_robust_initial
+epsilon_schedule
+hyperparameters
+lbf_config
+num_agents
+num_actions
+obs_dim
+total_environment_steps
+gradient_steps
+episode_lengths
+best_loss
+latest_loss
+periodic_eval
+best_joint_reward
+best_eval_joint_reward
+best_checkpoint_source
+checkpoint_paths
+include_replay_buffer
+rng_state
+agent_labels
+artifact_dir
+stats_path
+timing
+solver_usage
+nfg_transformer_usage
+algorithm
+gym_id
+time_limit
+sre_solver_workers
+training_reward_plot_paths
+summary_path
+```
+
+The nested fields inside the stats payload are:
+
+```text
+hyperparameters
+  learning_rate
+  batch_size
+  replay_buffer_capacity
+  learning_starts
+  gamma
+  action_epsilon_start
+  action_epsilon_end
+  action_epsilon_decay_fraction
+  grad_clip_max_norm
+  sre_num_repeats
+  sre_include_pure_starts
+  train_every
+  network_type
+  target_update_steps
+  target_equilibrium_update_steps
+  target_tau
+  solver_max_iter
+  solver_tol
+  solver_damping
+  solver_temperature
+  sre_solver_workers
+  sre_policy_cache_enabled
+  sre_policy_cache_size
+  sre_policy_cache_round_digits
+  sre_state_cache_round_digits
+  sre_approx_cache_enabled
+  sre_cache_exploitability_tol
+  sre_solver_exploitability_tol
+  sre_approx_accept_tol
+  sre_solver_early_exit
+  nfg_checkpoint_path
+  nfg_device
+  nfg_fallback_enabled
+  nfg_accept_gap
+  sre_target_value_mode
+  sr_adidas_max_iters
+  sr_adidas_lr
+  sr_adidas_tau_init
+  sr_adidas_tau_min
+  sr_adidas_tau_threshold
+  sr_adidas_exploitability_tol
+  sr_adidas_device
+
+lbf_config
+  players
+  field_size
+  sight
+  max_food
+  max_episode_steps
+  player_levels
+  min_food_level
+  max_food_level
+  normalize_reward
+  food_levels
+  force_coop
+
+periodic_eval[]
+  episode_rewards
+  joint_rewards
+  mean_joint_reward
+  episode
+  global_step
+  gradient_step
+
+checkpoint_paths
+  best
+  final
+
+rng_state
+  python_random
+  numpy_random
+  torch_random_cpu
+  torch_random_cuda
+
+timing
+  wall_clock_seconds
+  episode_time
+    count
+    mean_seconds
+    min_seconds
+    max_seconds
+    std_seconds
+    mean_microseconds
+    min_microseconds
+    max_microseconds
+    std_microseconds
+  sre_solve_time
+    count
+    mean_seconds
+    min_seconds
+    max_seconds
+    std_seconds
+    mean_microseconds
+    min_microseconds
+    max_microseconds
+    std_microseconds
+  backend_solve_time
+    count
+    mean_seconds
+    min_seconds
+    max_seconds
+    std_seconds
+    mean_microseconds
+    min_microseconds
+    max_microseconds
+    std_microseconds
+  path_solve_time
+    count
+    mean_seconds
+    min_seconds
+    max_seconds
+    std_seconds
+    mean_microseconds
+    min_microseconds
+    max_microseconds
+    std_microseconds
+  agents[]
+    agent_index
+    algorithm
+    sre_solve_time
+      count
+      mean_seconds
+      min_seconds
+      max_seconds
+      std_seconds
+      mean_microseconds
+      min_microseconds
+      max_microseconds
+      std_microseconds
+    backend_solve_time
+      count
+      mean_seconds
+      min_seconds
+      max_seconds
+      std_seconds
+      mean_microseconds
+      min_microseconds
+      max_microseconds
+      std_microseconds
+    path_solve_time
+      count
+      mean_seconds
+      min_seconds
+      max_seconds
+      std_seconds
+      mean_microseconds
+      min_microseconds
+      max_microseconds
+      std_microseconds
+    sre_policy_cache
+      enabled
+      config_enabled
+      disabled_by_solver
+      approx_enabled
+      entries
+      max_entries
+      requests
+      exact_hits
+      approx_hits
+      misses
+      hit_rate
+      path_solves_avoided
+      stores
+      evictions
+      warm_start_uses
+      forced_refreshes
+      validation_count
+      validation_mean_seconds
+      validation_mean_microseconds
+      lookup_time
+        count
+        mean_seconds
+        min_seconds
+        max_seconds
+        std_seconds
+        mean_microseconds
+        min_microseconds
+        max_microseconds
+        std_microseconds
+      uniform_fallbacks
+      solver_results
+      candidate_returned
+      candidate_return_rate
+      certified_candidates
+      approx_candidates
+      rejected_candidates
+      malformed_candidates
+      candidate_robust_exploitability
+        count
+        mean
+        std
+        min
+        max
+        p50
+        p90
+        p95
+      solver_starts_attempted
+        count
+        mean
+      solver_early_exits
+      cache_round_digits
+      state_round_digits
+      approx_exploitability_tol
+      solver_exploitability_tol
+      solver_approx_accept_tol
+      target_value_mode
+      target_equilibrium_update_steps
+      target_equilibrium_refreshes
+      target_equilibrium_cache_only_steps
+      target_equilibrium_cache_only_misses
+      target_equilibrium_stale_policy_reuses
+    update_time
+      count
+      mean_seconds
+      min_seconds
+      max_seconds
+      std_seconds
+      mean_microseconds
+      min_microseconds
+      max_microseconds
+      std_microseconds
+  sre_policy_cache
+    requests
+    exact_hits
+    approx_hits
+    misses
+    path_solves_avoided
+    warm_start_uses
+    forced_refreshes
+    stores
+    evictions
+    validation_count
+    target_equilibrium_refreshes
+    target_equilibrium_cache_only_steps
+    target_equilibrium_cache_only_misses
+    target_equilibrium_stale_policy_reuses
+    hit_rate
+
+solver_usage
+  solve_time
+    count
+    mean_seconds
+    min_seconds
+    max_seconds
+    std_seconds
+    mean_microseconds
+    min_microseconds
+    max_microseconds
+    std_microseconds
+
+nfg_transformer_usage
+  solve_time
+    count
+    mean_seconds
+    min_seconds
+    max_seconds
+    std_seconds
+    mean_microseconds
+    min_microseconds
+    max_microseconds
+    std_microseconds
+
+training_reward_plot_paths
+  agent_<n>
+  combined
+```
+
+The recorded training metrics are:
+
+- Reward metrics: `rewards` is one reward series per agent; `episode_lengths`
+  stores environment steps per episode; `total_environment_steps` stores the
+  total number of environment transitions; `best_joint_reward` stores the best
+  training joint reward when no periodic eval checkpoint has taken over.
+- Optimisation metrics: `gradient_steps`, `best_loss`, and `latest_loss`.
+- Periodic evaluation metrics: `periodic_eval` stores one record per evaluation
+  point when `eval_interval` is enabled. Each record contains
+  `episode_rewards`, `joint_rewards`, `mean_joint_reward`, `episode`,
+  `global_step`, and `gradient_step`.
+- Checkpoint metrics: `best_eval_joint_reward`, `best_checkpoint_source`, and
+  `checkpoint_paths.best` / `checkpoint_paths.final`.
+- Timing metrics: `timing.wall_clock_seconds`, `timing.episode_time`,
+  `timing.sre_solve_time`, `timing.backend_solve_time`,
+  `timing.path_solve_time`, and per-agent entries under `timing.agents`.
+  Duration summaries use `count`, `mean_seconds`, `min_seconds`,
+  `max_seconds`, `std_seconds`, `mean_microseconds`, `min_microseconds`,
+  `max_microseconds`, and `std_microseconds`.
+- Per-agent timing/cache metrics: each `timing.agents` entry stores
+  `agent_index`, `algorithm`, `sre_solve_time`, `backend_solve_time`,
+  `path_solve_time`, `sre_policy_cache`, and `update_time`.
+- Aggregated cache metrics: `timing.sre_policy_cache` stores `requests`,
+  `exact_hits`, `approx_hits`, `misses`, `path_solves_avoided`,
+  `warm_start_uses`, `forced_refreshes`, `stores`, `evictions`,
+  `validation_count`, `target_equilibrium_refreshes`,
+  `target_equilibrium_cache_only_steps`,
+  `target_equilibrium_cache_only_misses`,
+  `target_equilibrium_stale_policy_reuses`, and `hit_rate`.
+- Solver metrics: `solver_usage.solve_time` records backend solve duration
+  summaries. `nfg_transformer_usage` is populated with the same object for
+  compatibility with neural-solver notebooks, even in the PATH pool run.
+
+`training_summary.txt` persists the most useful headline values:
+`scenario`, `algorithm`, `epsilon`, `episodes`, `best_loss`, `latest_loss`,
+best/final checkpoint paths, and each agent's reward mean and standard
+deviation.
 
 ## EPyMARL Baselines
 

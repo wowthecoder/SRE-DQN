@@ -1,0 +1,8 @@
+iteration: 529
+total_loss: 21041.02343750
+value_loss: 10529.55957031
+action_loss: 10511.46484375
+best_loss: 21041.02343750
+best_idx: 529
+improvement_counter: 0
+eval_reward_count: 0

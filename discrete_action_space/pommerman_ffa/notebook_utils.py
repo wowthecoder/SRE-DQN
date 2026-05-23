@@ -791,6 +791,14 @@ def train_pommerman_deep_srq(
     sr_adidas_tau_min=1e-3,
     sr_adidas_exploitability_tol=None,
     sr_adidas_device=None,
+    sred_max_iters=250,
+    sred_lr=0.05,
+    sred_optimizer="adam",
+    sred_br_temperature=0.05,
+    sred_gap_temperature=0.01,
+    sred_gradient_clip_norm=10.0,
+    sred_eval_every=10,
+    sred_device=None,
     batch_size=32,
     include_replay_buffer=True,
     verbose=True,
@@ -815,6 +823,20 @@ def train_pommerman_deep_srq(
             tau_init=sr_adidas_tau_init,
             tau_min=sr_adidas_tau_min,
             device=sr_adidas_device,
+        )
+        solver_record_name = solver_name
+    elif solver_name in {"sred_gradient_sre", "sred_gd_sre", "sred_gd"}:
+        solver = make_sre_solver(
+            solver_name,
+            random_seed=seed,
+            max_iters=sred_max_iters,
+            lr=sred_lr,
+            optimizer=sred_optimizer,
+            br_temperature=sred_br_temperature,
+            gap_temperature=sred_gap_temperature,
+            gradient_clip_norm=sred_gradient_clip_norm,
+            eval_every=sred_eval_every,
+            device=sred_device,
         )
         solver_record_name = solver_name
     elif nfg_checkpoint_path:

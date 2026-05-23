@@ -1,0 +1,11 @@
+iteration: 2381
+total_loss: 823.08654785
+value_loss: 411.59289551
+action_loss: 411.49365234
+best_loss: 823.08654785
+best_idx: 2381
+improvement_counter: 0
+eval_reward_count: 2
+eval_rewards:
+  iteration: 1000 | eps_b: 0 | mean_reward: -1.51459587 | std_reward: 2.80100727 | agent_mean_rewards: [-1.454122, -1.346552, -1.602551, -1.607245, -1.562509]
+  iteration: 2000 | eps_b: 0 | mean_reward: -1.36788547 | std_reward: 2.77881074 | agent_mean_rewards: [-1.346881, -1.393052, -1.487271, -1.300864, -1.31136 ]
