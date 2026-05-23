@@ -44,6 +44,7 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
     def __init__(self, pathwrap_path=DEFAULT_PATHWRAP_PATH, random_seed=None):
         self.path_solver = PathSolverWrapper(pathwrap_path)
         self.rng = np.random.default_rng(random_seed)
+        self._structure_cache = {}
 
     @staticmethod
     def _opponent_profiles(action_sizes, player_id):
@@ -87,6 +88,39 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
             index["kappa"].append(pos)
             pos += 1
         return index, opponent_data, pos
+
+    def _structure_for_action_sizes(self, action_sizes):
+        key = tuple(int(size) for size in action_sizes)
+        structure = self._structure_cache.get(key)
+        if structure is not None:
+            return structure
+
+        index, opponent_data, n_vars = self._build_index(key)
+        distances_by_player = [
+            self._distance_matrix(len(opponent_data[player_id][1]))
+            for player_id in range(len(key))
+        ]
+        sparse_pattern = self._build_sparse_jacobian_pattern(
+            index, key, opponent_data, distances_by_player
+        )
+        lb_template = np.full(n_vars, -INF, dtype=np.float64)
+        ub_template = np.full(n_vars, INF, dtype=np.float64)
+        for player_id in range(len(key)):
+            lb_template[index["prob"][player_id]] = 0.0
+            lb_template[index["lambda"][player_id]] = 0.0
+            lb_template[index["eta"][player_id]] = 0.0
+        structure = {
+            "index": index,
+            "opponent_data": opponent_data,
+            "n_vars": n_vars,
+            "distances_by_player": distances_by_player,
+            "sparse_pattern": sparse_pattern,
+            "nnz": int(sum(len(entries) for entries in sparse_pattern)),
+            "lb_template": lb_template,
+            "ub_template": ub_template,
+        }
+        self._structure_cache[key] = structure
+        return structure
 
     @staticmethod
     def _policies_from_z(z, index, action_sizes):
@@ -446,6 +480,8 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
         payoffs_by_player,
         distances_by_player=None,
         sparse_pattern=None,
+        lb_template=None,
+        ub_template=None,
     ):
         n_vars = z.shape[0]
         if sparse_pattern is None:
@@ -454,12 +490,19 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
             )
         nnz = sum(len(entries) for entries in sparse_pattern)
         f = np.zeros(n_vars, dtype=np.float64)
-        lb = np.full(n_vars, -INF, dtype=np.float64)
-        ub = np.full(n_vars, INF, dtype=np.float64)
-        for player_id in range(q_tensor.shape[-1]):
-            lb[index["prob"][player_id]] = 0.0
-            lb[index["lambda"][player_id]] = 0.0
-            lb[index["eta"][player_id]] = 0.0
+        if lb_template is None:
+            lb = np.full(n_vars, -INF, dtype=np.float64)
+            for player_id in range(q_tensor.shape[-1]):
+                lb[index["prob"][player_id]] = 0.0
+                lb[index["lambda"][player_id]] = 0.0
+                lb[index["eta"][player_id]] = 0.0
+        else:
+            lb = lb_template.copy()
+        ub = (
+            np.full(n_vars, INF, dtype=np.float64)
+            if ub_template is None
+            else ub_template.copy()
+        )
 
         def func_eval(n, z_ptr, f_ptr):
             z_view = np.ctypeslib.as_array(z_ptr, shape=(n,))
@@ -513,18 +556,15 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
         start = time.perf_counter()
         q_tensor = validate_nplayer_q_tensor(q_tensor)
         action_sizes = q_tensor.shape[:-1]
-        index, opponent_data, _ = self._build_index(action_sizes)
+        structure = self._structure_for_action_sizes(action_sizes)
+        index = structure["index"]
+        opponent_data = structure["opponent_data"]
+        distances_by_player = structure["distances_by_player"]
+        sparse_pattern = structure["sparse_pattern"]
         payoffs_by_player = [
             self._payoff_by_own_and_opponent_profile(q_tensor, player_id, opponent_data[player_id][1])
             for player_id in range(q_tensor.shape[-1])
         ]
-        distances_by_player = [
-            self._distance_matrix(len(opponent_data[player_id][1]))
-            for player_id in range(q_tensor.shape[-1])
-        ]
-        sparse_pattern = self._build_sparse_jacobian_pattern(
-            index, action_sizes, opponent_data, distances_by_player
-        )
 
         initial_policies = self._normalize_initial_policies(
             action_sizes, initial_policies
@@ -590,6 +630,8 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
                     payoffs_by_player,
                     distances_by_player,
                     sparse_pattern,
+                    structure["lb_template"],
+                    structure["ub_template"],
                 )
             except Exception as exc:
                 messages.append(str(exc))

@@ -424,12 +424,11 @@ class SrAdidasAgent:
             policies = self.pi_net(s)
         return [p.squeeze(0).cpu().numpy() for p in policies]
 
-    def save_checkpoint(self, path):
-        """Save enough state for notebook evaluation and training inspection."""
+    def save_checkpoint(self, path, include_replay_buffer=False, metadata=None):
+        """Save enough state for notebook evaluation and exact training resume."""
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        torch.save(
-            {
+        payload = {
                 "obs_dim": self.obs_dim,
                 "num_agents": self.num_agents,
                 "num_actions": self.num_actions,
@@ -446,15 +445,42 @@ class SrAdidasAgent:
                 "q_optimizer": self.q_optimizer.state_dict(),
                 "pi_optimizer": self.pi_optimizer.state_dict(),
                 "tau": self.tau_schedule.tau,
+                "tau_min": self.tau_schedule.tau_min,
+                "tau_decay_factor": self.tau_schedule.decay_factor,
+                "tau_threshold": self.tau_schedule.threshold,
+                "action_epsilon_start": self.action_eps_schedule.start,
+                "action_epsilon_end": self.action_eps_schedule.end,
+                "action_epsilon_decay_fraction": self.action_eps_schedule.decay_fraction,
+                "action_epsilon_total_steps": self.action_eps_schedule.total_steps,
+                "action_epsilon_mode": self.action_eps_schedule.mode,
                 "action_epsilon_step": self.action_eps_schedule._step,
+                "robust_epsilon_start": self.robust_eps_schedule.start,
+                "robust_epsilon_end": self.robust_eps_schedule.end,
+                "robust_epsilon_decay_fraction": self.robust_eps_schedule.decay_fraction,
+                "robust_epsilon_total_steps": self.robust_eps_schedule.total_steps,
+                "robust_epsilon_mode": self.robust_eps_schedule.mode,
                 "robust_epsilon_step": self.robust_eps_schedule._step,
+                "update_calls": self._update_calls,
+                "train_step_calls": self._train_step_calls,
+                "buf_counter": self._buf_counter,
+                "y_cache": self._y_cache,
                 "train_losses_q": self.train_losses_q,
                 "train_losses_pi": self.train_losses_pi,
                 "adi_estimates": self.adi_estimates,
                 "train_times": self.train_times,
-            },
-            path,
-        )
+                "python_random_state": repr(random.getstate()),
+                "numpy_random_state": repr(np.random.get_state()),
+                "torch_random_state": torch.get_rng_state().cpu().tolist(),
+                "metadata": dict(metadata or {}),
+            }
+        if torch.cuda.is_available():
+            payload["torch_cuda_random_state"] = [
+                state.cpu().tolist() for state in torch.cuda.get_rng_state_all()
+            ]
+        if include_replay_buffer:
+            payload["replay_buffer"] = list(self.replay_buffer.buffer)
+            payload["replay_buffer_capacity"] = self.replay_buffer.buffer.maxlen
+        torch.save(payload, path)
 
     def load_checkpoint(self, path, map_location=None):
         """Load a checkpoint saved by :meth:`save_checkpoint`."""
@@ -467,12 +493,72 @@ class SrAdidasAgent:
         if "pi_optimizer" in checkpoint:
             self.pi_optimizer.load_state_dict(checkpoint["pi_optimizer"])
         self.tau_schedule.tau = float(checkpoint.get("tau", self.tau_schedule.tau))
+        self.tau_schedule.tau_min = float(checkpoint.get("tau_min", self.tau_schedule.tau_min))
+        self.tau_schedule.decay_factor = float(
+            checkpoint.get("tau_decay_factor", self.tau_schedule.decay_factor)
+        )
+        self.tau_schedule.threshold = float(
+            checkpoint.get("tau_threshold", self.tau_schedule.threshold)
+        )
+        self.action_eps_schedule.start = float(
+            checkpoint.get("action_epsilon_start", self.action_eps_schedule.start)
+        )
+        self.action_eps_schedule.end = float(
+            checkpoint.get("action_epsilon_end", self.action_eps_schedule.end)
+        )
+        self.action_eps_schedule.decay_fraction = float(
+            checkpoint.get(
+                "action_epsilon_decay_fraction",
+                self.action_eps_schedule.decay_fraction,
+            )
+        )
+        self.action_eps_schedule.total_steps = int(
+            checkpoint.get(
+                "action_epsilon_total_steps",
+                self.action_eps_schedule.total_steps,
+            )
+        )
+        self.action_eps_schedule.mode = checkpoint.get(
+            "action_epsilon_mode", self.action_eps_schedule.mode
+        )
         self.action_eps_schedule._step = int(
             checkpoint.get("action_epsilon_step", self.action_eps_schedule._step)
+        )
+        self.robust_eps_schedule.start = float(
+            checkpoint.get("robust_epsilon_start", self.robust_eps_schedule.start)
+        )
+        self.robust_eps_schedule.end = float(
+            checkpoint.get("robust_epsilon_end", self.robust_eps_schedule.end)
+        )
+        self.robust_eps_schedule.decay_fraction = float(
+            checkpoint.get(
+                "robust_epsilon_decay_fraction",
+                self.robust_eps_schedule.decay_fraction,
+            )
+        )
+        self.robust_eps_schedule.total_steps = int(
+            checkpoint.get(
+                "robust_epsilon_total_steps",
+                self.robust_eps_schedule.total_steps,
+            )
+        )
+        self.robust_eps_schedule.mode = checkpoint.get(
+            "robust_epsilon_mode", self.robust_eps_schedule.mode
         )
         self.robust_eps_schedule._step = int(
             checkpoint.get("robust_epsilon_step", self.robust_eps_schedule._step)
         )
+        self._update_calls = int(checkpoint.get("update_calls", self._update_calls))
+        self._train_step_calls = int(
+            checkpoint.get("train_step_calls", self._train_step_calls)
+        )
+        self._buf_counter = int(checkpoint.get("buf_counter", self._buf_counter))
+        self._y_cache = dict(checkpoint.get("y_cache", self._y_cache))
+        replay_buffer_items = checkpoint.get("replay_buffer")
+        if replay_buffer_items is not None:
+            capacity = int(checkpoint.get("replay_buffer_capacity", len(replay_buffer_items)))
+            self.replay_buffer = ReplayBuffer(max(1, capacity))
+            self.replay_buffer.buffer.extend(replay_buffer_items)
         self.train_losses_q = list(checkpoint.get("train_losses_q", self.train_losses_q))
         self.train_losses_pi = list(checkpoint.get("train_losses_pi", self.train_losses_pi))
         self.adi_estimates = list(checkpoint.get("adi_estimates", self.adi_estimates))

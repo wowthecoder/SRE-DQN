@@ -56,12 +56,12 @@ DEEP_SRQ_LBF_HYPERPARAMS = {
     "action_epsilon_end": 0.05,
     "action_epsilon_decay_fraction": 0.6,
     "grad_clip_max_norm": 10.0,
-    "sre_num_repeats": 16,
-    "sre_include_pure_starts": True,
+    "sre_num_repeats": 1,
+    "sre_include_pure_starts": False,
     "train_every": 4,
     "network_type": "shared_trunk_separate_heads",
     "target_update_steps": 250,
-    "target_equilibrium_update_steps": 4,
+    "target_equilibrium_update_steps": 1,
     "target_tau": None,
     "solver_max_iter": 150,
     "solver_tol": 1e-4,
@@ -75,6 +75,7 @@ DEEP_SRQ_LBF_HYPERPARAMS = {
     "sre_approx_cache_enabled": True,
     "sre_cache_exploitability_tol": 1e-3,
     "sre_solver_exploitability_tol": 1e-4,
+    "sre_approx_accept_tol": 1e-2,
     "sre_solver_early_exit": True,
     "nfg_checkpoint_path": None,
     "nfg_device": None,
@@ -143,6 +144,88 @@ def _central_state(obs_dict, agent_order):
     return np.concatenate(parts).astype(np.float32, copy=False)
 
 
+def _rng_state_payload():
+    payload = {
+        "python_random": repr(random.getstate()),
+        "numpy_random": repr(np.random.get_state()),
+    }
+    if torch is not None:
+        payload["torch_random_cpu"] = torch.get_rng_state().cpu().tolist()
+        if torch.cuda.is_available():
+            payload["torch_random_cuda"] = [
+                state.cpu().tolist() for state in torch.cuda.get_rng_state_all()
+            ]
+    return payload
+
+
+def _solver_usage_summary(solver):
+    if solver is None:
+        return {}
+    if hasattr(solver, "get_usage_summary"):
+        return solver.get_usage_summary()
+    if hasattr(solver, "get_solve_time_summary"):
+        return {"solve_time": solver.get_solve_time_summary()}
+    fallback = getattr(solver, "_fallback_solver", None)
+    if fallback is not None and hasattr(fallback, "get_usage_summary"):
+        return fallback.get_usage_summary()
+    if fallback is not None and hasattr(fallback, "get_solve_time_summary"):
+        return {"solve_time": fallback.get_solve_time_summary()}
+    return {}
+
+
+def _evaluate_agent_rewards(
+    agent,
+    *,
+    lbf_env_config,
+    seed,
+    n_episodes,
+    max_steps=None,
+):
+    old_epsilon = agent.config.epsilon_explore
+    agent.config.epsilon_explore = 0.0
+    rewards = []
+    try:
+        for episode in range(int(n_episodes)):
+            env = make_pz_env(**lbf_env_config)
+            try:
+                obs_dict, _ = env.reset(seed=int(seed) + episode)
+                agent_order = list(env.possible_agents)
+                totals = np.zeros(len(agent_order), dtype=np.float64)
+                steps = 0
+                while env.agents and (max_steps is None or steps < int(max_steps)):
+                    state = _central_state(obs_dict, agent_order)
+                    action_list = agent.act_joint(state)
+                    action_dict = {
+                        agent_name: int(action_list[agent_id])
+                        for agent_id, agent_name in enumerate(agent_order)
+                    }
+                    obs_dict, reward_dict, term_dict, trunc_dict, _ = env.step(action_dict)
+                    totals += np.asarray(
+                        [reward_dict.get(agent_name, 0.0) for agent_name in agent_order],
+                        dtype=np.float64,
+                    )
+                    steps += 1
+                    if all(
+                        bool(term_dict.get(agent_name, False))
+                        or bool(trunc_dict.get(agent_name, False))
+                        for agent_name in agent_order
+                    ):
+                        break
+                rewards.append(totals.tolist())
+            finally:
+                env.close()
+    finally:
+        agent.config.epsilon_explore = old_epsilon
+    rewards_arr = np.asarray(rewards, dtype=np.float64)
+    return {
+        "episode_rewards": rewards,
+        "joint_rewards": rewards_arr.sum(axis=1).tolist() if rewards_arr.size else [],
+        "mean_joint_reward": (
+            None if rewards_arr.size == 0 else float(rewards_arr.sum(axis=1).mean())
+        ),
+    }
+
+
 def _make_solver(solver_name, hp, seed):
     if solver_name in {"nfg_transformer_sre", "nfg_sre"}:
         return make_sre_solver(
@@ -168,10 +251,15 @@ def train_lbf_deep_srq_experiment(
     epsilon_schedule="linear",
     seed=BASE_SEED,
     output_root=DEFAULT_OUTPUT_ROOT,
+    run_dir=None,
     lbf_config_overrides=None,
     hyperparameter_overrides=None,
     use_gpu=True,
     write_plots=True,
+    include_replay_buffer=False,
+    eval_interval=None,
+    eval_episodes=5,
+    eval_seed_offset=50_000,
     run_name_suffix=None,
     print_full_stats=True,
 ):
@@ -188,7 +276,7 @@ def train_lbf_deep_srq_experiment(
     run_name = f"{_slugify(solver_name)}_eps{epsilon_robust_initial:g}_{epsilon_schedule}"
     if run_name_suffix:
         run_name = f"{run_name}__{run_name_suffix}"
-    run_dir = Path(output_root) / run_name
+    run_dir = Path(run_dir) if run_dir is not None else Path(output_root) / run_name
     run_dir.mkdir(parents=True, exist_ok=True)
 
     agent = DuelingDoubleDqnSreAgent(
@@ -210,7 +298,10 @@ def train_lbf_deep_srq_experiment(
             network_type=hp["network_type"],
             use_gpu=use_gpu,
             sre_solver=_make_solver(solver_name, hp, seed),
-            target_equilibrium_update_steps=hp.get("target_equilibrium_update_steps", 4),
+            target_equilibrium_update_steps=hp.get(
+                "target_equilibrium_update_steps",
+                DEEP_SRQ_LBF_HYPERPARAMS["target_equilibrium_update_steps"],
+            ),
             sre_policy_cache_enabled=hp.get("sre_policy_cache_enabled", True),
             sre_policy_cache_size=hp.get("sre_policy_cache_size", 4096),
             sre_policy_cache_round_digits=hp.get("sre_policy_cache_round_digits", 6),
@@ -218,15 +309,22 @@ def train_lbf_deep_srq_experiment(
             sre_approx_cache_enabled=hp.get("sre_approx_cache_enabled", True),
             sre_cache_exploitability_tol=hp.get("sre_cache_exploitability_tol", 1e-3),
             sre_solver_exploitability_tol=hp.get("sre_solver_exploitability_tol", 1e-4),
+            sre_approx_accept_tol=hp.get("sre_approx_accept_tol", 1e-2),
             sre_solver_early_exit=hp.get("sre_solver_early_exit", True),
         )
     )
 
     rewards_history = [[] for _ in range(num_agents)]
     episode_lengths = []
+    loss_history = []
+    eval_history = []
     global_step = 0
     gradient_steps = 0
     best_joint_reward = -float("inf")
+    best_eval_joint_reward = -float("inf")
+    best_loss = None
+    latest_loss = None
+    best_checkpoint_source = "training_reward"
     training_start = time.perf_counter()
 
     print(
@@ -283,6 +381,17 @@ def train_lbf_deep_srq_experiment(
                 )
                 if loss is not None:
                     gradient_steps += 1
+                    latest_loss = float(loss)
+                    loss_history.append(
+                        {
+                            "episode": int(episode + 1),
+                            "global_step": int(global_step),
+                            "gradient_step": int(gradient_steps),
+                            "loss": latest_loss,
+                        }
+                    )
+                    if best_loss is None or latest_loss < best_loss:
+                        best_loss = latest_loss
                     if hp["target_tau"] is not None:
                         agent.soft_update_target_network(hp["target_tau"])
                     elif (
@@ -300,11 +409,59 @@ def train_lbf_deep_srq_experiment(
                 rewards_history[agent_id].append(float(reward))
             episode_lengths.append(int(ep_steps))
             joint_reward = float(np.sum(ep_rewards))
-            if joint_reward > best_joint_reward:
-                best_joint_reward = joint_reward
-                agent.save_checkpoint(run_dir / "shared_deepsrq_best.pt")
+            if eval_interval and (episode + 1) % int(eval_interval) == 0:
+                eval_record = _evaluate_agent_rewards(
+                    agent,
+                    lbf_env_config=config,
+                    seed=seed + int(eval_seed_offset) + episode,
+                    n_episodes=eval_episodes,
+                    max_steps=config.get("max_episode_steps"),
+                )
+                eval_record.update(
+                    {
+                        "episode": int(episode + 1),
+                        "global_step": int(global_step),
+                        "gradient_step": int(gradient_steps),
+                    }
+                )
+                eval_history.append(eval_record)
+                mean_eval = eval_record.get("mean_joint_reward")
+                if mean_eval is not None and mean_eval > best_eval_joint_reward:
+                    best_eval_joint_reward = float(mean_eval)
+                    best_checkpoint_source = "periodic_eval_reward"
+                    agent.save_checkpoint(
+                        run_dir / "shared_deepsrq_best.pt",
+                        include_replay_buffer=include_replay_buffer,
+                )
+                solver_usage = _solver_usage_summary(getattr(agent, "sre_solver", None))
+                fallback_rate = solver_usage.get("fallback_rate")
+                solve_time = solver_usage.get("solve_time") or {}
+                solve_ms = solve_time.get("mean_microseconds")
+                if solve_ms is not None:
+                    solver_status = f"solver_mean_ms={solve_ms / 1000.0:.3f}"
+                elif fallback_rate is not None:
+                    solver_status = f"fallback_rate={fallback_rate:.3f}"
+                else:
+                    solver_status = "solver_status=unavailable"
+                print(
+                    f"[ep {episode + 1:5d}] train_joint={joint_reward:8.4f} | "
+                    f"eval_joint={mean_eval if mean_eval is not None else float('nan'):8.4f} | "
+                    f"best_loss={best_loss if best_loss is not None else float('nan'):.6f} | "
+                    f"latest_loss={latest_loss if latest_loss is not None else float('nan'):.6f} | "
+                    f"{solver_status}"
+                )
 
-        agent.save_checkpoint(run_dir / "shared_deepsrq_final.pt")
+            if not eval_history and joint_reward > best_joint_reward:
+                best_joint_reward = joint_reward
+                agent.save_checkpoint(
+                    run_dir / "shared_deepsrq_best.pt",
+                    include_replay_buffer=include_replay_buffer,
+                )
+
+        agent.save_checkpoint(
+            run_dir / "shared_deepsrq_final.pt",
+            include_replay_buffer=include_replay_buffer,
+        )
     finally:
         wall_clock_seconds = time.perf_counter() - training_start
         timing = collect_timing_stats(
@@ -313,6 +470,7 @@ def train_lbf_deep_srq_experiment(
             episode_durations=episode_lengths,
             include_episode_durations=False,
         )
+        solver_usage = _solver_usage_summary(getattr(agent, "sre_solver", None))
         agent.close()
         env.close()
 
@@ -339,12 +497,29 @@ def train_lbf_deep_srq_experiment(
         "total_environment_steps": int(global_step),
         "gradient_steps": int(gradient_steps),
         "episode_lengths": episode_lengths,
+        "loss_history": loss_history,
+        "best_loss": best_loss,
+        "latest_loss": latest_loss,
+        "periodic_eval": eval_history,
+        "best_joint_reward": float(best_joint_reward),
+        "best_eval_joint_reward": (
+            None if best_eval_joint_reward == -float("inf") else float(best_eval_joint_reward)
+        ),
+        "best_checkpoint_source": best_checkpoint_source,
+        "checkpoint_paths": {
+            "best": str(run_dir / "shared_deepsrq_best.pt"),
+            "final": str(run_dir / "shared_deepsrq_final.pt"),
+        },
+        "include_replay_buffer": bool(include_replay_buffer),
+        "rng_state": _rng_state_payload(),
         "agent_labels": [
             f"Agent {agent_id + 1} (DeepSRQ)" for agent_id in range(num_agents)
         ],
         "artifact_dir": str(run_dir),
         "stats_path": str(stats_path),
         "timing": timing,
+        "solver_usage": solver_usage,
+        "nfg_transformer_usage": solver_usage,
     }
     if write_plots:
         plot_training_stats(stats, out_path=plot_path)

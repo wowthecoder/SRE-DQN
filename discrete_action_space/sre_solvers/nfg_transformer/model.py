@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from functools import lru_cache
-from itertools import product
 from typing import Optional
 
 import torch
@@ -29,14 +27,12 @@ class NfgTransformerConfig:
         return asdict(self)
 
 
-@lru_cache(maxsize=64)
-def _joint_indices_cpu(action_sizes: tuple[int, ...]):
-    values = list(product(*(range(size) for size in action_sizes)))
-    return torch.tensor(values, dtype=torch.long)
-
-
 def joint_indices(action_sizes, device):
-    return _joint_indices_cpu(tuple(int(size) for size in action_sizes)).to(device=device)
+    ranges = [
+        torch.arange(int(size), dtype=torch.long, device=device)
+        for size in action_sizes
+    ]
+    return torch.cartesian_prod(*ranges)
 
 
 class NfgTransformerBlock(nn.Module):

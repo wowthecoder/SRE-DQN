@@ -2,23 +2,12 @@
 from __future__ import annotations
 
 import json
+from importlib import resources
 from pathlib import Path
 from typing import Callable, Iterable
 
 import numpy as np
-
-
-_LBF_AGENT_COLORS = np.asarray(
-    [
-        [37, 99, 235],
-        [220, 38, 38],
-        [22, 163, 74],
-        [217, 119, 6],
-        [126, 34, 206],
-        [8, 145, 178],
-    ],
-    dtype=np.uint8,
-)
+import matplotlib.pyplot as plt
 
 
 def central_state(obs_dict, agent_order):
@@ -27,17 +16,73 @@ def central_state(obs_dict, agent_order):
     ).astype(np.float32, copy=False)
 
 
-def _fill_cell(frame, row: int, col: int, color, *, cell_size: int, pad: int = 0):
-    y0 = int(row) * cell_size + int(pad)
-    y1 = (int(row) + 1) * cell_size - int(pad)
-    x0 = int(col) * cell_size + int(pad)
-    x1 = (int(col) + 1) * cell_size - int(pad)
-    frame[y0:y1, x0:x1] = np.asarray(color, dtype=np.uint8)
+def _unwrap_lbf_env(env):
+    current = env
+    seen = set()
+    for _ in range(12):
+        if current is None:
+            return None
+        ident = id(current)
+        if ident in seen:
+            return None
+        seen.add(ident)
+        if getattr(current, "field", None) is not None and getattr(current, "players", None) is not None:
+            return current
+        for attr in ("_inner", "_env", "unwrapped", "env"):
+            try:
+                child = getattr(current, attr, None)
+            except Exception:
+                child = None
+            if child is not None and child is not current:
+                current = child
+                break
+        else:
+            return None
+    return None
 
 
-def _lbf_state_frame(env, *, cell_size: int = 42):
+def _load_lbf_icon(name: str, size: int):
+    from PIL import Image
+
+    try:
+        icon_path = resources.files("lbforaging.foraging").joinpath("icons", name)
+        image = Image.open(icon_path)
+    except Exception:
+        return None
+    resampling = getattr(Image, "Resampling", Image).LANCZOS
+    return image.convert("RGBA").resize((size, size), resampling)
+
+
+def _draw_badge(draw, *, center_x: float, center_y: float, radius: float, text: str):
+    from PIL import ImageFont
+
+    x0 = center_x - radius
+    y0 = center_y - radius
+    x1 = center_x + radius
+    y1 = center_y + radius
+    draw.ellipse((x0, y0, x1, y1), fill=(255, 255, 255), outline=(0, 0, 0), width=2)
+    try:
+        font = ImageFont.truetype("DejaVuSans-Bold.ttf", size=max(10, int(radius * 1.25)))
+    except Exception:
+        font = ImageFont.load_default()
+    bbox = draw.textbbox((0, 0), text, font=font)
+    text_w = bbox[2] - bbox[0]
+    text_h = bbox[3] - bbox[1]
+    draw.text(
+        (center_x - text_w / 2, center_y - text_h / 2 - 1),
+        text,
+        fill=(0, 0, 0),
+        font=font,
+    )
+
+
+def lbf_state_frame(env, *, grid_size: int = 50):
     """Render an LBF grid frame from environment state without opening a GUI."""
-    inner = getattr(env, "_inner", None)
+    from PIL import Image, ImageDraw
+
+    inner = _unwrap_lbf_env(env)
+    if inner is None:
+        return None
     field = getattr(inner, "field", None)
     players = getattr(inner, "players", None)
     if field is None or players is None:
@@ -47,31 +92,59 @@ def _lbf_state_frame(env, *, cell_size: int = 42):
     if field.ndim != 2:
         return None
     rows, cols = field.shape
-    frame = np.full((rows * cell_size, cols * cell_size, 3), 248, dtype=np.uint8)
+    stride = grid_size + 1
+    width = 1 + cols * stride
+    height = 1 + rows * stride
+    image = Image.new("RGB", (width, height), (255, 255, 255))
+    draw = ImageDraw.Draw(image)
+
+    for row in range(rows + 1):
+        y = row * stride + 1
+        draw.line((0, y, stride * cols, y), fill=(0, 0, 0), width=1)
+    for col in range(cols + 1):
+        x = col * stride + 1
+        draw.line((x, 0, x, stride * rows), fill=(0, 0, 0), width=1)
+
+    apple = _load_lbf_icon("apple.png", grid_size)
+    agent_icon = _load_lbf_icon("agent.png", grid_size)
 
     food_rows, food_cols = np.nonzero(field > 0)
     for row, col in zip(food_rows, food_cols):
-        level = float(field[row, col])
-        intensity = min(1.0, 0.35 + 0.15 * level)
-        color = np.asarray([194, 231, 196], dtype=np.float64) * (1.0 - intensity)
-        color += np.asarray([35, 126, 66], dtype=np.float64) * intensity
-        _fill_cell(frame, row, col, color.astype(np.uint8), cell_size=cell_size, pad=4)
+        x = int(col) * stride
+        y = int(row) * stride
+        if apple is not None:
+            image.paste(apple, (x, y), apple)
+        else:
+            draw.ellipse((x + 6, y + 6, x + grid_size - 6, y + grid_size - 6), fill=(255, 0, 0))
+        _draw_badge(
+            draw,
+            center_x=x + 0.75 * stride,
+            center_y=y + 0.75 * stride,
+            radius=grid_size / 5,
+            text=str(field[row, col]),
+        )
 
-    for idx, player in enumerate(players):
+    for player in players:
         position = getattr(player, "position", None)
         if position is None:
             continue
         row, col = position
         if 0 <= int(row) < rows and 0 <= int(col) < cols:
-            color = _LBF_AGENT_COLORS[idx % len(_LBF_AGENT_COLORS)]
-            _fill_cell(frame, row, col, color, cell_size=cell_size, pad=max(7, cell_size // 5))
+            x = int(col) * stride
+            y = int(row) * stride
+            if agent_icon is not None:
+                image.paste(agent_icon, (x, y), agent_icon)
+            else:
+                draw.ellipse((x + 10, y + 8, x + grid_size - 10, y + grid_size - 2), fill=(0, 0, 0))
+            _draw_badge(
+                draw,
+                center_x=x + 0.75 * stride,
+                center_y=y + 0.75 * stride,
+                radius=grid_size / 5,
+                text=str(getattr(player, "level", "")),
+            )
 
-    grid_color = np.asarray([190, 190, 190], dtype=np.uint8)
-    frame[::cell_size, :, :] = grid_color
-    frame[:, ::cell_size, :] = grid_color
-    frame[-1, :, :] = grid_color
-    frame[:, -1, :] = grid_color
-    return frame
+    return np.asarray(image, dtype=np.uint8)
 
 
 def sample_lbf_rollout(
@@ -92,7 +165,7 @@ def sample_lbf_rollout(
         nonlocal render_failed, render_error
         if render_failed:
             return None
-        frame = _lbf_state_frame(env)
+        frame = lbf_state_frame(env)
         if frame is not None:
             return frame
         try:  # Last-resort array render for non-standard envs; never requests human mode.
@@ -332,6 +405,13 @@ def _align_values_to_axis(values, episodes) -> list[float]:
     return aligned
 
 
+def _is_nonflat_series(values, *, atol: float = 1e-12) -> bool:
+    values = np.asarray(values, dtype=np.float64)
+    if values.size < 2:
+        return False
+    return bool(np.ptp(values) > float(atol))
+
+
 def agent_training_reward_series(record: dict) -> tuple[list[float], list[tuple[str, np.ndarray]]]:
     """Return per-agent training reward curves from ablation or EPyMARL artifacts."""
     rewards = record.get("rewards")
@@ -342,10 +422,12 @@ def agent_training_reward_series(record: dict) -> tuple[list[float], list[tuple[
             labels = record.get("agent_labels") or [
                 f"Agent {idx + 1}" for idx in range(arr.shape[0])
             ]
-            return episodes, [
+            series = [
                 (str(labels[idx]), np.asarray(arr[idx], dtype=np.float64))
                 for idx in range(arr.shape[0])
+                if _is_nonflat_series(arr[idx])
             ]
+            return episodes, series
 
     payload = _load_reward_payload(record)
     curves = payload.get("reward_curve", {})
@@ -368,13 +450,11 @@ def agent_training_reward_series(record: dict) -> tuple[list[float], list[tuple[
     for label in agent_labels:
         values = curves.get(label)
         if values:
+            aligned = np.asarray(_align_values_to_axis(values, episodes), dtype=np.float64)
+            if not _is_nonflat_series(aligned):
+                continue
             display_label = label.replace("_", " ").title()
-            series.append(
-                (
-                    display_label,
-                    np.asarray(_align_values_to_axis(values, episodes), dtype=np.float64),
-                )
-            )
+            series.append((display_label, aligned))
     return list(episodes), series
 
 
@@ -394,7 +474,7 @@ def plot_individual_agent_training_rewards(record: dict, *, title_prefix: str | 
         mean = float(values.mean())
         std = float(values.std())
         fig, ax = plt.subplots(figsize=(10, 3.6))
-        ax.plot(x, values, linewidth=1.3, alpha=0.8, label=label)
+        ax.plot(x, values, linewidth=1.3, alpha=0.8, marker="", label=label)
         ax.axhline(mean, color="black", linestyle=":", linewidth=1.4)
         ax.text(
             0.99,
@@ -426,7 +506,7 @@ def plot_combined_agent_training_rewards(record: dict, *, title: str | None = No
     fig, ax = plt.subplots(figsize=(10, 3.8))
     for label, values in series:
         x = np.asarray(episodes[: values.size], dtype=np.float64)
-        ax.plot(x, values, linewidth=1.6, label=label)
+        ax.plot(x, values, linewidth=1.6, marker="", label=label)
     ax.set_title(title or f"{_record_label(record)} - agent reward comparison")
     ax.set_xlabel("Scenario episode")
     ax.set_ylabel("Training reward")
@@ -445,6 +525,7 @@ def display_training_reward_plots(records: Iterable[dict]):
         run_label = _record_label(record)
         for fig in plot_individual_agent_training_rewards(record, title_prefix=run_label):
             display(fig)
+            plt.close(fig)
             displayed.append(fig)
         combined = plot_combined_agent_training_rewards(
             record,
@@ -452,6 +533,7 @@ def display_training_reward_plots(records: Iterable[dict]):
         )
         if combined is not None:
             display(combined)
+            plt.close(combined)
             displayed.append(combined)
     return displayed
 

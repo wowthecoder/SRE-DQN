@@ -29,6 +29,7 @@ class NfgTransformerSreSolver(SreStageGameSolver):
     """
 
     name = "nfg_transformer_sre"
+    bypass_deep_srq_policy_cache = True
 
     def __init__(
         self,
@@ -58,6 +59,12 @@ class NfgTransformerSreSolver(SreStageGameSolver):
         self.solve_time_sumsq = 0.0
         self.solve_time_min = None
         self.solve_time_max = None
+        self.neural_accept_count = 0
+        self.fallback_count = 0
+        self.neural_gap_sum = 0.0
+        self.neural_gap_sumsq = 0.0
+        self.neural_gap_min = None
+        self.neural_gap_max = None
 
         if self.checkpoint_path is None:
             config = NfgTransformerConfig(
@@ -108,6 +115,13 @@ class NfgTransformerSreSolver(SreStageGameSolver):
         self.solve_time_sumsq += count * per_solve * per_solve
         self.solve_time_min = per_solve if self.solve_time_min is None else min(self.solve_time_min, per_solve)
         self.solve_time_max = per_solve if self.solve_time_max is None else max(self.solve_time_max, per_solve)
+
+    def _record_neural_gap(self, gap):
+        gap = float(gap)
+        self.neural_gap_sum += gap
+        self.neural_gap_sumsq += gap * gap
+        self.neural_gap_min = gap if self.neural_gap_min is None else min(self.neural_gap_min, gap)
+        self.neural_gap_max = gap if self.neural_gap_max is None else max(self.neural_gap_max, gap)
 
     @staticmethod
     def _normalize_policies(policies, q_tensor):
@@ -284,7 +298,9 @@ class NfgTransformerSreSolver(SreStageGameSolver):
         ):
             neural_policies = self._normalize_policies(neural_policies, q_tensor)
             neural_gap = float(neural_gaps[batch_id])
+            self._record_neural_gap(neural_gap)
             if neural_gap <= accept_tol or not self.fallback_enabled:
+                self.neural_accept_count += 1
                 results.append(
                     self._result_from_policies(
                         q_tensor,
@@ -316,6 +332,7 @@ class NfgTransformerSreSolver(SreStageGameSolver):
                 )
                 if warm_gap < neural_gap:
                     initial = warm_policies
+            self.fallback_count += 1
             fallback_result = self._fallback().solve(
                 q_tensor,
                 epsilon_value,
@@ -465,6 +482,40 @@ class NfgTransformerSreSolver(SreStageGameSolver):
             "min_microseconds": float(self.solve_time_min * 1_000_000.0),
             "max_microseconds": float(self.solve_time_max * 1_000_000.0),
             "std_microseconds": float(std * 1_000_000.0),
+        }
+
+    def get_usage_summary(self):
+        neural = int(self.neural_accept_count)
+        fallback = int(self.fallback_count)
+        total = neural + fallback
+        if total == 0:
+            gap_summary = {
+                "count": 0,
+                "mean": None,
+                "std": None,
+                "min": None,
+                "max": None,
+            }
+        else:
+            mean = self.neural_gap_sum / total
+            variance = max(self.neural_gap_sumsq / total - mean * mean, 0.0)
+            gap_summary = {
+                "count": int(total),
+                "mean": float(mean),
+                "std": float(np.sqrt(variance)),
+                "min": float(self.neural_gap_min),
+                "max": float(self.neural_gap_max),
+            }
+        return {
+            "solver": self.name,
+            "checkpoint_path": None if self.checkpoint_path is None else str(self.checkpoint_path),
+            "fallback_enabled": bool(self.fallback_enabled),
+            "neural_accept_count": neural,
+            "fallback_count": fallback,
+            "total_decisions": int(total),
+            "neural_accept_rate": None if total == 0 else float(neural / total),
+            "fallback_rate": None if total == 0 else float(fallback / total),
+            "neural_robust_exploitability": gap_summary,
         }
 
     def close(self):

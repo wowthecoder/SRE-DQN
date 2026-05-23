@@ -47,6 +47,16 @@ BASE_SEED = 2025
 DEFAULT_OUTPUT_ROOT = Path("runs")
 DEFAULT_NUM_AGENTS = 4
 DEFAULT_NUM_ACTIONS = 6
+ROBUST_EPSILONS = (0.01, 0.1, 0.5, 1.0)
+DEEPSRQ_NFGTRANSFORMER_FAMILY = "deepsrq_nfgtransformer"
+SR_ADIDAS_FAMILY = "sr_adidas"
+DEFAULT_NFG_TRANSFORMER_CHECKPOINT = (
+    _DISCRETE_DIR
+    / "sre_solvers"
+    / "nfg_transformer"
+    / "nfg_sre_checkpoints"
+    / "nfg_sre_lbf3_online.pt"
+)
 
 
 def find_repo_root(start=None):
@@ -66,6 +76,46 @@ def configure_notebook_imports(start=None):
         if str(path) not in sys.path:
             sys.path.insert(0, str(path))
     return root
+
+
+def epsilon_slug(epsilon):
+    return str(float(epsilon))
+
+
+def pommerman_dir(repo_root=None):
+    if repo_root is None:
+        return _THIS_DIR
+    return Path(repo_root) / "discrete_action_space" / "pommerman_ffa"
+
+
+def pommerman_artifact_dir(family, phase, epsilon, *, repo_root=None):
+    return pommerman_dir(repo_root) / str(family) / str(phase) / epsilon_slug(epsilon)
+
+
+def deepsrq_nfgtransformer_training_dir(epsilon, *, repo_root=None):
+    return pommerman_artifact_dir(
+        DEEPSRQ_NFGTRANSFORMER_FAMILY,
+        "training",
+        epsilon,
+        repo_root=repo_root,
+    )
+
+
+def deepsrq_nfgtransformer_evaluation_dir(epsilon, *, repo_root=None):
+    return pommerman_artifact_dir(
+        DEEPSRQ_NFGTRANSFORMER_FAMILY,
+        "evaluation",
+        epsilon,
+        repo_root=repo_root,
+    )
+
+
+def sr_adidas_training_dir(epsilon, *, repo_root=None):
+    return pommerman_artifact_dir(SR_ADIDAS_FAMILY, "training", epsilon, repo_root=repo_root)
+
+
+def sr_adidas_evaluation_dir(epsilon, *, repo_root=None):
+    return pommerman_artifact_dir(SR_ADIDAS_FAMILY, "evaluation", epsilon, repo_root=repo_root)
 
 
 def set_global_seed(seed=BASE_SEED):
@@ -265,6 +315,7 @@ class SharedIqlDqnAgent:
                 "optimizer": self.optimizer.state_dict(),
                 "step_count": self.step_count,
                 "update_count": self.update_count,
+                "batch_size": self.batch_size,
                 "losses": self.losses,
             },
             path,
@@ -303,6 +354,7 @@ class SharedIppoAgent:
         entropy_coef=0.01,
         value_coef=0.5,
         update_epochs=4,
+        batch_size=64,
         use_gpu=True,
     ):
         if torch is None:
@@ -315,6 +367,7 @@ class SharedIppoAgent:
         self.entropy_coef = float(entropy_coef)
         self.value_coef = float(value_coef)
         self.update_epochs = int(update_epochs)
+        self.batch_size = max(1, int(batch_size))
         self.device = torch.device("cuda" if use_gpu and torch.cuda.is_available() else "cpu")
         self.net = _ActorCritic(obs_dim, num_actions).to(self.device)
         self.optimizer = optim.Adam(self.net.parameters(), lr=lr)
@@ -339,26 +392,30 @@ class SharedIppoAgent:
         old_logp = torch.as_tensor([t["logp"] for t in trajectories], dtype=torch.float32, device=self.device)
         returns = torch.as_tensor([t["return"] for t in trajectories], dtype=torch.float32, device=self.device)
         advantages = torch.as_tensor([t["advantage"] for t in trajectories], dtype=torch.float32, device=self.device)
-        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+        advantages = (advantages - advantages.mean()) / (advantages.std(unbiased=False) + 1e-8)
 
         final_loss = None
+        num_items = int(obs.shape[0])
         for _ in range(self.update_epochs):
-            logits, values = self.net(obs)
-            dist = torch.distributions.Categorical(logits=logits)
-            logp = dist.log_prob(actions)
-            ratio = torch.exp(logp - old_logp)
-            policy_loss = -torch.min(
-                advantages * ratio,
-                advantages * torch.clamp(ratio, 1.0 - self.clip_coef, 1.0 + self.clip_coef),
-            ).mean()
-            value_loss = F.mse_loss(values, returns)
-            entropy = dist.entropy().mean()
-            loss = policy_loss + self.value_coef * value_loss - self.entropy_coef * entropy
-            self.optimizer.zero_grad()
-            loss.backward()
-            nn.utils.clip_grad_norm_(self.net.parameters(), 10.0)
-            self.optimizer.step()
-            final_loss = float(loss.detach().cpu())
+            indices = torch.randperm(num_items, device=self.device)
+            for start in range(0, num_items, self.batch_size):
+                mb = indices[start:start + self.batch_size]
+                logits, values = self.net(obs[mb])
+                dist = torch.distributions.Categorical(logits=logits)
+                logp = dist.log_prob(actions[mb])
+                ratio = torch.exp(logp - old_logp[mb])
+                policy_loss = -torch.min(
+                    advantages[mb] * ratio,
+                    advantages[mb] * torch.clamp(ratio, 1.0 - self.clip_coef, 1.0 + self.clip_coef),
+                ).mean()
+                value_loss = F.mse_loss(values, returns[mb])
+                entropy = dist.entropy().mean()
+                loss = policy_loss + self.value_coef * value_loss - self.entropy_coef * entropy
+                self.optimizer.zero_grad()
+                loss.backward()
+                nn.utils.clip_grad_norm_(self.net.parameters(), 10.0)
+                self.optimizer.step()
+                final_loss = float(loss.detach().cpu())
         self.losses.append(final_loss)
         return final_loss
 
@@ -371,6 +428,7 @@ class SharedIppoAgent:
                 "num_actions": self.num_actions,
                 "net": self.net.state_dict(),
                 "optimizer": self.optimizer.state_dict(),
+                "batch_size": self.batch_size,
                 "losses": self.losses,
             },
             path,
@@ -406,6 +464,7 @@ def train_iql_dqn(
     seed=BASE_SEED,
     output_root=DEFAULT_OUTPUT_ROOT,
     use_gpu=True,
+    batch_size=64,
     verbose=True,
 ):
     set_global_seed(seed)
@@ -419,6 +478,7 @@ def train_iql_dqn(
     agent = SharedIqlDqnAgent(
         obs_dim,
         num_actions,
+        batch_size=batch_size,
         epsilon_decay_steps=max(1, n_episodes * max_steps * len(order)),
         use_gpu=use_gpu,
     )
@@ -458,7 +518,7 @@ def train_iql_dqn(
         episode_lengths=episode_lengths,
         seed=seed,
         output_dir=output_dir,
-        extra={"losses": agent.losses},
+        extra={"losses": agent.losses, "batch_size": int(batch_size)},
     )
     stats = _write_stats(stats, output_dir)
     stats["agent"] = agent
@@ -472,6 +532,7 @@ def train_ippo(
     seed=BASE_SEED,
     output_root=DEFAULT_OUTPUT_ROOT,
     use_gpu=True,
+    batch_size=64,
     verbose=True,
 ):
     set_global_seed(seed)
@@ -482,7 +543,7 @@ def train_ippo(
     num_actions = int(probe.action_space(order[0]).n)
     probe.close()
 
-    agent = SharedIppoAgent(obs_dim, num_actions, use_gpu=use_gpu)
+    agent = SharedIppoAgent(obs_dim, num_actions, batch_size=batch_size, use_gpu=use_gpu)
     output_dir = Path(output_root) / "ippo"
     episode_rewards = []
     episode_lengths = []
@@ -538,7 +599,7 @@ def train_ippo(
         episode_lengths=episode_lengths,
         seed=seed,
         output_dir=output_dir,
-        extra={"losses": agent.losses},
+        extra={"losses": agent.losses, "batch_size": int(batch_size)},
     )
     stats = _write_stats(stats, output_dir)
     stats["agent"] = agent
@@ -551,8 +612,12 @@ def train_pommerman_sr_adidas(
     max_steps=200,
     seed=BASE_SEED,
     output_root=DEFAULT_OUTPUT_ROOT,
+    output_dir=None,
     use_gpu=True,
     epsilon_robust=0.5,
+    epsilon_robust_end=None,
+    epsilon_robust_decay_fraction=1.0,
+    batch_size=32,
     verbose=True,
 ):
     from discrete_action_space.sr_adidas.train import train_sr_adidas
@@ -600,15 +665,19 @@ def train_pommerman_sr_adidas(
         max_steps_per_episode=max_steps,
         seed=seed,
         epsilon_robust=epsilon_robust,
+        epsilon_robust_end=epsilon_robust if epsilon_robust_end is None else epsilon_robust_end,
+        epsilon_robust_decay_fraction=epsilon_robust_decay_fraction,
+        batch_size=batch_size,
         eval_interval=max(1, min(25, n_episodes)),
         use_gpu=use_gpu,
         verbose=verbose,
     )
-    output_dir = Path(output_root) / "sr_adidas"
+    output_dir = Path(output_dir) if output_dir is not None else Path(output_root) / "sr_adidas"
     output_dir.mkdir(parents=True, exist_ok=True)
     agent = results["agent"]
     if hasattr(agent, "save_checkpoint"):
-        agent.save_checkpoint(output_dir / "sr_adidas_final.pt")
+        agent.save_checkpoint(output_dir / "sr_adidas_best.pt", include_replay_buffer=True)
+        agent.save_checkpoint(output_dir / "sr_adidas_final.pt", include_replay_buffer=True)
     stats = _stats_payload(
         algorithm="SR-ADIDAS",
         episode_rewards=results["episode_rewards"],
@@ -619,10 +688,72 @@ def train_pommerman_sr_adidas(
             "train_losses_q": results.get("train_losses_q", []),
             "train_losses_pi": results.get("train_losses_pi", []),
             "adi_estimates": results.get("adi_estimates", []),
+            "batch_size": int(batch_size),
+            "obs_dim": int(obs_dim),
+            "single_obs_dim": int(single_obs_dim),
+            "epsilon_robust_initial": float(epsilon_robust),
+            "epsilon_robust_end": float(epsilon_robust if epsilon_robust_end is None else epsilon_robust_end),
+            "epsilon_schedule": "constant" if (epsilon_robust_end is None or float(epsilon_robust_end) == float(epsilon_robust)) else "linear",
+            "checkpoint_paths": {
+                "best": str(output_dir / "sr_adidas_best.pt"),
+                "final": str(output_dir / "sr_adidas_final.pt"),
+            },
         },
     )
     stats = _write_stats(stats, output_dir)
     stats["agent"] = agent
+    return stats
+
+
+def train_pommerman_sr_adidas_for_epsilon(
+    epsilon,
+    *,
+    n_episodes=100,
+    max_steps=200,
+    seed=BASE_SEED,
+    repo_root=None,
+    use_gpu=True,
+    batch_size=32,
+    verbose=True,
+):
+    run_dir = sr_adidas_training_dir(epsilon, repo_root=repo_root)
+    stats = train_pommerman_sr_adidas(
+        n_episodes=n_episodes,
+        max_steps=max_steps,
+        seed=seed,
+        output_dir=run_dir,
+        use_gpu=use_gpu,
+        epsilon_robust=float(epsilon),
+        epsilon_robust_end=float(epsilon),
+        epsilon_robust_decay_fraction=1.0,
+        batch_size=batch_size,
+        verbose=verbose,
+    )
+    stats.update(
+        {
+            "algorithm_family": SR_ADIDAS_FAMILY,
+            "epsilon_schedule": "constant",
+            "artifact_dir": str(run_dir),
+        }
+    )
+    saved_stats = dict(stats)
+    saved_stats.pop("agent", None)
+    save_training_stats(run_dir / "training_stats.txt", saved_stats)
+    manifest_path = (
+        pommerman_dir(repo_root)
+        / SR_ADIDAS_FAMILY
+        / "training"
+        / f"manifest_eps_{epsilon_slug(epsilon)}.json"
+    )
+    save_training_stats(
+        manifest_path,
+        {
+            "algorithm": SR_ADIDAS_FAMILY,
+            "epsilon": float(epsilon),
+            "training_stats_path": str(run_dir / "training_stats.txt"),
+            "artifact_dir": str(run_dir),
+        },
+    )
     return stats
 
 
@@ -632,24 +763,27 @@ def train_pommerman_deep_srq(
     max_steps=200,
     seed=BASE_SEED,
     output_root=DEFAULT_OUTPUT_ROOT,
+    output_dir=None,
     use_gpu=True,
     epsilon_robust_initial=0.5,
     epsilon_schedule="linear",
     nfg_checkpoint_path=None,
     nfg_accept_gap=None,
     nfg_fallback_enabled=True,
+    batch_size=32,
+    include_replay_buffer=True,
     verbose=True,
 ):
     from dueling_double_dqn_sre import DuelingDoubleDqnSreAgent, DuelingDoubleDqnSreAgentConfig
     from sre_solvers import make_sre_solver
 
     set_global_seed(seed)
-    env = make_env()
-    obs, _ = env.reset(seed=seed)
-    order = _agent_order(env)
+    probe = make_env()
+    obs, _ = probe.reset(seed=seed)
+    order = _agent_order(probe)
     obs_dim = int(_central_state(obs, order).shape[0])
-    num_actions = int(env.action_space(order[0]).n)
-    env.close()
+    num_actions = int(probe.action_space(order[0]).n)
+    probe.close()
 
     if nfg_checkpoint_path:
         solver = make_sre_solver(
@@ -682,7 +816,7 @@ def train_pommerman_deep_srq(
             lr=3e-4,
             gamma=0.99,
             buffer_size=20_000,
-            batch_size=32,
+            batch_size=batch_size,
             learning_starts=500,
             grad_clip_norm=10.0,
             train_every=4,
@@ -695,13 +829,21 @@ def train_pommerman_deep_srq(
         )
     )
 
-    output_dir = Path(output_root) / "deep_srq_nfg_transformer"
+    output_dir = (
+        Path(output_dir)
+        if output_dir is not None
+        else Path(output_root) / "deep_srq_nfg_transformer"
+    )
     output_dir.mkdir(parents=True, exist_ok=True)
     episode_rewards = []
     episode_lengths = []
+    loss_history = []
     gradient_steps = 0
     best_joint_reward = -float("inf")
+    best_loss = None
+    latest_loss = None
     start = time.perf_counter()
+    env = make_env()
 
     try:
         for episode in tqdm(range(n_episodes), desc="pommerman:deep_srq", disable=not verbose):
@@ -720,9 +862,20 @@ def train_pommerman_deep_srq(
                     [bool(terms.get(a, False) or truncs.get(a, False)) for a in order],
                     dtype=np.float32,
                 )
-                loss = agent.update(state, actions_list, reward_vec, next_state, done_mask, batch_size=32)
+                loss = agent.update(state, actions_list, reward_vec, next_state, done_mask, batch_size=batch_size)
                 if loss is not None:
                     gradient_steps += 1
+                    latest_loss = float(loss)
+                    loss_history.append(
+                        {
+                            "episode": int(episode + 1),
+                            "step": int(steps),
+                            "gradient_step": int(gradient_steps),
+                            "loss": latest_loss,
+                        }
+                    )
+                    if best_loss is None or latest_loss < best_loss:
+                        best_loss = latest_loss
                     if gradient_steps % 250 == 0:
                         agent.update_target_network()
                 rewards_total += reward_vec
@@ -733,8 +886,14 @@ def train_pommerman_deep_srq(
             joint_reward = float(np.sum(rewards_total))
             if joint_reward > best_joint_reward:
                 best_joint_reward = joint_reward
-                agent.save_checkpoint(output_dir / "shared_deepsrq_best.pt")
-        agent.save_checkpoint(output_dir / "shared_deepsrq_final.pt")
+                agent.save_checkpoint(
+                    output_dir / "shared_deepsrq_best.pt",
+                    include_replay_buffer=include_replay_buffer,
+                )
+        agent.save_checkpoint(
+            output_dir / "shared_deepsrq_final.pt",
+            include_replay_buffer=include_replay_buffer,
+        )
     finally:
         wall_clock_seconds = time.perf_counter() - start
         timing = collect_timing_stats([agent], wall_clock_seconds=wall_clock_seconds)
@@ -755,11 +914,81 @@ def train_pommerman_deep_srq(
             "epsilon_robust_initial": float(epsilon_robust_initial),
             "epsilon_schedule": epsilon_schedule,
             "gradient_steps": int(gradient_steps),
+            "batch_size": int(batch_size),
+            "obs_dim": int(obs_dim),
+            "loss_history": loss_history,
+            "best_loss": best_loss,
+            "latest_loss": latest_loss,
+            "best_joint_reward": float(best_joint_reward),
+            "include_replay_buffer": bool(include_replay_buffer),
+            "checkpoint_paths": {
+                "best": str(output_dir / "shared_deepsrq_best.pt"),
+                "final": str(output_dir / "shared_deepsrq_final.pt"),
+            },
             "timing": timing,
         },
     )
     stats = _write_stats(stats, output_dir)
     stats["agent"] = agent
+    return stats
+
+
+def train_pommerman_deepsrq_nfgtransformer_for_epsilon(
+    epsilon,
+    *,
+    n_episodes=100,
+    max_steps=200,
+    seed=BASE_SEED,
+    repo_root=None,
+    use_gpu=True,
+    nfg_checkpoint_path=DEFAULT_NFG_TRANSFORMER_CHECKPOINT,
+    nfg_accept_gap=None,
+    nfg_fallback_enabled=False,
+    batch_size=32,
+    verbose=True,
+):
+    run_dir = deepsrq_nfgtransformer_training_dir(epsilon, repo_root=repo_root)
+    stats = train_pommerman_deep_srq(
+        n_episodes=n_episodes,
+        max_steps=max_steps,
+        seed=seed,
+        output_dir=run_dir,
+        use_gpu=use_gpu,
+        epsilon_robust_initial=float(epsilon),
+        epsilon_schedule="constant",
+        nfg_checkpoint_path=nfg_checkpoint_path,
+        nfg_accept_gap=nfg_accept_gap,
+        nfg_fallback_enabled=nfg_fallback_enabled,
+        batch_size=batch_size,
+        include_replay_buffer=True,
+        verbose=verbose,
+    )
+    stats.update(
+        {
+            "algorithm_family": DEEPSRQ_NFGTRANSFORMER_FAMILY,
+            "artifact_dir": str(run_dir),
+        }
+    )
+    saved_stats = dict(stats)
+    saved_stats.pop("agent", None)
+    save_training_stats(run_dir / "training_stats.txt", saved_stats)
+    manifest_path = (
+        pommerman_dir(repo_root)
+        / DEEPSRQ_NFGTRANSFORMER_FAMILY
+        / "training"
+        / f"manifest_eps_{epsilon_slug(epsilon)}.json"
+    )
+    save_training_stats(
+        manifest_path,
+        {
+            "algorithm": DEEPSRQ_NFGTRANSFORMER_FAMILY,
+            "solver_name": "nfg_transformer_sre",
+            "nfg_fallback_enabled": bool(nfg_fallback_enabled),
+            "epsilon": float(epsilon),
+            "training_stats_path": str(run_dir / "training_stats.txt"),
+            "artifact_dir": str(run_dir),
+        },
+    )
     return stats
 
 
@@ -958,6 +1187,211 @@ def policy_from_deep_srq(agent):
     return _policy
 
 
+def _load_stats(path):
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def load_pommerman_deepsrq_nfgtransformer_agent(
+    epsilon,
+    *,
+    repo_root=None,
+    use_gpu=True,
+    checkpoint_name="best",
+    nfg_checkpoint_path=None,
+    nfg_accept_gap=None,
+    nfg_fallback_enabled=False,
+):
+    if torch is None:
+        raise ImportError("Deep SRQ checkpoint loading requires torch.")
+    from dueling_double_dqn_sre import DuelingDoubleDqnSreAgent, DuelingDoubleDqnSreAgentConfig
+    from sre_solvers import make_sre_solver
+
+    run_dir = deepsrq_nfgtransformer_training_dir(epsilon, repo_root=repo_root)
+    stats = _load_stats(run_dir / "training_stats.txt")
+    checkpoint_paths = stats.get("checkpoint_paths", {})
+    checkpoint_value = checkpoint_paths.get(checkpoint_name)
+    checkpoint = Path(checkpoint_value) if checkpoint_value else run_dir / "shared_deepsrq_best.pt"
+    if not checkpoint.is_file():
+        checkpoint = run_dir / "shared_deepsrq_best.pt"
+    if not checkpoint.is_file():
+        checkpoint = run_dir / "shared_deepsrq_final.pt"
+    if not checkpoint.is_file():
+        raise FileNotFoundError(f"No DeepSRQ checkpoint found in {run_dir}.")
+
+    solver_checkpoint = (
+        nfg_checkpoint_path
+        if nfg_checkpoint_path is not None
+        else stats.get("nfg_checkpoint_path")
+    )
+    solver = make_sre_solver(
+        "nfg_transformer_sre",
+        checkpoint_path=solver_checkpoint,
+        accept_exploitability_tol=(
+            nfg_accept_gap if nfg_accept_gap is not None else stats.get("nfg_accept_gap")
+        ),
+        fallback_enabled=(
+            nfg_fallback_enabled
+            if nfg_fallback_enabled is not None
+            else stats.get("nfg_fallback_enabled", False)
+        ),
+    )
+    agent = DuelingDoubleDqnSreAgent(
+        DuelingDoubleDqnSreAgentConfig(
+            obs_dim=int(stats["obs_dim"]),
+            num_agents=int(stats.get("num_agents", DEFAULT_NUM_AGENTS)),
+            num_actions=int(stats.get("num_actions", DEFAULT_NUM_ACTIONS)),
+            epsilon_robust=float(epsilon),
+            epsilon_robust_initial=float(epsilon),
+            epsilon_schedule="constant",
+            epsilon_explore=0.0,
+            action_epsilon_start=0.0,
+            action_epsilon_end=0.0,
+            lr=3e-4,
+            gamma=0.99,
+            buffer_size=20_000,
+            batch_size=int(stats.get("batch_size", 32)),
+            learning_starts=500,
+            grad_clip_norm=10.0,
+            train_every=4,
+            target_update_steps=250,
+            target_equilibrium_update_steps=4,
+            network_type="shared_trunk_separate_heads",
+            use_gpu=use_gpu,
+            sre_solver=solver,
+            sre_solver_name="nfg_transformer_sre",
+        )
+    )
+    agent.load_checkpoint(checkpoint, map_location=None if use_gpu else "cpu")
+    agent.config.epsilon_explore = 0.0
+    agent.config.epsilon_robust = float(epsilon)
+    return agent
+
+
+def load_pommerman_sr_adidas_agent(
+    epsilon,
+    *,
+    repo_root=None,
+    use_gpu=True,
+    checkpoint_name="best",
+):
+    if torch is None:
+        raise ImportError("SR-ADIDAS checkpoint loading requires torch.")
+    from discrete_action_space.sr_adidas.sr_adidas_agent import SrAdidasAgent
+
+    run_dir = sr_adidas_training_dir(epsilon, repo_root=repo_root)
+    stats = _load_stats(run_dir / "training_stats.txt")
+    checkpoint_paths = stats.get("checkpoint_paths", {})
+    checkpoint_value = checkpoint_paths.get(checkpoint_name)
+    checkpoint = Path(checkpoint_value) if checkpoint_value else run_dir / "sr_adidas_best.pt"
+    if not checkpoint.is_file():
+        checkpoint = run_dir / "sr_adidas_best.pt"
+    if not checkpoint.is_file():
+        checkpoint = run_dir / "sr_adidas_final.pt"
+    if not checkpoint.is_file():
+        raise FileNotFoundError(f"No SR-ADIDAS checkpoint found in {run_dir}.")
+
+    agent = SrAdidasAgent(
+        obs_dim=int(stats["obs_dim"]),
+        num_agents=int(stats.get("num_agents", DEFAULT_NUM_AGENTS)),
+        num_actions=int(stats.get("num_actions", DEFAULT_NUM_ACTIONS)),
+        epsilon_robust=float(epsilon),
+        epsilon_robust_end=float(epsilon),
+        total_steps=1,
+        use_gpu=use_gpu,
+        batch_size=int(stats.get("batch_size", 32)),
+    )
+    agent.load_checkpoint(checkpoint, map_location=None if use_gpu else "cpu")
+    agent.action_eps_schedule.start = 0.0
+    agent.action_eps_schedule.end = 0.0
+    return agent
+
+
+def evaluate_pommerman_deepsrq_nfgtransformer_for_epsilon(
+    epsilon,
+    *,
+    n_episodes=20,
+    max_steps=200,
+    seed=BASE_SEED + 10_000,
+    repo_root=None,
+    use_gpu=True,
+    nfg_checkpoint_path=None,
+    nfg_accept_gap=None,
+    nfg_fallback_enabled=False,
+):
+    output_dir = deepsrq_nfgtransformer_evaluation_dir(epsilon, repo_root=repo_root)
+    agent = load_pommerman_deepsrq_nfgtransformer_agent(
+        epsilon,
+        repo_root=repo_root,
+        use_gpu=use_gpu,
+        nfg_checkpoint_path=nfg_checkpoint_path,
+        nfg_accept_gap=nfg_accept_gap,
+        nfg_fallback_enabled=nfg_fallback_enabled,
+    )
+    try:
+        stats = evaluate_policy(
+            policy_from_deep_srq(agent),
+            n_episodes=n_episodes,
+            max_steps=max_steps,
+            seed=seed,
+            output_dir=output_dir,
+            label=f"deep_srq_nfgtransformer_eps_{epsilon_slug(epsilon)}",
+        )
+    finally:
+        agent.close()
+    stats["epsilon_robust"] = float(epsilon)
+    stats["artifact_dir"] = str(output_dir)
+    save_training_stats(
+        output_dir / "evaluation_manifest.json",
+        {
+            "algorithm": DEEPSRQ_NFGTRANSFORMER_FAMILY,
+            "epsilon": float(epsilon),
+            "n_episodes": int(n_episodes),
+            "max_steps": int(max_steps),
+            "artifact_dir": str(output_dir),
+        },
+    )
+    return stats
+
+
+def evaluate_pommerman_sr_adidas_for_epsilon(
+    epsilon,
+    *,
+    n_episodes=20,
+    max_steps=200,
+    seed=BASE_SEED + 10_000,
+    repo_root=None,
+    use_gpu=True,
+):
+    output_dir = sr_adidas_evaluation_dir(epsilon, repo_root=repo_root)
+    agent = load_pommerman_sr_adidas_agent(
+        epsilon,
+        repo_root=repo_root,
+        use_gpu=use_gpu,
+    )
+    stats = evaluate_policy(
+        policy_from_sr_adidas(agent),
+        n_episodes=n_episodes,
+        max_steps=max_steps,
+        seed=seed,
+        output_dir=output_dir,
+        label=f"sr_adidas_eps_{epsilon_slug(epsilon)}",
+    )
+    stats["epsilon_robust"] = float(epsilon)
+    stats["artifact_dir"] = str(output_dir)
+    save_training_stats(
+        output_dir / "evaluation_manifest.json",
+        {
+            "algorithm": SR_ADIDAS_FAMILY,
+            "epsilon": float(epsilon),
+            "n_episodes": int(n_episodes),
+            "max_steps": int(max_steps),
+            "artifact_dir": str(output_dir),
+        },
+    )
+    return stats
+
+
 def _save_rollout_video_if_possible(frames, out_path, *, fps=4, title="Evaluation rollout"):
     try:
         return save_rollout_video(frames, out_path, fps=fps, title=title)
@@ -992,6 +1426,14 @@ def _try_render_frame(env, *, allow_human_render=False):
     arr = np.asarray(frame)
     if arr.ndim < 2:
         return None, None
+    if arr.ndim == 3 and arr.shape[-1] in (3, 4):
+        if np.issubdtype(arr.dtype, np.floating):
+            if float(np.nanmax(arr)) > 1.0:
+                arr = np.clip(arr, 0, 255).astype(np.uint8)
+            else:
+                arr = np.clip(arr, 0.0, 1.0)
+        elif arr.dtype != np.uint8:
+            arr = np.clip(arr, 0, 255).astype(np.uint8)
     return arr, None
 
 
@@ -1020,8 +1462,7 @@ def plot_individual_agent_training_rewards(stats, *, title_prefix=None):
         mean = float(values.mean())
         std = float(values.std())
         fig, ax = plt.subplots(figsize=(10, 3.6))
-        ax.scatter(episodes, values, s=10, alpha=0.45, label=label)
-        ax.plot(episodes, values, linewidth=1.0, alpha=0.6)
+        ax.plot(episodes, values, linewidth=1.0, alpha=0.6, marker="")
         ax.axhline(mean, color="black", linestyle=":", linewidth=1.4)
         ax.text(
             0.99,

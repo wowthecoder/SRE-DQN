@@ -162,7 +162,7 @@ def _save_reward_curve(curves: dict[str, list[float]], out_path: Path, *, title:
             continue
         if has_agent_curves and label in aggregate_labels:
             continue
-        ax.plot(episodes, values, linewidth=1.8, label=label.replace("_", " ").title())
+        ax.plot(episodes, values, linewidth=1.8, marker="", label=label.replace("_", " ").title())
     ax.set_xlabel("Episode")
     ax.set_ylabel("Training reward")
     ax.set_title(title)

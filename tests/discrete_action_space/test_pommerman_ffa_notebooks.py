@@ -1,5 +1,6 @@
 import json
 import sys
+import ast
 from pathlib import Path
 
 import matplotlib
@@ -99,7 +100,39 @@ def test_pommerman_plot_helpers_accept_fake_rewards(tmp_path):
 
 def test_pommerman_notebooks_are_valid_json():
     notebook_dir = ROOT / "discrete_action_space" / "pommerman_ffa"
-    for name in ("pommerman_baselines.ipynb", "pommerman_sr_algorithms.ipynb"):
+    for name in (
+        "pommerman_baselines.ipynb",
+        "pommerman_sr_algorithms.ipynb",
+        "pommerman_deepsrq_nfgtransformer_training.ipynb",
+        "pommerman_deepsrq_nfgtransformer_evaluation.ipynb",
+        "pommerman_sr_adidas_training.ipynb",
+        "pommerman_sr_adidas_evaluation.ipynb",
+    ):
         data = json.loads((notebook_dir / name).read_text())
         assert data["nbformat"] == 4
         assert data["cells"]
+        for index, cell in enumerate(data["cells"]):
+            if cell["cell_type"] == "code":
+                ast.parse("".join(cell["source"]), filename=f"{name}:{index}")
+
+
+def test_pommerman_split_notebook_artifact_paths(tmp_path):
+    from discrete_action_space.pommerman_ffa.notebook_utils import (
+        deepsrq_nfgtransformer_evaluation_dir,
+        deepsrq_nfgtransformer_training_dir,
+        sr_adidas_evaluation_dir,
+        sr_adidas_training_dir,
+    )
+
+    assert deepsrq_nfgtransformer_training_dir(0.01, repo_root=tmp_path) == (
+        tmp_path / "discrete_action_space/pommerman_ffa/deepsrq_nfgtransformer/training/0.01"
+    )
+    assert deepsrq_nfgtransformer_evaluation_dir(1.0, repo_root=tmp_path) == (
+        tmp_path / "discrete_action_space/pommerman_ffa/deepsrq_nfgtransformer/evaluation/1.0"
+    )
+    assert sr_adidas_training_dir(0.5, repo_root=tmp_path) == (
+        tmp_path / "discrete_action_space/pommerman_ffa/sr_adidas/training/0.5"
+    )
+    assert sr_adidas_evaluation_dir(0.1, repo_root=tmp_path) == (
+        tmp_path / "discrete_action_space/pommerman_ffa/sr_adidas/evaluation/0.1"
+    )
