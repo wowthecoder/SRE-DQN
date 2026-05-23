@@ -5,6 +5,11 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
+try:
+    from .instrumented_env import InstrumentedForagingEnv
+except ImportError:  # Script/notebook import from the lbf_grid directory
+    from instrumented_env import InstrumentedForagingEnv
+
 
 @dataclass(frozen=True)
 class LbfEpymarlScenario:
@@ -28,7 +33,8 @@ EPYMARL_LBF_SCENARIOS = {
         key="lbf_8x8_2p_2f_levels12",
         gym_id="SREDQNForaging-8x8-2p-2f-levels12-v0",
         description=(
-            "2 agents with levels 1 and 2, 8x8 grid, 2 foods, max food level 3, "
+            "2 agents with levels 1 and 2, 8x8 grid, 10 foods "
+            "(3 level-3, 2 level-2, 5 level-1), "
             "full sight, 50-step episodes"
         ),
         time_limit=50,
@@ -36,20 +42,22 @@ EPYMARL_LBF_SCENARIOS = {
             "players": 2,
             "player_levels": [1, 2],
             "field_size": (8, 8),
-            "min_food_level": 1,
-            "max_food_level": 3,
-            "max_num_food": 2,
+            "food_levels": [3, 3, 3, 2, 2, 1, 1, 1, 1, 1],
+            "max_num_food": 10,
             "sight": 8,
             "max_episode_steps": 50,
             "force_coop": False,
             "normalize_reward": True,
+            "penalty": 0.0,
+            "empty_load_penalty": 0.01,
         },
     ),
     "lbf_8x8_2p_2f_force_coop": LbfEpymarlScenario(
         key="lbf_8x8_2p_2f_force_coop",
         gym_id="SREDQNForaging-8x8-2p-2f-force-coop-v0",
         description=(
-            "2 level-1 agents, 8x8 grid, 2 level-2 foods, full sight, forced "
+            "2 level-1 agents, 8x8 grid, 10 foods "
+            "(5 level-1, 5 level-2), full sight, forced "
             "cooperation, 50-step episodes"
         ),
         time_limit=50,
@@ -57,67 +65,62 @@ EPYMARL_LBF_SCENARIOS = {
             "players": 2,
             "player_levels": [1, 1],
             "field_size": (8, 8),
-            "food_levels": [2, 2],
-            "max_num_food": 2,
+            "food_levels": [1, 1, 1, 1, 1, 2, 2, 2, 2, 2],
+            "max_num_food": 10,
             "sight": 8,
             "max_episode_steps": 50,
             "force_coop": True,
             "normalize_reward": True,
+            "penalty": 0.0,
+            "empty_load_penalty": 0.01,
         },
     ),
     "lbf_10x10_3p_8f_levels123": LbfEpymarlScenario(
         key="lbf_10x10_3p_8f_levels123",
         gym_id="SREDQNForaging-10x10-3p-8f-levels123-v0",
         description=(
-            "3 agents with levels 1, 2, and 3, 10x10 grid, 8 foods including "
-            "one level-6 food, full sight, 100-step episodes"
+            "3 agents with levels 1, 2, and 3, 10x10 grid, 18 foods "
+            "(3 each for levels 1-6), full sight, 100-step episodes"
         ),
         time_limit=100,
         kwargs={
             "players": 3,
             "player_levels": [1, 2, 3],
             "field_size": (10, 10),
-            "food_levels": [6, 1, 1, 2, 2, 3, 3, 4],
-            "max_num_food": 8,
+            "food_levels": [
+                1,
+                1,
+                1,
+                2,
+                2,
+                2,
+                3,
+                3,
+                3,
+                4,
+                4,
+                4,
+                5,
+                5,
+                5,
+                6,
+                6,
+                6,
+            ],
+            "max_num_food": 18,
             "sight": 10,
             "max_episode_steps": 100,
             "force_coop": False,
             "normalize_reward": True,
+            "penalty": 0.0,
+            "empty_load_penalty": 0.01,
         },
     ),
 }
 
 
-try:
-    from lbforaging.foraging import ForagingEnv
-except ImportError:  # pragma: no cover - handled when env dependencies are absent
-    ForagingEnv = object
-
-
-class ExactLevelForagingEnv(ForagingEnv):
-    """lb-foraging env with exact per-agent levels after every reset."""
-
-    def __init__(self, *args, player_levels=None, food_levels=None, **kwargs):
-        self._player_levels = None if player_levels is None else [int(v) for v in player_levels]
-        if self._player_levels is not None:
-            kwargs["min_player_level"] = list(self._player_levels)
-            kwargs["max_player_level"] = list(self._player_levels)
-
-        if food_levels is not None:
-            levels = [int(v) for v in food_levels]
-            kwargs["min_food_level"] = levels
-            kwargs["max_food_level"] = levels
-
-        super().__init__(*args, **kwargs)
-
-    def reset(self, seed=None, options=None):
-        obs, info = super().reset(seed=seed, options=options)
-        if self._player_levels is not None:
-            for player, level in zip(self.players, self._player_levels):
-                player.level = int(level)
-            self._gen_valid_moves()
-            obs = self._make_gym_obs()
-        return obs, info
+class ExactLevelForagingEnv(InstrumentedForagingEnv):
+    """lb-foraging env with exact levels, dense spawning, and diagnostics."""
 
 
 def register_epymarl_lbf_envs():

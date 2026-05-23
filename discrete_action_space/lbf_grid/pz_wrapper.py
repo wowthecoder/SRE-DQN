@@ -6,6 +6,11 @@ from typing import Dict, Optional, Sequence, Tuple
 
 from pettingzoo import ParallelEnv
 
+try:
+    from .instrumented_env import InstrumentedForagingEnv
+except ImportError:  # Script/notebook import from the lbf_grid directory
+    from instrumented_env import InstrumentedForagingEnv
+
 
 def _as_level_list(name: str, values: Sequence[int], expected_len: int) -> list[int]:
     levels = [int(value) for value in values]
@@ -37,10 +42,9 @@ class LBFParallelEnv(ParallelEnv):
         grid_observation: bool = False,
         observe_agent_levels: bool = True,
         penalty: float = 0.0,
+        empty_load_penalty: float = 0.0,
         render_mode: Optional[str] = None,
     ):
-        from lbforaging.foraging import ForagingEnv
-
         super().__init__()
         self.n_players = int(players)
         self.field_size = tuple(field_size)
@@ -69,10 +73,12 @@ class LBFParallelEnv(ParallelEnv):
         ):
             _as_level_list("max_food_level", max_food_level, self.max_food)
 
-        self._inner = ForagingEnv(
+        self._inner = InstrumentedForagingEnv(
             players=players,
+            player_levels=player_levels,
             min_player_level=min_player_level,
             max_player_level=max_player_level,
+            food_levels=food_levels,
             min_food_level=min_food_level,
             max_food_level=max_food_level,
             field_size=self.field_size,
@@ -84,6 +90,7 @@ class LBFParallelEnv(ParallelEnv):
             grid_observation=grid_observation,
             observe_agent_levels=observe_agent_levels,
             penalty=penalty,
+            empty_load_penalty=empty_load_penalty,
             render_mode=render_mode,
         )
         self.possible_agents = [f"player_{i}" for i in range(players)]
@@ -101,7 +108,7 @@ class LBFParallelEnv(ParallelEnv):
         return self._act_space
 
     def reset(self, seed=None, options=None):
-        obs_list, _ = self._inner.reset(seed=seed, options=options)
+        obs_list, info = self._inner.reset(seed=seed, options=options)
         if self._player_levels is not None:
             for player, level in zip(self._inner.players, self._player_levels):
                 player.level = int(level)
@@ -111,7 +118,7 @@ class LBFParallelEnv(ParallelEnv):
             obs_list = [obs_list]
         self.agents = list(self.possible_agents)
         obs = {agent: obs_list[i] for i, agent in enumerate(self.agents)}
-        infos = {agent: {} for agent in self.agents}
+        infos = {agent: dict(info) if isinstance(info, dict) else {} for agent in self.agents}
         return obs, infos
 
     def step(self, actions: Dict):
@@ -163,6 +170,7 @@ def make_pz_env(
     grid_observation: bool = False,
     observe_agent_levels: bool = True,
     penalty: float = 0.0,
+    empty_load_penalty: float = 0.0,
     render_mode: Optional[str] = None,
 ) -> LBFParallelEnv:
     """Create the default basic Level-Based Foraging PettingZoo env."""
@@ -183,5 +191,6 @@ def make_pz_env(
         grid_observation=grid_observation,
         observe_agent_levels=observe_agent_levels,
         penalty=penalty,
+        empty_load_penalty=empty_load_penalty,
         render_mode=render_mode,
     )

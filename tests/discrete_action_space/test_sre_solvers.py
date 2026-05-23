@@ -6,6 +6,7 @@ from sre_solvers import (
     PathCBimatrixSreSolver,
     SreSolveResult,
 )
+from sre_solvers.n_player.path_mcp_nplayer import _sort_sre_candidates
 from bimatrix_game.stats_utils import collect_timing_stats
 
 
@@ -232,6 +233,7 @@ def test_dueling_double_dqn_accepts_approximate_sre_candidate():
             use_gpu=False,
             sre_solver=_FakeSolver(),
             sre_approx_accept_tol=1e-2,
+            sre_exploitability_filter_enabled=True,
         )
     )
     try:
@@ -269,6 +271,7 @@ def test_dueling_double_dqn_rejects_large_gap_sre_candidate():
             use_gpu=False,
             sre_solver=_FakeSolver(),
             sre_approx_accept_tol=1e-2,
+            sre_exploitability_filter_enabled=True,
         )
     )
     try:
@@ -291,6 +294,63 @@ def test_dueling_double_dqn_rejects_large_gap_sre_candidate():
         assert summary["uniform_fallbacks"] == 1
     finally:
         agent.close()
+
+
+def test_dueling_double_dqn_can_disable_exploitability_filter():
+    pytest.importorskip("torch")
+    from dueling_double_dqn_sre import DuelingDoubleDqnSreAgent, DuelingDoubleDqnSreAgentConfig
+
+    agent = DuelingDoubleDqnSreAgent(
+        DuelingDoubleDqnSreAgentConfig(
+            obs_dim=4,
+            num_agents=2,
+            num_actions=2,
+            use_gpu=False,
+            sre_solver=_FakeSolver(),
+            sre_approx_accept_tol=1e-2,
+            sre_exploitability_filter_enabled=False,
+        )
+    )
+    try:
+        result = SreSolveResult(
+            policies=[
+                np.array([1.0, 0.0], dtype=np.float64),
+                np.array([1.0, 0.0], dtype=np.float64),
+            ],
+            solutions=[],
+            utilities_sr=[],
+            utilities_nominal=[],
+            success=False,
+            metadata={"robust_exploitability": 5e-2},
+        )
+        policies, cacheable = agent._policies_from_sre_result(result)
+        assert cacheable is True
+        assert np.allclose(policies[0], [1.0, 0.0])
+        summary = agent.get_sre_cache_summary()
+        assert summary["unfiltered_candidates"] == 1
+        assert summary["rejected_candidates"] == 0
+        assert summary["uniform_fallbacks"] == 0
+    finally:
+        agent.close()
+
+
+def test_nplayer_path_candidate_selection_can_prefer_joint_welfare():
+    candidates = [
+        {
+            "robust_exploitability": 1e-4,
+            "joint_nominal_welfare": 1.0,
+        },
+        {
+            "robust_exploitability": 5e-2,
+            "joint_nominal_welfare": 10.0,
+        },
+    ]
+
+    by_gap = _sort_sre_candidates(candidates, "robust_exploitability")
+    by_welfare = _sort_sre_candidates(candidates, "joint_nominal_welfare")
+
+    assert by_gap[0]["joint_nominal_welfare"] == pytest.approx(1.0)
+    assert by_welfare[0]["joint_nominal_welfare"] == pytest.approx(10.0)
 
 
 def test_dueling_double_dqn_robust_values_are_used_for_targets():

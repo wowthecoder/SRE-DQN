@@ -47,6 +47,7 @@ try:
         train_lbf_deep_srq_experiment,
     )
     from .epymarl_lbf_env import EPYMARL_LBF_SCENARIOS
+    from .instrumented_env import aggregate_lbf_episode_metrics, extract_lbf_metrics
     from .notebook_eval import (
         plot_evaluation_agent_reward_boxplot,
         sample_lbf_rollouts,
@@ -62,6 +63,7 @@ except ImportError:  # Script/notebook import from the lbf_grid directory
         train_lbf_deep_srq_experiment,
     )
     from epymarl_lbf_env import EPYMARL_LBF_SCENARIOS  # type: ignore
+    from instrumented_env import aggregate_lbf_episode_metrics, extract_lbf_metrics  # type: ignore
     from notebook_eval import (  # type: ignore
         plot_evaluation_agent_reward_boxplot,
         sample_lbf_rollouts,
@@ -561,11 +563,14 @@ def _evaluate_sr_adidas_agent(agent, *, lbf_env_config, seed, n_episodes, max_st
     agent.action_eps_schedule.start = 0.0
     agent.action_eps_schedule.end = 0.0
     rewards = []
+    episode_metrics = []
+    episode_lengths = []
     try:
         for episode in range(int(n_episodes)):
             env = make_pz_env(**lbf_env_config)
             try:
-                obs_dict, _ = env.reset(seed=int(seed) + episode)
+                obs_dict, reset_info = env.reset(seed=int(seed) + episode)
+                latest_metrics = extract_lbf_metrics(reset_info)
                 agent_order = list(env.possible_agents)
                 totals = np.zeros(len(agent_order), dtype=np.float64)
                 steps = 0
@@ -576,7 +581,8 @@ def _evaluate_sr_adidas_agent(agent, *, lbf_env_config, seed, n_episodes, max_st
                         agent_name: int(action_list[agent_id])
                         for agent_id, agent_name in enumerate(agent_order)
                     }
-                    obs_dict, reward_dict, term_dict, trunc_dict, _ = env.step(action_dict)
+                    obs_dict, reward_dict, term_dict, trunc_dict, step_info = env.step(action_dict)
+                    latest_metrics = extract_lbf_metrics(step_info) or latest_metrics
                     totals += np.asarray(
                         [reward_dict.get(agent_name, 0.0) for agent_name in agent_order],
                         dtype=np.float64,
@@ -589,6 +595,8 @@ def _evaluate_sr_adidas_agent(agent, *, lbf_env_config, seed, n_episodes, max_st
                     ):
                         break
                 rewards.append(totals.tolist())
+                episode_lengths.append(int(steps))
+                episode_metrics.append(latest_metrics)
             finally:
                 env.close()
     finally:
@@ -598,6 +606,12 @@ def _evaluate_sr_adidas_agent(agent, *, lbf_env_config, seed, n_episodes, max_st
     return {
         "episode_rewards": rewards,
         "joint_rewards": rewards_arr.sum(axis=1).tolist() if rewards_arr.size else [],
+        "episode_lengths": episode_lengths,
+        "episode_metrics": episode_metrics,
+        "metric_totals": aggregate_lbf_episode_metrics(
+            episode_metrics,
+            rewards_arr.shape[1] if rewards_arr.ndim == 2 else None,
+        ),
         "mean_joint_reward": None if rewards_arr.size == 0 else float(rewards_arr.sum(axis=1).mean()),
     }
 
@@ -1156,6 +1170,12 @@ def load_deepsrq_policy(
                 "target_equilibrium_update_steps",
                 DEEP_SRQ_LBF_HYPERPARAMS["target_equilibrium_update_steps"],
             ),
+            sre_candidate_selection=hp.get(
+                "sre_candidate_selection", "robust_exploitability"
+            ),
+            sre_exploitability_filter_enabled=hp.get(
+                "sre_exploitability_filter_enabled", False
+            ),
             sre_target_value_mode=hp.get("sre_target_value_mode", "robust"),
         )
     )
@@ -1231,6 +1251,12 @@ def load_deepsrq_path_mcp_pool_policy(
             sre_solver_exploitability_tol=hp.get("sre_solver_exploitability_tol", 1e-4),
             sre_approx_accept_tol=hp.get("sre_approx_accept_tol", 1e-2),
             sre_solver_early_exit=hp.get("sre_solver_early_exit", True),
+            sre_candidate_selection=hp.get(
+                "sre_candidate_selection", "robust_exploitability"
+            ),
+            sre_exploitability_filter_enabled=hp.get(
+                "sre_exploitability_filter_enabled", False
+            ),
         )
     )
     agent.load_checkpoint(checkpoint, map_location=None if use_gpu else "cpu")
@@ -1315,6 +1341,8 @@ def evaluate_policy_matchup(
     slot_counts = [int(n_episodes)] if opponent_policy is None else rotated_episode_counts(n_episodes, num_agents)
     all_episode_rewards = []
     all_joint_rewards = []
+    all_episode_metrics = []
+    all_episode_lengths = []
     first_frames = []
     render_error = None
 
@@ -1376,6 +1404,8 @@ def evaluate_policy_matchup(
             )
         all_episode_rewards.extend(rollouts["episode_rewards"])
         all_joint_rewards.extend(rollouts["joint_rewards"])
+        all_episode_metrics.extend(rollouts.get("episode_metrics", []))
+        all_episode_lengths.extend(rollouts.get("episode_lengths") or rollouts.get("steps", []))
         if not first_frames and rollouts.get("frames"):
             first_frames = rollouts["frames"]
         render_error = render_error or rollouts.get("render_error")
@@ -1390,6 +1420,12 @@ def evaluate_policy_matchup(
         "slot_episode_counts": slot_counts,
         "episode_rewards": all_episode_rewards,
         "joint_rewards": all_joint_rewards,
+        "episode_lengths": all_episode_lengths,
+        "episode_metrics": all_episode_metrics,
+        "metric_totals": aggregate_lbf_episode_metrics(
+            all_episode_metrics,
+            num_agents,
+        ),
         "agent_labels": [f"Agent {idx + 1}" for idx in range(num_agents)],
         "render_error": render_error,
         "artifact_dir": str(output_dir),

@@ -11,6 +11,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 try:
+    from .instrumented_env import aggregate_lbf_episode_metrics, extract_lbf_metrics
+except ImportError:  # Script/notebook import from the lbf_grid directory
+    from instrumented_env import aggregate_lbf_episode_metrics, extract_lbf_metrics
+
+try:
     from tqdm.auto import tqdm
 except Exception:  # pragma: no cover - tqdm is optional in plain scripts.
     tqdm = None
@@ -186,11 +191,12 @@ def sample_lbf_rollout(
             return None
 
     try:
-        obs_dict, _ = env.reset(seed=seed)
+        obs_dict, reset_info = env.reset(seed=seed)
         agent_order = list(env.possible_agents)
         total_rewards = np.zeros(len(agent_order), dtype=np.float64)
         step_rewards = []
         steps = 0
+        episode_metrics = extract_lbf_metrics(reset_info)
 
         frame = _try_render()
         if frame is not None:
@@ -209,7 +215,8 @@ def sample_lbf_rollout(
             action_dict = {
                 agent: action_list[index] for index, agent in enumerate(agent_order)
             }
-            obs_dict, reward_dict, term_dict, trunc_dict, _ = env.step(action_dict)
+            obs_dict, reward_dict, term_dict, trunc_dict, step_info = env.step(action_dict)
+            episode_metrics = extract_lbf_metrics(step_info) or episode_metrics
             rewards = np.asarray(
                 [reward_dict.get(agent, 0.0) for agent in agent_order],
                 dtype=np.float64,
@@ -238,6 +245,7 @@ def sample_lbf_rollout(
         "total_rewards": total_rewards.tolist(),
         "joint_reward": float(total_rewards.sum()),
         "steps": int(steps),
+        "episode_metrics": episode_metrics,
         "render_error": render_error,
     }
 
@@ -295,7 +303,7 @@ def sample_lbf_rollouts_vectorized(
     def start_episode(episode_idx):
         capture_frames = bool(capture_first_episode_frames and episode_idx == 0)
         env = _make_episode_env(make_env, capture_frames, make_env_accepts_capture)
-        obs_dict, _ = env.reset(seed=int(seed) + episode_idx)
+        obs_dict, reset_info = env.reset(seed=int(seed) + episode_idx)
         agent_order = list(env.possible_agents)
         slot = {
             "episode_idx": int(episode_idx),
@@ -307,6 +315,7 @@ def sample_lbf_rollouts_vectorized(
             "actions": [],
             "steps": 0,
             "frames": [],
+            "episode_metrics": extract_lbf_metrics(reset_info),
             "capture_frames": capture_frames,
             "render_failed": False,
             "render_error": None,
@@ -373,7 +382,10 @@ def sample_lbf_rollouts_vectorized(
                         agent: action_list[index]
                         for index, agent in enumerate(agent_order)
                     }
-                    obs_dict, reward_dict, term_dict, trunc_dict, _ = env.step(action_dict)
+                    obs_dict, reward_dict, term_dict, trunc_dict, step_info = env.step(action_dict)
+                    slot["episode_metrics"] = (
+                        extract_lbf_metrics(step_info) or slot["episode_metrics"]
+                    )
                     rewards = np.asarray(
                         [reward_dict.get(agent, 0.0) for agent in agent_order],
                         dtype=np.float64,
@@ -414,6 +426,7 @@ def sample_lbf_rollouts_vectorized(
                     "total_rewards": slot["total_rewards"].tolist(),
                     "joint_reward": float(slot["total_rewards"].sum()),
                     "steps": int(slot["steps"]),
+                    "episode_metrics": slot["episode_metrics"],
                     "render_error": slot["render_error"],
                 }
                 if progress is not None:
@@ -435,6 +448,12 @@ def sample_lbf_rollouts_vectorized(
         "episode_rewards": [rollout["total_rewards"] for rollout in rollouts],
         "joint_rewards": [rollout["joint_reward"] for rollout in rollouts],
         "steps": [rollout["steps"] for rollout in rollouts],
+        "episode_lengths": [rollout["steps"] for rollout in rollouts],
+        "episode_metrics": [rollout.get("episode_metrics") for rollout in rollouts],
+        "metric_totals": aggregate_lbf_episode_metrics(
+            [rollout.get("episode_metrics") for rollout in rollouts],
+            len(rollouts[0]["total_rewards"]) if rollouts else None,
+        ),
     }
 
 
@@ -577,6 +596,12 @@ def sample_lbf_rollouts(
         "episode_rewards": [rollout["total_rewards"] for rollout in rollouts],
         "joint_rewards": [rollout["joint_reward"] for rollout in rollouts],
         "steps": [rollout["steps"] for rollout in rollouts],
+        "episode_lengths": [rollout["steps"] for rollout in rollouts],
+        "episode_metrics": [rollout.get("episode_metrics") for rollout in rollouts],
+        "metric_totals": aggregate_lbf_episode_metrics(
+            [rollout.get("episode_metrics") for rollout in rollouts],
+            len(rollouts[0]["total_rewards"]) if rollouts else None,
+        ),
     }
 
 

@@ -35,9 +35,11 @@ from stats_utils import (
 )
 
 try:  # Package import when used as discrete_action_space.lbf_grid.deep_srq_lbf
+    from .instrumented_env import aggregate_lbf_episode_metrics, extract_lbf_metrics
     from .pz_wrapper import make_pz_env
     from .scenarios import basic_lbf_config
 except ImportError:  # Script/notebook import from the lbf_grid directory
+    from instrumented_env import aggregate_lbf_episode_metrics, extract_lbf_metrics
     from pz_wrapper import make_pz_env
     from scenarios import basic_lbf_config
 
@@ -77,6 +79,8 @@ DEEP_SRQ_LBF_HYPERPARAMS = {
     "sre_solver_exploitability_tol": 1e-4,
     "sre_approx_accept_tol": 1e-2,
     "sre_solver_early_exit": True,
+    "sre_candidate_selection": "robust_exploitability",
+    "sre_exploitability_filter_enabled": False,
     "nfg_checkpoint_path": None,
     "nfg_device": None,
     "nfg_fallback_enabled": True,
@@ -192,11 +196,14 @@ def _evaluate_agent_rewards(
     old_epsilon = agent.config.epsilon_explore
     agent.config.epsilon_explore = 0.0
     rewards = []
+    episode_metrics = []
+    episode_lengths = []
     try:
         for episode in range(int(n_episodes)):
             env = make_pz_env(**lbf_env_config)
             try:
-                obs_dict, _ = env.reset(seed=int(seed) + episode)
+                obs_dict, reset_info = env.reset(seed=int(seed) + episode)
+                latest_metrics = extract_lbf_metrics(reset_info)
                 agent_order = list(env.possible_agents)
                 totals = np.zeros(len(agent_order), dtype=np.float64)
                 steps = 0
@@ -207,7 +214,8 @@ def _evaluate_agent_rewards(
                         agent_name: int(action_list[agent_id])
                         for agent_id, agent_name in enumerate(agent_order)
                     }
-                    obs_dict, reward_dict, term_dict, trunc_dict, _ = env.step(action_dict)
+                    obs_dict, reward_dict, term_dict, trunc_dict, step_info = env.step(action_dict)
+                    latest_metrics = extract_lbf_metrics(step_info) or latest_metrics
                     totals += np.asarray(
                         [reward_dict.get(agent_name, 0.0) for agent_name in agent_order],
                         dtype=np.float64,
@@ -220,6 +228,8 @@ def _evaluate_agent_rewards(
                     ):
                         break
                 rewards.append(totals.tolist())
+                episode_lengths.append(int(steps))
+                episode_metrics.append(latest_metrics)
             finally:
                 env.close()
     finally:
@@ -228,6 +238,12 @@ def _evaluate_agent_rewards(
     return {
         "episode_rewards": rewards,
         "joint_rewards": rewards_arr.sum(axis=1).tolist() if rewards_arr.size else [],
+        "episode_lengths": episode_lengths,
+        "episode_metrics": episode_metrics,
+        "metric_totals": aggregate_lbf_episode_metrics(
+            episode_metrics,
+            rewards_arr.shape[1] if rewards_arr.ndim == 2 else None,
+        ),
         "mean_joint_reward": (
             None if rewards_arr.size == 0 else float(rewards_arr.sum(axis=1).mean())
         ),
@@ -352,6 +368,12 @@ def train_lbf_deep_srq_experiment(
             ),
             sre_approx_accept_tol=hp.get("sre_approx_accept_tol", 1e-2),
             sre_solver_early_exit=hp.get("sre_solver_early_exit", True),
+            sre_candidate_selection=hp.get(
+                "sre_candidate_selection", "robust_exploitability"
+            ),
+            sre_exploitability_filter_enabled=hp.get(
+                "sre_exploitability_filter_enabled", False
+            ),
             sre_target_value_mode=hp.get("sre_target_value_mode", "robust"),
         )
     )

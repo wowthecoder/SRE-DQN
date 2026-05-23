@@ -92,6 +92,8 @@ class DuelingDoubleDqnSreAgentConfig:
     sre_solver_exploitability_tol: float = 1e-4
     sre_approx_accept_tol: float = 1e-2
     sre_solver_early_exit: bool = True
+    sre_candidate_selection: str = "robust_exploitability"
+    sre_exploitability_filter_enabled: bool = False
     sre_target_value_mode: str = "robust"
 
 
@@ -301,6 +303,7 @@ class DuelingDoubleDqnSreAgent:
         self.sre_approx_candidate_count = 0
         self.sre_rejected_candidate_count = 0
         self.sre_malformed_candidate_count = 0
+        self.sre_unfiltered_candidate_count = 0
         self.sre_candidate_gap_values = []
         self.sre_solver_starts_attempted_count = 0
         self.sre_solver_starts_attempted_sum = 0
@@ -456,6 +459,7 @@ class DuelingDoubleDqnSreAgent:
             ),
             "certified_candidates": int(self.sre_certified_candidate_count),
             "approx_candidates": int(self.sre_approx_candidate_count),
+            "unfiltered_candidates": int(self.sre_unfiltered_candidate_count),
             "rejected_candidates": int(self.sre_rejected_candidate_count),
             "malformed_candidates": int(self.sre_malformed_candidate_count),
             "candidate_robust_exploitability": self._candidate_gap_summary(),
@@ -476,6 +480,8 @@ class DuelingDoubleDqnSreAgent:
             "approx_exploitability_tol": float(self.config.sre_cache_exploitability_tol),
             "solver_exploitability_tol": float(self.config.sre_solver_exploitability_tol),
             "solver_approx_accept_tol": float(self.config.sre_approx_accept_tol),
+            "candidate_selection": str(self.config.sre_candidate_selection),
+            "exploitability_filter_enabled": bool(self.config.sre_exploitability_filter_enabled),
             "target_value_mode": str(self.config.sre_target_value_mode),
             "target_equilibrium_update_steps": int(self.config.target_equilibrium_update_steps),
             "target_equilibrium_refreshes": int(self.target_equilibrium_refresh_count),
@@ -700,6 +706,7 @@ class DuelingDoubleDqnSreAgent:
             "include_pure_starts": self.config.sre_include_pure_starts,
             "exploitability_tol": self.config.sre_solver_exploitability_tol,
             "early_exit": self.config.sre_solver_early_exit,
+            "candidate_selection": self.config.sre_candidate_selection,
         }
         if initial_policies is not None:
             kwargs["initial_policies"] = initial_policies
@@ -714,6 +721,7 @@ class DuelingDoubleDqnSreAgent:
                     "exploitability_tol",
                     "early_exit",
                     "include_pure_starts",
+                    "candidate_selection",
                 ):
                     if key in kwargs and key in message:
                         kwargs.pop(key, None)
@@ -728,6 +736,7 @@ class DuelingDoubleDqnSreAgent:
             "include_pure_starts": self.config.sre_include_pure_starts,
             "exploitability_tol": self.config.sre_solver_exploitability_tol,
             "early_exit": self.config.sre_solver_early_exit,
+            "candidate_selection": self.config.sre_candidate_selection,
         }
         if initial_policies_batch is not None:
             kwargs["initial_policies_batch"] = initial_policies_batch
@@ -742,6 +751,7 @@ class DuelingDoubleDqnSreAgent:
                     "exploitability_tol",
                     "early_exit",
                     "include_pure_starts",
+                    "candidate_selection",
                 ):
                     if key in kwargs and key in message:
                         kwargs.pop(key, None)
@@ -756,6 +766,7 @@ class DuelingDoubleDqnSreAgent:
             "include_pure_starts": self.config.sre_include_pure_starts,
             "exploitability_tol": self.config.sre_solver_exploitability_tol,
             "early_exit": self.config.sre_solver_early_exit,
+            "candidate_selection": self.config.sre_candidate_selection,
         }
         if initial_policies_batch is not None:
             kwargs["initial_policies_batch"] = initial_policies_batch
@@ -770,6 +781,7 @@ class DuelingDoubleDqnSreAgent:
                     "exploitability_tol",
                     "early_exit",
                     "include_pure_starts",
+                    "candidate_selection",
                 ):
                     if key in kwargs and key in message:
                         kwargs.pop(key, None)
@@ -812,6 +824,10 @@ class DuelingDoubleDqnSreAgent:
 
         if result.success:
             self.sre_certified_candidate_count += 1
+            return policies, True
+
+        if not self.config.sre_exploitability_filter_enabled:
+            self.sre_unfiltered_candidate_count += 1
             return policies, True
 
         gap = metadata.get("robust_exploitability")
@@ -1315,6 +1331,8 @@ class DuelingDoubleDqnSreAgent:
             "sre_solver_exploitability_tol": self.config.sre_solver_exploitability_tol,
             "sre_approx_accept_tol": self.config.sre_approx_accept_tol,
             "sre_solver_early_exit": self.config.sre_solver_early_exit,
+            "sre_candidate_selection": self.config.sre_candidate_selection,
+            "sre_exploitability_filter_enabled": self.config.sre_exploitability_filter_enabled,
             "sre_target_value_mode": self.config.sre_target_value_mode,
             "target_equilibrium_update_steps": self.config.target_equilibrium_update_steps,
             "update_calls": self._update_calls,
@@ -1379,6 +1397,8 @@ class DuelingDoubleDqnSreAgent:
         cfg.sre_solver_exploitability_tol = float(checkpoint.get("sre_solver_exploitability_tol", cfg.sre_solver_exploitability_tol))
         cfg.sre_approx_accept_tol = float(checkpoint.get("sre_approx_accept_tol", cfg.sre_approx_accept_tol))
         cfg.sre_solver_early_exit = bool(checkpoint.get("sre_solver_early_exit", cfg.sre_solver_early_exit))
+        cfg.sre_candidate_selection = checkpoint.get("sre_candidate_selection", cfg.sre_candidate_selection)
+        cfg.sre_exploitability_filter_enabled = bool(checkpoint.get("sre_exploitability_filter_enabled", cfg.sre_exploitability_filter_enabled))
         cfg.sre_target_value_mode = checkpoint.get("sre_target_value_mode", cfg.sre_target_value_mode)
         cfg.target_equilibrium_update_steps = max(1, int(checkpoint.get("target_equilibrium_update_steps", cfg.target_equilibrium_update_steps)))
         self.q_tensor_shape = tuple([cfg.num_actions] * cfg.num_agents + [cfg.num_agents])

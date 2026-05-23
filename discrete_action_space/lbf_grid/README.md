@@ -56,6 +56,7 @@ env.close()
 | `force_coop` | `False` | Native lb-foraging cooperative loading constraint |
 | `normalize_reward` | `True` | Use native normalized lb-foraging rewards |
 | `penalty` | `0.0` in wrapper | Penalty subtracted from each failed loader |
+| `empty_load_penalty` | `0.0` in wrapper | Penalty subtracted only when an agent loads with no adjacent food |
 
 `food_levels` must have length `max_food`. For example, `max_food=5,
 food_levels=[1, 1, 2, 2, 3]` keeps food positions random but fixes the spawned
@@ -74,12 +75,14 @@ food-level multiset.
 
 ## Rewards and Penalties
 
-The wrapper uses the upstream `lb-foraging` reward rules without extra shaping.
-Agents receive reward only when a `LOAD` action successfully collects adjacent
-food.
+The wrapper uses the upstream `lb-foraging` reward rules plus an optional
+empty-load penalty. Agents otherwise receive reward only when a `LOAD` action
+successfully collects adjacent food.
 
-- Movement actions, `NONE`, invalid actions converted to `NONE`, and movement
-  collisions have reward `0`.
+- Movement actions, `NONE`, invalid movement actions converted to `NONE`, and
+  movement collisions have reward `0`.
+- Empty loads have reward `-empty_load_penalty`; the denser benchmark
+  scenarios set this to `0.01`.
 - A load is considered with the set of loading agents adjacent to the same food.
   If their summed player level is less than the food level, the load fails.
 - Failed loaders receive `-penalty`; the project wrapper default is
@@ -491,9 +494,9 @@ The notebook registers three local Gymnasium IDs for the requested scenarios:
 
 | Scenario | Episode length | EPyMARL `t_max` for 1000 episodes |
 |---|---:|---:|
-| 2 agents with levels 1 and 2, 8x8, 2 foods, max food level 3 | 50 | 50000 |
-| 2 level-1 agents, 8x8, 2 level-2 foods, forced cooperation | 50 | 50000 |
-| 3 agents with levels 1, 2, and 3, 10x10, 8 foods including one level-6 food | 100 | 100000 |
+| 2 agents with levels 1 and 2, 8x8, 10 foods: 3 level-3, 2 level-2, 5 level-1 | 50 | 50000 |
+| 2 level-1 agents, 8x8, 10 foods: 5 level-1, 5 level-2, forced cooperation | 50 | 50000 |
+| 3 agents with levels 1, 2, and 3, 10x10, 18 foods: 3 each for levels 1-6 | 100 | 100000 |
 
 Set `EPYMARL_ROOT` in the notebook to a local clone of
 `https://github.com/uoe-agents/epymarl` before running the EPyMARL algorithms.
