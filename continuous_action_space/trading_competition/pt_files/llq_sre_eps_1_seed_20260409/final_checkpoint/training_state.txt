@@ -1,11 +1,18 @@
-iteration: 2640
-total_loss: 24255188.00000000
-value_loss: 12129341.00000000
-action_loss: 12125846.00000000
-best_loss: 41722.58593750
-best_idx: 639
-improvement_counter: 2001
-eval_reward_count: 2
+iteration: 9999
+total_loss: 2230072320.00000000
+value_loss: 1115052160.00000000
+action_loss: 1115020160.00000000
+best_loss: 924.83886719
+best_idx: 8014
+improvement_counter: 1985
+eval_reward_count: 9
 eval_rewards:
-  iteration: 1000 | eps_b: 1 | mean_reward: -3.86415458 | std_reward: 5.45831013 | agent_mean_rewards: [-4.244892, -3.448482, -4.094986, -3.758721, -3.773694]
-  iteration: 2000 | eps_b: 1 | mean_reward: -235.32191467 | std_reward: 4637.71044922 | agent_mean_rewards: [ -22.255102, -617.841919,  -93.892715, -382.587891,  -60.032032]
+  iteration: 1000 | eps_b: 1 | mean_reward: -45.79201889 | std_reward: 1313.69653320 | agent_mean_rewards: [  -5.340892,   -4.729355,   -4.342179,  -16.589361, -197.958328]
+  iteration: 2000 | eps_b: 1 | mean_reward: -235.59849548 | std_reward: 3513.25390625 | agent_mean_rewards: [ -70.387535,  -97.569473, -164.442139, -439.142883, -406.450653]
+  iteration: 3000 | eps_b: 1 | mean_reward: -14.71239948 | std_reward: 208.56642151 | agent_mean_rewards: [-31.921501, -10.74062 ,  -9.582087, -11.476434,  -9.841362]
+  iteration: 4000 | eps_b: 1 | mean_reward: -2.08442736 | std_reward: 3.58830547 | agent_mean_rewards: [-2.17821 , -2.06554 , -1.934647, -1.840047, -2.403694]
+  iteration: 5000 | eps_b: 1 | mean_reward: -1.55564725 | std_reward: 2.79330111 | agent_mean_rewards: [-1.764359, -1.407194, -1.54113 , -1.417998, -1.647555]
+  iteration: 6000 | eps_b: 1 | mean_reward: -1.52567089 | std_reward: 3.10942984 | agent_mean_rewards: [-1.245498, -1.47548 , -1.569964, -1.680145, -1.657267]
+  iteration: 7000 | eps_b: 1 | mean_reward: -1.38474143 | std_reward: 2.88638997 | agent_mean_rewards: [-1.335031, -1.321781, -1.398412, -1.455393, -1.41309 ]
+  iteration: 8000 | eps_b: 1 | mean_reward: -1.20671463 | std_reward: 2.69663525 | agent_mean_rewards: [-1.10588 , -1.320683, -1.304244, -1.144476, -1.15829 ]
+  iteration: 9000 | eps_b: 1 | mean_reward: -79.61249542 | std_reward: 3256.31127930 | agent_mean_rewards: [ -37.542213, -341.366394,   -2.242206,  -10.446733,   -6.464987]
