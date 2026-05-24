@@ -105,6 +105,7 @@ def test_dueling_double_dqn_uses_injected_solver_policy():
             learning_starts=999,
             use_gpu=False,
             sre_solver=solver,
+            sre_policy_cache_enabled=True,
         )
     )
     try:
@@ -156,6 +157,7 @@ def test_dueling_double_dqn_reuses_policy_cache_for_repeated_state():
             learning_starts=999,
             use_gpu=False,
             sre_solver=solver,
+            sre_policy_cache_enabled=True,
         )
     )
     try:
@@ -234,6 +236,7 @@ def test_dueling_double_dqn_accepts_approximate_sre_candidate():
             sre_solver=_FakeSolver(),
             sre_approx_accept_tol=1e-2,
             sre_exploitability_filter_enabled=True,
+            sre_uniform_fallback_enabled=True,
         )
     )
     try:
@@ -272,6 +275,7 @@ def test_dueling_double_dqn_rejects_large_gap_sre_candidate():
             sre_solver=_FakeSolver(),
             sre_approx_accept_tol=1e-2,
             sre_exploitability_filter_enabled=True,
+            sre_uniform_fallback_enabled=True,
         )
     )
     try:
@@ -292,6 +296,42 @@ def test_dueling_double_dqn_rejects_large_gap_sre_candidate():
         summary = agent.get_sre_cache_summary()
         assert summary["rejected_candidates"] == 1
         assert summary["uniform_fallbacks"] == 1
+    finally:
+        agent.close()
+
+
+def test_dueling_double_dqn_raises_when_uniform_fallback_disabled():
+    pytest.importorskip("torch")
+    from dueling_double_dqn_sre import DuelingDoubleDqnSreAgent, DuelingDoubleDqnSreAgentConfig
+
+    agent = DuelingDoubleDqnSreAgent(
+        DuelingDoubleDqnSreAgentConfig(
+            obs_dim=4,
+            num_agents=2,
+            num_actions=2,
+            use_gpu=False,
+            sre_solver=_FakeSolver(),
+            sre_approx_accept_tol=1e-2,
+            sre_exploitability_filter_enabled=True,
+        )
+    )
+    try:
+        result = SreSolveResult(
+            policies=[
+                np.array([1.0, 0.0], dtype=np.float64),
+                np.array([1.0, 0.0], dtype=np.float64),
+            ],
+            solutions=[],
+            utilities_sr=[],
+            utilities_nominal=[],
+            success=False,
+            metadata={"robust_exploitability": 5e-2},
+        )
+        with pytest.raises(RuntimeError, match="uniform fallback is disabled"):
+            agent._policies_from_sre_result(result)
+        summary = agent.get_sre_cache_summary()
+        assert summary["uniform_fallback_enabled"] is False
+        assert summary["uniform_fallbacks"] == 0
     finally:
         agent.close()
 
@@ -529,6 +569,7 @@ def test_target_equilibrium_frequency_reuses_cache_between_refreshes():
             target_equilibrium_update_steps=4,
             use_gpu=False,
             sre_solver=solver,
+            sre_policy_cache_enabled=True,
             sre_approx_cache_enabled=False,
         )
     )
@@ -626,6 +667,57 @@ def test_nfg_style_solver_bypasses_deep_srq_policy_cache_keying():
         assert summary["disabled_by_solver"] is True
         assert summary["misses"] == 0
         assert summary["stores"] == 0
+    finally:
+        agent.close()
+
+
+def test_torch_q_batch_is_copied_to_numpy_for_non_torch_solver():
+    torch = pytest.importorskip("torch")
+    from dueling_double_dqn_sre import DuelingDoubleDqnSreAgent, DuelingDoubleDqnSreAgentConfig
+
+    class FakeNumpyBatchSolver:
+        name = "fake_numpy_batch_solver"
+
+        def __init__(self):
+            self.seen_numpy = False
+
+        def solve_batch(self, q_tensors, epsilon, **kwargs):
+            del epsilon, kwargs
+            q_tensors = list(q_tensors)
+            self.seen_numpy = all(isinstance(q_tensor, np.ndarray) for q_tensor in q_tensors)
+            assert self.seen_numpy
+            return [
+                SreSolveResult(
+                    policies=[
+                        np.array([1.0, 0.0], dtype=np.float64),
+                        np.array([0.0, 1.0], dtype=np.float64),
+                    ],
+                    solutions=[],
+                    utilities_sr=[],
+                    utilities_nominal=[],
+                    success=True,
+                )
+                for _ in q_tensors
+            ]
+
+        def close(self):
+            pass
+
+    solver = FakeNumpyBatchSolver()
+    agent = DuelingDoubleDqnSreAgent(
+        DuelingDoubleDqnSreAgentConfig(
+            obs_dim=4,
+            num_agents=2,
+            num_actions=2,
+            use_gpu=False,
+            sre_solver=solver,
+        )
+    )
+    try:
+        q_batch = torch.zeros((3, 2, 2, 2), dtype=torch.float32)
+        policies = agent._solve_sre_batch(q_batch)
+        assert solver.seen_numpy is True
+        assert len(policies) == 3
     finally:
         agent.close()
 

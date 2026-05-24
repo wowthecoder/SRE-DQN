@@ -5,6 +5,7 @@ import json
 import math
 import os
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -19,7 +20,7 @@ from .epymarl_lbf_env import (
 )
 
 
-EPYMARL_ALGORITHMS = ("random", "iql", "mappo", "qmix")
+EPYMARL_ALGORITHMS = ("random", "iql", "ippo", "mappo", "qmix", "maa2c")
 UNSUPPORTED_EPYMARL_OVERRIDES = frozenset({"env_args.disable_env_checker"})
 
 
@@ -46,6 +47,85 @@ def _format_epymarl_override_value(value) -> str:
     if value is None:
         return "null"
     return str(value)
+
+
+def _epymarl_model_token(scenario_key: str, seed: int, algorithm: str) -> str:
+    """Return the deterministic EPyMARL model directory token."""
+    return f"{scenario_key}/{int(seed)}/{str(algorithm).lower()}"
+
+
+def _load_episode_metrics(metrics_dir: str | Path) -> list[dict]:
+    metrics_dir = Path(metrics_dir)
+    if not metrics_dir.exists():
+        return []
+
+    records = []
+    sequence = 0
+    for path in sorted(metrics_dir.glob("*.jsonl")):
+        with path.open(encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    payload = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                payload["_source_file"] = path.name
+                payload["_sequence"] = sequence
+                sequence += 1
+                records.append(payload)
+    return sorted(
+        records,
+        key=lambda item: (
+            str(item.get("phase", "")),
+            int(item.get("episode_index", 0)),
+            int(item.get("pid", 0)),
+            int(item.get("_sequence", 0)),
+        ),
+    )
+
+
+def _episode_metric_totals(records: list[dict]) -> dict:
+    num_agents = 0
+    for record in records:
+        for key in (
+            "foods_collected_per_agent",
+            "empty_loads_per_agent",
+            "invalid_loads_per_agent",
+        ):
+            values = record.get(key)
+            if isinstance(values, dict):
+                for agent_key in values:
+                    try:
+                        num_agents = max(num_agents, int(str(agent_key).split("_")[-1]) + 1)
+                    except ValueError:
+                        pass
+
+    per_agent = lambda: {f"agent_{idx}": 0 for idx in range(num_agents)}
+    totals = {
+        "episode_count": len(records),
+        "episode_lengths": [int(record.get("episode_length", 0)) for record in records],
+        "foods_collected_total": 0,
+        "foods_collected_per_agent": per_agent(),
+        "empty_loads_total": 0,
+        "empty_loads_per_agent": per_agent(),
+        "invalid_loads_total": 0,
+        "invalid_loads_per_agent": per_agent(),
+    }
+
+    for record in records:
+        totals["foods_collected_total"] += int(record.get("foods_collected_total", 0))
+        totals["empty_loads_total"] += int(record.get("empty_loads_total", 0))
+        totals["invalid_loads_total"] += int(record.get("invalid_loads_total", 0))
+        for src_key, dst_key in (
+            ("foods_collected_per_agent", "foods_collected_per_agent"),
+            ("empty_loads_per_agent", "empty_loads_per_agent"),
+            ("invalid_loads_per_agent", "invalid_loads_per_agent"),
+        ):
+            for agent, value in (record.get(src_key) or {}).items():
+                totals[dst_key][agent] = totals[dst_key].get(agent, 0) + int(value)
+    return totals
 
 
 def _normalize_config_overrides(config_overrides):
@@ -269,25 +349,50 @@ def run_random_policy_baseline(
     scenario = get_epymarl_lbf_scenario(scenario_key)
     rewards_by_agent = [[] for _ in range(scenario.n_agents)]
     episode_lengths = []
+    out_dir = Path(output_root) / scenario.key / "random"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    metrics_dir = out_dir / "episode_metrics" / "training"
+    metrics_dir.mkdir(parents=True, exist_ok=True)
+    for path in metrics_dir.glob("*.jsonl"):
+        path.unlink()
 
-    for episode in range(int(n_episodes)):
-        env = gym.make(scenario.gym_id, disable_env_checker=True)
-        try:
-            env.reset(seed=int(seed) + episode)
-            done = False
-            truncated = False
-            ep_rewards = np.zeros(scenario.n_agents, dtype=np.float64)
-            ep_steps = 0
-            while not (done or truncated):
-                _, rewards, done, truncated, _ = env.step(env.action_space.sample())
-                ep_rewards += np.asarray(rewards, dtype=np.float64)
-                ep_steps += 1
-        finally:
-            env.close()
+    old_metrics_env = {
+        key: os.environ.get(key)
+        for key in (
+            "SREDQN_LBF_METRICS_DIR",
+            "SREDQN_LBF_METRICS_RUN_ID",
+            "SREDQN_LBF_METRICS_PHASE",
+        )
+    }
+    os.environ["SREDQN_LBF_METRICS_DIR"] = str(metrics_dir)
+    os.environ["SREDQN_LBF_METRICS_RUN_ID"] = f"{scenario.key}_random_seed{int(seed)}"
+    os.environ["SREDQN_LBF_METRICS_PHASE"] = "training"
 
-        for agent_id, reward in enumerate(ep_rewards):
-            rewards_by_agent[agent_id].append(float(reward))
-        episode_lengths.append(int(ep_steps))
+    try:
+        for episode in range(int(n_episodes)):
+            env = gym.make(scenario.gym_id, disable_env_checker=True)
+            try:
+                env.reset(seed=int(seed) + episode)
+                done = False
+                truncated = False
+                ep_rewards = np.zeros(scenario.n_agents, dtype=np.float64)
+                ep_steps = 0
+                while not (done or truncated):
+                    _, rewards, done, truncated, _ = env.step(env.action_space.sample())
+                    ep_rewards += np.asarray(rewards, dtype=np.float64)
+                    ep_steps += 1
+            finally:
+                env.close()
+
+            for agent_id, reward in enumerate(ep_rewards):
+                rewards_by_agent[agent_id].append(float(reward))
+            episode_lengths.append(int(ep_steps))
+    finally:
+        for key, value in old_metrics_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
 
     stats = {
         "algorithm": "random",
@@ -303,15 +408,20 @@ def run_random_policy_baseline(
         "mean_last_100_joint_reward": float(np.sum(rewards_by_agent, axis=0)[-100:].mean()),
     }
 
-    out_dir = Path(output_root) / scenario.key / "random"
-    out_dir.mkdir(parents=True, exist_ok=True)
     reward_stats, curves = _build_random_reward_artifacts(stats)
+    episode_metrics = _load_episode_metrics(metrics_dir)
+    episode_metrics_path = out_dir / "training_episode_metrics.json"
+    episode_metrics_path.write_text(json.dumps(_json_safe(episode_metrics), indent=2))
+    reward_stats["episode_metrics"] = episode_metrics
+    reward_stats["episode_metric_totals"] = _episode_metric_totals(episode_metrics)
+    reward_stats["episode_metrics_path"] = str(episode_metrics_path)
     stats_path = out_dir / "reward_stats.json"
     curve_path = out_dir / "reward_curve.png"
     stats_path.write_text(json.dumps(_json_safe(reward_stats), indent=2))
     _save_reward_curve(curves, curve_path, title=f"Random - {scenario.key}")
     stats["reward_stats_path"] = str(stats_path)
     stats["reward_curve_path"] = str(curve_path)
+    stats["episode_metrics_path"] = str(episode_metrics_path)
     return stats
 
 
@@ -325,10 +435,11 @@ def build_epymarl_command(
     output_root: str | Path = "lbf_epymarl_baseline_runs",
     common_reward: bool = False,
     config_overrides: dict[str, object] | None = None,
+    model_token: str | None = None,
 ) -> list[str]:
     """Build a Python command that registers local LBF IDs then runs EPyMARL."""
     algorithm = str(algorithm).lower()
-    if algorithm not in ("iql", "mappo", "qmix"):
+    if algorithm not in ("iql", "ippo", "mappo", "qmix", "maa2c"):
         raise ValueError(f"Unsupported EPyMARL algorithm: {algorithm}")
 
     epymarl_root = Path(epymarl_root).expanduser().resolve()
@@ -357,11 +468,25 @@ def build_epymarl_command(
     for key, value in config_overrides.items():
         overrides.append(f"{key}={_format_epymarl_override_value(value)}")
 
+    model_token = "" if model_token is None else str(model_token)
     bootstrap = (
-        "import runpy, sys; "
+        "import runpy, sys, types; "
         "from pathlib import Path; "
         f"epymarl_root = Path({str(epymarl_root)!r}); "
         "sys.path.insert(0, str(epymarl_root / 'src')); "
+        f"model_token = {model_token!r}; "
+        "\nif model_token:\n"
+        "    run_path = epymarl_root / 'src' / 'run.py'\n"
+        "    run_source = run_path.read_text()\n"
+        "    old = \"unique_token = (\\n        f\\\"{_config['name']}_seed{_config['seed']}_{map_name}_{datetime.datetime.now()}\\\"\\n    )\"\n"
+        "    new = \"unique_token = \" + repr(model_token)\n"
+        "    if old not in run_source:\n"
+        "        raise RuntimeError('Could not patch EPyMARL unique_token assignment')\n"
+        "    run_source = run_source.replace(old, new)\n"
+        "    run_module = types.ModuleType('run')\n"
+        "    run_module.__file__ = str(run_path)\n"
+        "    sys.modules['run'] = run_module\n"
+        "    exec(compile(run_source, str(run_path), 'exec'), run_module.__dict__)\n"
         "from discrete_action_space.lbf_grid.epymarl_lbf_env import "
         "register_epymarl_lbf_envs; "
         "register_epymarl_lbf_envs(); "
@@ -385,6 +510,7 @@ def run_epymarl_baseline(
     show_progress: bool = False,
 ):
     """Run one baseline (random or EPyMARL) for a single scenario."""
+    algorithm = str(algorithm).lower()
     if str(algorithm).lower() == "random":
         return run_random_policy_baseline(
             scenario_key,
@@ -402,6 +528,7 @@ def run_epymarl_baseline(
         output_root=output_root,
         common_reward=common_reward,
         config_overrides=config_overrides,
+        model_token=_epymarl_model_token(scenario_key, seed, algorithm),
     )
 
     repo_root = Path(__file__).resolve().parents[2]
@@ -413,10 +540,26 @@ def run_epymarl_baseline(
     env["PYTHONPATH"] = os.pathsep.join(pythonpath)
 
     scenario = get_epymarl_lbf_scenario(scenario_key)
-    run_dir = Path(output_root) / scenario.key / str(algorithm).lower()
+    run_dir = Path(output_root) / scenario.key / algorithm
     run_dir.mkdir(parents=True, exist_ok=True)
+    model_root = (
+        Path(output_root).expanduser().resolve()
+        / "models"
+        / scenario.key
+        / str(int(seed))
+        / algorithm
+    )
+    if model_root.exists():
+        shutil.rmtree(model_root)
+    metrics_dir = run_dir / "episode_metrics" / "training"
+    metrics_dir.mkdir(parents=True, exist_ok=True)
+    for path in metrics_dir.glob("*.jsonl"):
+        path.unlink()
+    env["SREDQN_LBF_METRICS_DIR"] = str(metrics_dir)
+    env["SREDQN_LBF_METRICS_RUN_ID"] = f"{scenario.key}_{algorithm}_seed{int(seed)}"
+    env["SREDQN_LBF_METRICS_PHASE"] = "training"
     t_max = n_frames_for_episodes(scenario_key, n_episodes)
-    sacred_base = epymarl_root / "results" / "sacred" / str(algorithm).lower() / scenario.gym_id
+    sacred_base = epymarl_root / "results" / "sacred" / algorithm / scenario.gym_id
 
     start_time = time.time()
     proc = subprocess.Popen(
@@ -506,7 +649,7 @@ def run_epymarl_baseline(
         )
     else:
         reward_stats = {
-            "algorithm": str(algorithm).lower(),
+            "algorithm": algorithm,
             "seed": int(seed),
             "t_max": int(t_max),
             "n_episodes": int(n_episodes),
@@ -514,6 +657,13 @@ def run_epymarl_baseline(
             "reward_curve": {},
         }
         curves = {}
+
+    episode_metrics = _load_episode_metrics(metrics_dir)
+    episode_metrics_path = run_dir / "training_episode_metrics.json"
+    episode_metrics_path.write_text(json.dumps(_json_safe(episode_metrics), indent=2))
+    reward_stats["episode_metrics"] = episode_metrics
+    reward_stats["episode_metric_totals"] = _episode_metric_totals(episode_metrics)
+    reward_stats["episode_metrics_path"] = str(episode_metrics_path)
 
     reward_stats_path.write_text(json.dumps(_json_safe(reward_stats), indent=2))
     _save_reward_curve(
@@ -523,7 +673,7 @@ def run_epymarl_baseline(
     )
 
     record = {
-        "algorithm": str(algorithm).lower(),
+        "algorithm": algorithm,
         "scenario_key": scenario.key,
         "scenario_name": scenario.description,
         "gym_id": scenario.gym_id,
@@ -534,6 +684,8 @@ def run_epymarl_baseline(
         "config_overrides": _normalize_config_overrides(config_overrides),
         "reward_stats_path": str(reward_stats_path),
         "reward_curve_path": str(reward_curve_path),
+        "episode_metrics_path": str(episode_metrics_path),
+        "model_root": str(model_root),
         "sacred_metrics_path": sacred_metrics_path,
     }
     if check and proc.returncode != 0:

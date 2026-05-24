@@ -58,7 +58,7 @@ DEEP_SRQ_LBF_HYPERPARAMS = {
     "action_epsilon_end": 0.05,
     "action_epsilon_decay_fraction": 0.6,
     "grad_clip_max_norm": 10.0,
-    "sre_num_repeats": 1,
+    "sre_num_repeats": 10,
     "sre_include_pure_starts": False,
     "train_every": 4,
     "network_type": "shared_trunk_separate_heads",
@@ -70,7 +70,7 @@ DEEP_SRQ_LBF_HYPERPARAMS = {
     "solver_damping": 0.35,
     "solver_temperature": 0.02,
     "sre_solver_workers": 8,
-    "sre_policy_cache_enabled": True,
+    "sre_policy_cache_enabled": False,
     "sre_policy_cache_size": 4096,
     "sre_policy_cache_round_digits": 6,
     "sre_state_cache_round_digits": 4,
@@ -81,6 +81,7 @@ DEEP_SRQ_LBF_HYPERPARAMS = {
     "sre_solver_early_exit": True,
     "sre_candidate_selection": "robust_exploitability",
     "sre_exploitability_filter_enabled": False,
+    "sre_uniform_fallback_enabled": False,
     "nfg_checkpoint_path": None,
     "nfg_device": None,
     "nfg_fallback_enabled": True,
@@ -468,7 +469,10 @@ def train_lbf_deep_srq_experiment(
                 "target_equilibrium_update_steps",
                 DEEP_SRQ_LBF_HYPERPARAMS["target_equilibrium_update_steps"],
             ),
-            sre_policy_cache_enabled=hp.get("sre_policy_cache_enabled", True),
+            sre_policy_cache_enabled=hp.get(
+                "sre_policy_cache_enabled",
+                DEEP_SRQ_LBF_HYPERPARAMS["sre_policy_cache_enabled"],
+            ),
             sre_policy_cache_size=hp.get("sre_policy_cache_size", 4096),
             sre_policy_cache_round_digits=hp.get("sre_policy_cache_round_digits", 6),
             sre_state_cache_round_digits=hp.get("sre_state_cache_round_digits", 4),
@@ -487,6 +491,10 @@ def train_lbf_deep_srq_experiment(
             ),
             sre_exploitability_filter_enabled=hp.get(
                 "sre_exploitability_filter_enabled", False
+            ),
+            sre_uniform_fallback_enabled=hp.get(
+                "sre_uniform_fallback_enabled",
+                DEEP_SRQ_LBF_HYPERPARAMS["sre_uniform_fallback_enabled"],
             ),
             sre_target_value_mode=hp.get("sre_target_value_mode", "robust"),
         )

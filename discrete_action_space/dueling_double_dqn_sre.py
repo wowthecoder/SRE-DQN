@@ -83,7 +83,7 @@ class DuelingDoubleDqnSreAgentConfig:
     q_hidden_dims: tuple = (128, 128)
     epsilon_robust_initial: float = 1.0
     epsilon_schedule: str = "exponential"
-    sre_policy_cache_enabled: bool = True
+    sre_policy_cache_enabled: bool = False
     sre_policy_cache_size: int = 4096
     sre_policy_cache_round_digits: int = 6
     sre_state_cache_round_digits: int = 4
@@ -95,6 +95,7 @@ class DuelingDoubleDqnSreAgentConfig:
     sre_candidate_selection: str = "robust_exploitability"
     sre_exploitability_filter_enabled: bool = False
     sre_target_value_mode: str = "robust"
+    sre_uniform_fallback_enabled: bool = False
 
 
 def _make_feature_mlp(input_dim, hidden_dims):
@@ -483,6 +484,7 @@ class DuelingDoubleDqnSreAgent:
             "candidate_selection": str(self.config.sre_candidate_selection),
             "exploitability_filter_enabled": bool(self.config.sre_exploitability_filter_enabled),
             "target_value_mode": str(self.config.sre_target_value_mode),
+            "uniform_fallback_enabled": bool(self.config.sre_uniform_fallback_enabled),
             "target_equilibrium_update_steps": int(self.config.target_equilibrium_update_steps),
             "target_equilibrium_refreshes": int(self.target_equilibrium_refresh_count),
             "target_equilibrium_cache_only_steps": int(self.target_equilibrium_cache_only_count),
@@ -542,6 +544,15 @@ class DuelingDoubleDqnSreAgent:
     def _uniform_policies(self):
         u = np.full(self.config.num_actions, 1.0 / self.config.num_actions, dtype=np.float32)
         return [u.copy() for _ in range(self.config.num_agents)]
+
+    def _fallback_policies(self, reason):
+        if not bool(self.config.sre_uniform_fallback_enabled):
+            raise RuntimeError(
+                "SRE solver failed and uniform fallback is disabled. "
+                f"{reason}"
+            )
+        self.sre_uniform_fallback_count += 1
+        return self._uniform_policies()
 
     def _sre_batch_key(self, q_tensor):
         q_key = np.ascontiguousarray(
@@ -803,14 +814,13 @@ class DuelingDoubleDqnSreAgent:
 
     def _policies_from_sre_result(self, result):
         if result is None:
-            self.sre_uniform_fallback_count += 1
-            return self._uniform_policies(), False
+            return self._fallback_policies("Solver returned no result."), False
 
         metadata = dict(getattr(result, "metadata", None) or {})
         self._record_sre_result_quality(result, metadata)
         if not result.policies or metadata.get("path_failed", False):
-            self.sre_uniform_fallback_count += 1
-            return self._uniform_policies(), False
+            message = getattr(result, "message", "") or "Solver returned no policies."
+            return self._fallback_policies(f"{message} Metadata: {metadata}"), False
 
         self.sre_candidate_return_count += 1
         policies = [self._normalize_policy(policy) for policy in result.policies]
@@ -819,8 +829,11 @@ class DuelingDoubleDqnSreAgent:
             or any(policy.shape[0] != self.config.num_actions for policy in policies)
         ):
             self.sre_malformed_candidate_count += 1
-            self.sre_uniform_fallback_count += 1
-            return self._uniform_policies(), False
+            return self._fallback_policies(
+                "Solver returned malformed policies. "
+                f"Expected {self.config.num_agents} policies of length "
+                f"{self.config.num_actions}; got {[policy.shape for policy in policies]}."
+            ), False
 
         if result.success:
             self.sre_certified_candidate_count += 1
@@ -836,8 +849,10 @@ class DuelingDoubleDqnSreAgent:
             return policies, True
 
         self.sre_rejected_candidate_count += 1
-        self.sre_uniform_fallback_count += 1
-        return self._uniform_policies(), False
+        return self._fallback_policies(
+            "Rejected approximate SRE candidate because robust exploitability "
+            f"{gap!r} exceeded tolerance {self.config.sre_approx_accept_tol}."
+        ), False
 
     def _solve_sre(self, q_tensor, state_key=None):
         q_tensor = np.asarray(q_tensor, dtype=np.float32)
@@ -845,10 +860,9 @@ class DuelingDoubleDqnSreAgent:
             solve_start = time.perf_counter()
             try:
                 result = self._call_sre_solver(q_tensor)
-            except Exception:
+            except Exception as exc:
                 self._record_sre_solve_time(time.perf_counter() - solve_start)
-                self.sre_uniform_fallback_count += 1
-                return self._uniform_policies()
+                return self._fallback_policies(f"Solver raised {exc!r}.")
             self._record_sre_solve_time(time.perf_counter() - solve_start)
             policies, _ = self._policies_from_sre_result(result)
             return policies
@@ -863,10 +877,9 @@ class DuelingDoubleDqnSreAgent:
         solve_start = time.perf_counter()
         try:
             result = self._call_sre_solver(q_tensor, initial_policies=warm_policies)
-        except Exception:
+        except Exception as exc:
             self._record_sre_solve_time(time.perf_counter() - solve_start)
-            self.sre_uniform_fallback_count += 1
-            return self._uniform_policies()
+            return self._fallback_policies(f"Solver raised {exc!r}.")
         self._record_sre_solve_time(time.perf_counter() - solve_start)
 
         policies, cacheable = self._policies_from_sre_result(result)
@@ -915,7 +928,12 @@ class DuelingDoubleDqnSreAgent:
             if q_tensors_torch is not None and hasattr(self.sre_solver, "solve_batch_torch"):
                 results = self._call_sre_solver_batch_torch(pending_q_tensors)
             elif hasattr(self.sre_solver, "solve_batch"):
-                results = self._call_sre_solver_batch(pending_q_tensors)
+                pending_for_solver = (
+                    pending_q_tensors.detach().cpu().numpy().astype(np.float32, copy=False)
+                    if q_tensors_torch is not None
+                    else pending_q_tensors
+                )
+                results = self._call_sre_solver_batch(pending_for_solver)
             else:
                 iterable = (
                     pending_q_tensors.detach().cpu().numpy()
@@ -923,9 +941,14 @@ class DuelingDoubleDqnSreAgent:
                     else pending_q_tensors
                 )
                 results = [self._solve_sre_result(q_tensor) for q_tensor in iterable]
-        except Exception:
+        except Exception as exc:
             elapsed = time.perf_counter() - solve_start
             self._record_sre_solve_time(elapsed, count=batch_size)
+            if not bool(self.config.sre_uniform_fallback_enabled):
+                raise RuntimeError(
+                    "SRE batch solver failed and uniform fallback is disabled. "
+                    f"Solver raised {exc!r}."
+                ) from exc
             results = [None] * batch_size
         else:
             elapsed = time.perf_counter() - solve_start
@@ -1028,8 +1051,10 @@ class DuelingDoubleDqnSreAgent:
                     unique_policies[unique_index] = self._copy_policies(warm_policies)
                     self.target_equilibrium_stale_policy_reuses += 1
                 else:
-                    unique_policies[unique_index] = self._uniform_policies()
-                    self.sre_uniform_fallback_count += 1
+                    unique_policies[unique_index] = self._fallback_policies(
+                        "Target-equilibrium cache-only step had no cached or warm-start "
+                        "policy and solver refresh was disabled."
+                    )
             pending_q_tensors = []
             pending_indices = []
             pending_warm_policies = []
@@ -1043,20 +1068,41 @@ class DuelingDoubleDqnSreAgent:
                         initial_policies_batch=pending_warm_policies,
                     )
                 elif hasattr(self.sre_solver, "solve_batch"):
+                    pending_for_solver = (
+                        [
+                            q_tensor.detach().cpu().numpy().astype(np.float32, copy=False)
+                            for q_tensor in pending_q_tensors
+                        ]
+                        if q_tensors_torch is not None
+                        else pending_q_tensors
+                    )
                     results = self._call_sre_solver_batch(
-                        pending_q_tensors,
+                        pending_for_solver,
                         initial_policies_batch=pending_warm_policies,
                     )
                 else:
+                    pending_for_solver = (
+                        [
+                            q_tensor.detach().cpu().numpy().astype(np.float32, copy=False)
+                            for q_tensor in pending_q_tensors
+                        ]
+                        if q_tensors_torch is not None
+                        else pending_q_tensors
+                    )
                     results = [
                         self._solve_sre_result(q_tensor, initial_policies=warm_policies)
                         for q_tensor, warm_policies in zip(
-                            pending_q_tensors, pending_warm_policies
+                            pending_for_solver, pending_warm_policies
                         )
                     ]
-            except Exception:
+            except Exception as exc:
                 elapsed = time.perf_counter() - solve_start
                 self._record_sre_solve_time(elapsed, count=len(pending_q_tensors))
+                if not bool(self.config.sre_uniform_fallback_enabled):
+                    raise RuntimeError(
+                        "SRE batch solver failed and uniform fallback is disabled. "
+                        f"Solver raised {exc!r}."
+                    ) from exc
                 results = [None] * len(pending_q_tensors)
             else:
                 elapsed = time.perf_counter() - solve_start
@@ -1334,6 +1380,7 @@ class DuelingDoubleDqnSreAgent:
             "sre_candidate_selection": self.config.sre_candidate_selection,
             "sre_exploitability_filter_enabled": self.config.sre_exploitability_filter_enabled,
             "sre_target_value_mode": self.config.sre_target_value_mode,
+            "sre_uniform_fallback_enabled": self.config.sre_uniform_fallback_enabled,
             "target_equilibrium_update_steps": self.config.target_equilibrium_update_steps,
             "update_calls": self._update_calls,
             "buffer_size": self.replay_buffer.buffer.maxlen,
@@ -1400,6 +1447,7 @@ class DuelingDoubleDqnSreAgent:
         cfg.sre_candidate_selection = checkpoint.get("sre_candidate_selection", cfg.sre_candidate_selection)
         cfg.sre_exploitability_filter_enabled = bool(checkpoint.get("sre_exploitability_filter_enabled", cfg.sre_exploitability_filter_enabled))
         cfg.sre_target_value_mode = checkpoint.get("sre_target_value_mode", cfg.sre_target_value_mode)
+        cfg.sre_uniform_fallback_enabled = bool(checkpoint.get("sre_uniform_fallback_enabled", cfg.sre_uniform_fallback_enabled))
         cfg.target_equilibrium_update_steps = max(1, int(checkpoint.get("target_equilibrium_update_steps", cfg.target_equilibrium_update_steps)))
         self.q_tensor_shape = tuple([cfg.num_actions] * cfg.num_agents + [cfg.num_agents])
         self._update_calls = int(checkpoint.get("update_calls", self._update_calls))

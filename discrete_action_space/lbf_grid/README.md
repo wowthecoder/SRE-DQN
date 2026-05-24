@@ -212,6 +212,7 @@ hyperparameters
   sre_solver_exploitability_tol
   sre_approx_accept_tol
   sre_solver_early_exit
+  sre_uniform_fallback_enabled
   nfg_checkpoint_path
   nfg_device
   nfg_fallback_enabled

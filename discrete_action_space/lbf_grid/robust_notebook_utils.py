@@ -1161,6 +1161,10 @@ def load_deepsrq_policy(
             sre_exploitability_filter_enabled=hp.get(
                 "sre_exploitability_filter_enabled", False
             ),
+            sre_uniform_fallback_enabled=hp.get(
+                "sre_uniform_fallback_enabled",
+                DEEP_SRQ_LBF_HYPERPARAMS["sre_uniform_fallback_enabled"],
+            ),
             sre_target_value_mode=hp.get("sre_target_value_mode", "robust"),
         )
     )
@@ -1227,7 +1231,10 @@ def load_deepsrq_path_mcp_pool_policy(
                 "target_equilibrium_update_steps",
                 DEEP_SRQ_LBF_HYPERPARAMS["target_equilibrium_update_steps"],
             ),
-            sre_policy_cache_enabled=hp.get("sre_policy_cache_enabled", True),
+            sre_policy_cache_enabled=hp.get(
+                "sre_policy_cache_enabled",
+                DEEP_SRQ_LBF_HYPERPARAMS["sre_policy_cache_enabled"],
+            ),
             sre_policy_cache_size=hp.get("sre_policy_cache_size", 4096),
             sre_policy_cache_round_digits=hp.get("sre_policy_cache_round_digits", 6),
             sre_state_cache_round_digits=hp.get("sre_state_cache_round_digits", 4),
@@ -1241,6 +1248,10 @@ def load_deepsrq_path_mcp_pool_policy(
             ),
             sre_exploitability_filter_enabled=hp.get(
                 "sre_exploitability_filter_enabled", False
+            ),
+            sre_uniform_fallback_enabled=hp.get(
+                "sre_uniform_fallback_enabled",
+                DEEP_SRQ_LBF_HYPERPARAMS["sre_uniform_fallback_enabled"],
             ),
         )
     )

@@ -1,6 +1,6 @@
 {
   "scenario_key": "lbf_8x8_2p_2f_levels12",
-  "scenario_name": "2 agents with levels 1 and 2, 8x8 grid, 2 foods, max food level 3, full sight, 50-step episodes",
+  "scenario_name": "2 agents with levels 1 and 2, 8x8 grid, 10 foods (3 level-3, 2 level-2, 5 level-1), full sight, 50-step episodes",
   "primary_label": "deepsrq_path_mcp_nplayer_pool",
   "opponent_label": null,
   "matchup_label": "deepsrq_path_mcp_nplayer_pool",
@@ -10,44 +10,8 @@
   ],
   "episode_rewards": [
     [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      1.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.5,
-      0.5
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
+      1.0,
+      -0.19000000000000003
     ],
     [
       0.0,
@@ -75,103 +39,7 @@
     ],
     [
       0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.3333333333333333,
-      0.6666666666666666
-    ],
-    [
-      0.25,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.5
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.16666666666666666,
-      0.8333333333333333
-    ],
-    [
-      0.0,
-      0.4
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      1.0
+      0.98
     ],
     [
       0.0,
@@ -187,6 +55,94 @@
     ],
     [
       0.0,
+      0.0
+    ],
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      -0.01
+    ],
+    [
+      0.0,
+      -0.01
+    ],
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      -0.09999999999999999
+    ],
+    [
+      0.0,
+      -0.02
+    ],
+    [
+      0.0,
+      0.98
+    ],
+    [
+      0.0,
+      0.97
+    ],
+    [
+      0.0,
+      -0.17
+    ],
+    [
+      0.0,
+      0.0
+    ],
+    [
+      1.0,
+      0.0
+    ],
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      -0.02
+    ],
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      1.88
+    ],
+    [
+      0.0,
+      0.8399999999999999
+    ],
+    [
+      1.0,
+      0.0
+    ],
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      0.0
+    ],
+    [
+      -0.05,
+      -0.09999999999999999
+    ],
+    [
+      0.0,
       1.0
     ],
     [
@@ -194,7 +150,23 @@
       0.0
     ],
     [
-      0.25,
+      -0.02,
+      1.0
+    ],
+    [
+      0.0,
+      1.96
+    ],
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
       0.0
     ],
     [
@@ -202,66 +174,6287 @@
       1.0
     ],
     [
-      0.3333333333333333,
-      0.6666666666666666
+      0.0,
+      1.98
     ],
     [
       0.0,
       0.0
+    ],
+    [
+      0.0,
+      0.0
+    ],
+    [
+      1.0,
+      -0.01
+    ],
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      -0.060000000000000005
     ]
   ],
   "joint_rewards": [
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    1.0,
-    0.0,
-    1.0,
-    0.0,
-    0.0,
+    0.8099999999999999,
     0.0,
     0.0,
     1.0,
     0.0,
     0.0,
     0.0,
+    0.98,
     0.0,
     0.0,
+    1.0,
     0.0,
+    0.0,
+    -0.01,
+    -0.01,
+    0.0,
+    0.0,
+    -0.09999999999999999,
+    -0.02,
+    0.98,
+    0.97,
+    -0.17,
+    0.0,
+    1.0,
+    0.0,
+    -0.02,
+    0.0,
+    1.88,
+    0.8399999999999999,
+    1.0,
+    0.0,
+    0.0,
+    -0.15,
+    1.0,
+    0.0,
+    0.98,
+    1.96,
     0.0,
     0.0,
     0.0,
     1.0,
-    0.25,
+    1.98,
+    0.0,
+    0.0,
+    0.99,
     0.0,
     0.0,
     0.0,
     0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.5,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.9999999999999999,
-    0.4,
-    0.0,
-    1.0,
-    0.0,
-    0.0,
-    1.0,
-    1.0,
-    0.0,
-    0.25,
-    1.0,
-    1.0,
-    0.0
+    -0.060000000000000005
   ],
+  "episode_lengths": [
+    50,
+    50,
+    50,
+    50,
+    50,
+    50,
+    50,
+    50,
+    50,
+    50,
+    50,
+    50,
+    50,
+    50,
+    50,
+    50,
+    50,
+    50,
+    50,
+    50,
+    50,
+    50,
+    50,
+    50,
+    50,
+    50,
+    50,
+    50,
+    50,
+    50,
+    50,
+    50,
+    50,
+    50,
+    50,
+    50,
+    50,
+    50,
+    50,
+    50,
+    50,
+    50,
+    50,
+    50,
+    50,
+    50,
+    50,
+    50,
+    50,
+    50
+  ],
+  "episode_metrics": [
+    {
+      "initial_agent_positions": [
+        {
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 7,
+          "col": 7,
+          "level": 1
+        },
+        {
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 3,
+          "col": 7,
+          "level": 2
+        }
+      ],
+      "initial_foods": [
+        {
+          "row": 2,
+          "col": 1,
+          "level": 3
+        },
+        {
+          "row": 2,
+          "col": 3,
+          "level": 1
+        },
+        {
+          "row": 2,
+          "col": 5,
+          "level": 1
+        },
+        {
+          "row": 3,
+          "col": 3,
+          "level": 3
+        },
+        {
+          "row": 3,
+          "col": 4,
+          "level": 2
+        },
+        {
+          "row": 4,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "row": 4,
+          "col": 6,
+          "level": 3
+        },
+        {
+          "row": 5,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "row": 6,
+          "col": 5,
+          "level": 2
+        },
+        {
+          "row": 6,
+          "col": 6,
+          "level": 1
+        }
+      ],
+      "episode_length": 50,
+      "foods_collected_total": 1,
+      "foods_collected_per_agent": {
+        "agent_0": 1,
+        "agent_1": 0
+      },
+      "foods_collected_by_agent": {
+        "agent_0": [
+          {
+            "step": 13,
+            "row": 5,
+            "col": 1,
+            "level": 1
+          }
+        ],
+        "agent_1": []
+      },
+      "foods_collected_events": [
+        {
+          "step": 13,
+          "row": 5,
+          "col": 1,
+          "level": 1,
+          "participating_agents": [
+            {
+              "agent": "player_0",
+              "agent_id": 0,
+              "level": 1
+            }
+          ]
+        }
+      ],
+      "empty_loads_total": 19,
+      "empty_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 19
+      },
+      "empty_load_events": [
+        {
+          "step": 3,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 3,
+          "col": 7
+        },
+        {
+          "step": 7,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 3,
+          "col": 7
+        },
+        {
+          "step": 11,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 3,
+          "col": 7
+        },
+        {
+          "step": 13,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 3,
+          "col": 7
+        },
+        {
+          "step": 17,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 2,
+          "col": 7
+        },
+        {
+          "step": 20,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 2,
+          "col": 7
+        },
+        {
+          "step": 24,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 7
+        },
+        {
+          "step": 30,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 7
+        },
+        {
+          "step": 31,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 7
+        },
+        {
+          "step": 33,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 7
+        },
+        {
+          "step": 34,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 7
+        },
+        {
+          "step": 36,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 7
+        },
+        {
+          "step": 37,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 7
+        },
+        {
+          "step": 39,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 7
+        },
+        {
+          "step": 41,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 7
+        },
+        {
+          "step": 43,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 7
+        },
+        {
+          "step": 46,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 7
+        },
+        {
+          "step": 47,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 7
+        },
+        {
+          "step": 49,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 7
+        }
+      ],
+      "invalid_loads_total": 1,
+      "invalid_loads_per_agent": {
+        "agent_0": 1,
+        "agent_1": 0
+      },
+      "invalid_load_events": [
+        {
+          "step": 8,
+          "row": 6,
+          "col": 5,
+          "level": 2,
+          "participating_agents": [
+            {
+              "agent": "player_0",
+              "agent_id": 0,
+              "level": 1
+            }
+          ],
+          "total_participating_level": 1
+        }
+      ]
+    },
+    {
+      "initial_agent_positions": [
+        {
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 1,
+          "col": 0,
+          "level": 1
+        },
+        {
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 5,
+          "col": 2,
+          "level": 2
+        }
+      ],
+      "initial_foods": [
+        {
+          "row": 1,
+          "col": 2,
+          "level": 1
+        },
+        {
+          "row": 1,
+          "col": 3,
+          "level": 3
+        },
+        {
+          "row": 2,
+          "col": 4,
+          "level": 2
+        },
+        {
+          "row": 2,
+          "col": 6,
+          "level": 1
+        },
+        {
+          "row": 3,
+          "col": 3,
+          "level": 3
+        },
+        {
+          "row": 4,
+          "col": 1,
+          "level": 3
+        },
+        {
+          "row": 4,
+          "col": 4,
+          "level": 2
+        },
+        {
+          "row": 4,
+          "col": 6,
+          "level": 1
+        },
+        {
+          "row": 6,
+          "col": 2,
+          "level": 1
+        },
+        {
+          "row": 6,
+          "col": 5,
+          "level": 1
+        }
+      ],
+      "episode_length": 50,
+      "foods_collected_total": 0,
+      "foods_collected_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "foods_collected_by_agent": {
+        "agent_0": [],
+        "agent_1": []
+      },
+      "foods_collected_events": [],
+      "empty_loads_total": 0,
+      "empty_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "empty_load_events": [],
+      "invalid_loads_total": 0,
+      "invalid_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "invalid_load_events": []
+    },
+    {
+      "initial_agent_positions": [
+        {
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 0,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 3,
+          "col": 2,
+          "level": 2
+        }
+      ],
+      "initial_foods": [
+        {
+          "row": 1,
+          "col": 1,
+          "level": 2
+        },
+        {
+          "row": 1,
+          "col": 4,
+          "level": 1
+        },
+        {
+          "row": 1,
+          "col": 6,
+          "level": 3
+        },
+        {
+          "row": 2,
+          "col": 2,
+          "level": 2
+        },
+        {
+          "row": 2,
+          "col": 6,
+          "level": 1
+        },
+        {
+          "row": 3,
+          "col": 5,
+          "level": 3
+        },
+        {
+          "row": 4,
+          "col": 4,
+          "level": 3
+        },
+        {
+          "row": 5,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "row": 5,
+          "col": 6,
+          "level": 1
+        },
+        {
+          "row": 6,
+          "col": 3,
+          "level": 1
+        }
+      ],
+      "episode_length": 50,
+      "foods_collected_total": 0,
+      "foods_collected_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "foods_collected_by_agent": {
+        "agent_0": [],
+        "agent_1": []
+      },
+      "foods_collected_events": [],
+      "empty_loads_total": 0,
+      "empty_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "empty_load_events": [],
+      "invalid_loads_total": 0,
+      "invalid_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "invalid_load_events": []
+    },
+    {
+      "initial_agent_positions": [
+        {
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 3,
+          "col": 2,
+          "level": 1
+        },
+        {
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 4,
+          "col": 1,
+          "level": 2
+        }
+      ],
+      "initial_foods": [
+        {
+          "row": 1,
+          "col": 1,
+          "level": 3
+        },
+        {
+          "row": 1,
+          "col": 3,
+          "level": 1
+        },
+        {
+          "row": 1,
+          "col": 6,
+          "level": 2
+        },
+        {
+          "row": 2,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "row": 3,
+          "col": 5,
+          "level": 2
+        },
+        {
+          "row": 4,
+          "col": 3,
+          "level": 1
+        },
+        {
+          "row": 5,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "row": 5,
+          "col": 6,
+          "level": 1
+        },
+        {
+          "row": 6,
+          "col": 4,
+          "level": 3
+        },
+        {
+          "row": 6,
+          "col": 6,
+          "level": 3
+        }
+      ],
+      "episode_length": 50,
+      "foods_collected_total": 1,
+      "foods_collected_per_agent": {
+        "agent_0": 0,
+        "agent_1": 1
+      },
+      "foods_collected_by_agent": {
+        "agent_0": [],
+        "agent_1": [
+          {
+            "step": 2,
+            "row": 5,
+            "col": 1,
+            "level": 1
+          }
+        ]
+      },
+      "foods_collected_events": [
+        {
+          "step": 2,
+          "row": 5,
+          "col": 1,
+          "level": 1,
+          "participating_agents": [
+            {
+              "agent": "player_1",
+              "agent_id": 1,
+              "level": 2
+            }
+          ]
+        }
+      ],
+      "empty_loads_total": 0,
+      "empty_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "empty_load_events": [],
+      "invalid_loads_total": 0,
+      "invalid_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "invalid_load_events": []
+    },
+    {
+      "initial_agent_positions": [
+        {
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 6,
+          "col": 2,
+          "level": 1
+        },
+        {
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 0,
+          "level": 2
+        }
+      ],
+      "initial_foods": [
+        {
+          "row": 1,
+          "col": 1,
+          "level": 3
+        },
+        {
+          "row": 1,
+          "col": 5,
+          "level": 3
+        },
+        {
+          "row": 1,
+          "col": 6,
+          "level": 1
+        },
+        {
+          "row": 3,
+          "col": 4,
+          "level": 1
+        },
+        {
+          "row": 4,
+          "col": 1,
+          "level": 2
+        },
+        {
+          "row": 4,
+          "col": 4,
+          "level": 1
+        },
+        {
+          "row": 5,
+          "col": 3,
+          "level": 1
+        },
+        {
+          "row": 5,
+          "col": 4,
+          "level": 2
+        },
+        {
+          "row": 5,
+          "col": 6,
+          "level": 1
+        },
+        {
+          "row": 6,
+          "col": 6,
+          "level": 3
+        }
+      ],
+      "episode_length": 50,
+      "foods_collected_total": 0,
+      "foods_collected_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "foods_collected_by_agent": {
+        "agent_0": [],
+        "agent_1": []
+      },
+      "foods_collected_events": [],
+      "empty_loads_total": 0,
+      "empty_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "empty_load_events": [],
+      "invalid_loads_total": 0,
+      "invalid_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "invalid_load_events": []
+    },
+    {
+      "initial_agent_positions": [
+        {
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 3,
+          "col": 0,
+          "level": 1
+        },
+        {
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 6,
+          "col": 0,
+          "level": 2
+        }
+      ],
+      "initial_foods": [
+        {
+          "row": 1,
+          "col": 2,
+          "level": 3
+        },
+        {
+          "row": 1,
+          "col": 5,
+          "level": 3
+        },
+        {
+          "row": 2,
+          "col": 2,
+          "level": 2
+        },
+        {
+          "row": 2,
+          "col": 5,
+          "level": 1
+        },
+        {
+          "row": 3,
+          "col": 2,
+          "level": 3
+        },
+        {
+          "row": 3,
+          "col": 4,
+          "level": 1
+        },
+        {
+          "row": 4,
+          "col": 2,
+          "level": 1
+        },
+        {
+          "row": 5,
+          "col": 5,
+          "level": 2
+        },
+        {
+          "row": 5,
+          "col": 6,
+          "level": 1
+        },
+        {
+          "row": 6,
+          "col": 3,
+          "level": 1
+        }
+      ],
+      "episode_length": 50,
+      "foods_collected_total": 0,
+      "foods_collected_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "foods_collected_by_agent": {
+        "agent_0": [],
+        "agent_1": []
+      },
+      "foods_collected_events": [],
+      "empty_loads_total": 0,
+      "empty_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "empty_load_events": [],
+      "invalid_loads_total": 0,
+      "invalid_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "invalid_load_events": []
+    },
+    {
+      "initial_agent_positions": [
+        {
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 3,
+          "col": 2,
+          "level": 1
+        },
+        {
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 4,
+          "col": 6,
+          "level": 2
+        }
+      ],
+      "initial_foods": [
+        {
+          "row": 1,
+          "col": 1,
+          "level": 3
+        },
+        {
+          "row": 2,
+          "col": 3,
+          "level": 3
+        },
+        {
+          "row": 2,
+          "col": 5,
+          "level": 1
+        },
+        {
+          "row": 3,
+          "col": 3,
+          "level": 2
+        },
+        {
+          "row": 4,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "row": 4,
+          "col": 2,
+          "level": 3
+        },
+        {
+          "row": 5,
+          "col": 1,
+          "level": 2
+        },
+        {
+          "row": 5,
+          "col": 6,
+          "level": 1
+        },
+        {
+          "row": 6,
+          "col": 3,
+          "level": 1
+        },
+        {
+          "row": 6,
+          "col": 4,
+          "level": 1
+        }
+      ],
+      "episode_length": 50,
+      "foods_collected_total": 0,
+      "foods_collected_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "foods_collected_by_agent": {
+        "agent_0": [],
+        "agent_1": []
+      },
+      "foods_collected_events": [],
+      "empty_loads_total": 0,
+      "empty_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "empty_load_events": [],
+      "invalid_loads_total": 0,
+      "invalid_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "invalid_load_events": []
+    },
+    {
+      "initial_agent_positions": [
+        {
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 4,
+          "col": 7,
+          "level": 1
+        },
+        {
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 4,
+          "col": 2,
+          "level": 2
+        }
+      ],
+      "initial_foods": [
+        {
+          "row": 1,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "row": 1,
+          "col": 3,
+          "level": 3
+        },
+        {
+          "row": 2,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "row": 2,
+          "col": 5,
+          "level": 2
+        },
+        {
+          "row": 3,
+          "col": 5,
+          "level": 3
+        },
+        {
+          "row": 4,
+          "col": 3,
+          "level": 2
+        },
+        {
+          "row": 5,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "row": 5,
+          "col": 6,
+          "level": 3
+        },
+        {
+          "row": 6,
+          "col": 4,
+          "level": 1
+        },
+        {
+          "row": 6,
+          "col": 5,
+          "level": 1
+        }
+      ],
+      "episode_length": 50,
+      "foods_collected_total": 1,
+      "foods_collected_per_agent": {
+        "agent_0": 0,
+        "agent_1": 1
+      },
+      "foods_collected_by_agent": {
+        "agent_0": [],
+        "agent_1": [
+          {
+            "step": 7,
+            "row": 2,
+            "col": 1,
+            "level": 1
+          }
+        ]
+      },
+      "foods_collected_events": [
+        {
+          "step": 7,
+          "row": 2,
+          "col": 1,
+          "level": 1,
+          "participating_agents": [
+            {
+              "agent": "player_1",
+              "agent_id": 1,
+              "level": 2
+            }
+          ]
+        }
+      ],
+      "empty_loads_total": 2,
+      "empty_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 2
+      },
+      "empty_load_events": [
+        {
+          "step": 14,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 2
+        },
+        {
+          "step": 15,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 2
+        }
+      ],
+      "invalid_loads_total": 0,
+      "invalid_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "invalid_load_events": []
+    },
+    {
+      "initial_agent_positions": [
+        {
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 0,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 5,
+          "col": 0,
+          "level": 2
+        }
+      ],
+      "initial_foods": [
+        {
+          "row": 1,
+          "col": 1,
+          "level": 3
+        },
+        {
+          "row": 2,
+          "col": 1,
+          "level": 3
+        },
+        {
+          "row": 2,
+          "col": 4,
+          "level": 3
+        },
+        {
+          "row": 3,
+          "col": 6,
+          "level": 1
+        },
+        {
+          "row": 4,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "row": 4,
+          "col": 2,
+          "level": 2
+        },
+        {
+          "row": 4,
+          "col": 4,
+          "level": 1
+        },
+        {
+          "row": 5,
+          "col": 4,
+          "level": 1
+        },
+        {
+          "row": 6,
+          "col": 3,
+          "level": 1
+        },
+        {
+          "row": 6,
+          "col": 6,
+          "level": 2
+        }
+      ],
+      "episode_length": 50,
+      "foods_collected_total": 0,
+      "foods_collected_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "foods_collected_by_agent": {
+        "agent_0": [],
+        "agent_1": []
+      },
+      "foods_collected_events": [],
+      "empty_loads_total": 0,
+      "empty_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "empty_load_events": [],
+      "invalid_loads_total": 0,
+      "invalid_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "invalid_load_events": []
+    },
+    {
+      "initial_agent_positions": [
+        {
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 0,
+          "col": 2,
+          "level": 1
+        },
+        {
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 6,
+          "col": 5,
+          "level": 2
+        }
+      ],
+      "initial_foods": [
+        {
+          "row": 1,
+          "col": 2,
+          "level": 1
+        },
+        {
+          "row": 1,
+          "col": 6,
+          "level": 1
+        },
+        {
+          "row": 2,
+          "col": 4,
+          "level": 3
+        },
+        {
+          "row": 3,
+          "col": 1,
+          "level": 2
+        },
+        {
+          "row": 4,
+          "col": 3,
+          "level": 2
+        },
+        {
+          "row": 4,
+          "col": 5,
+          "level": 1
+        },
+        {
+          "row": 4,
+          "col": 6,
+          "level": 1
+        },
+        {
+          "row": 5,
+          "col": 6,
+          "level": 1
+        },
+        {
+          "row": 6,
+          "col": 1,
+          "level": 3
+        },
+        {
+          "row": 6,
+          "col": 4,
+          "level": 3
+        }
+      ],
+      "episode_length": 50,
+      "foods_collected_total": 0,
+      "foods_collected_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "foods_collected_by_agent": {
+        "agent_0": [],
+        "agent_1": []
+      },
+      "foods_collected_events": [],
+      "empty_loads_total": 0,
+      "empty_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "empty_load_events": [],
+      "invalid_loads_total": 0,
+      "invalid_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "invalid_load_events": []
+    },
+    {
+      "initial_agent_positions": [
+        {
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 1,
+          "col": 2,
+          "level": 1
+        },
+        {
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 6,
+          "col": 6,
+          "level": 2
+        }
+      ],
+      "initial_foods": [
+        {
+          "row": 1,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "row": 1,
+          "col": 5,
+          "level": 1
+        },
+        {
+          "row": 2,
+          "col": 3,
+          "level": 1
+        },
+        {
+          "row": 2,
+          "col": 4,
+          "level": 1
+        },
+        {
+          "row": 3,
+          "col": 6,
+          "level": 1
+        },
+        {
+          "row": 4,
+          "col": 2,
+          "level": 2
+        },
+        {
+          "row": 4,
+          "col": 4,
+          "level": 2
+        },
+        {
+          "row": 4,
+          "col": 5,
+          "level": 3
+        },
+        {
+          "row": 5,
+          "col": 5,
+          "level": 3
+        },
+        {
+          "row": 6,
+          "col": 3,
+          "level": 3
+        }
+      ],
+      "episode_length": 50,
+      "foods_collected_total": 1,
+      "foods_collected_per_agent": {
+        "agent_0": 0,
+        "agent_1": 1
+      },
+      "foods_collected_by_agent": {
+        "agent_0": [],
+        "agent_1": [
+          {
+            "step": 7,
+            "row": 3,
+            "col": 6,
+            "level": 1
+          }
+        ]
+      },
+      "foods_collected_events": [
+        {
+          "step": 7,
+          "row": 3,
+          "col": 6,
+          "level": 1,
+          "participating_agents": [
+            {
+              "agent": "player_1",
+              "agent_id": 1,
+              "level": 2
+            }
+          ]
+        }
+      ],
+      "empty_loads_total": 0,
+      "empty_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "empty_load_events": [],
+      "invalid_loads_total": 1,
+      "invalid_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 1
+      },
+      "invalid_load_events": [
+        {
+          "step": 3,
+          "row": 5,
+          "col": 5,
+          "level": 3,
+          "participating_agents": [
+            {
+              "agent": "player_1",
+              "agent_id": 1,
+              "level": 2
+            }
+          ],
+          "total_participating_level": 2
+        }
+      ]
+    },
+    {
+      "initial_agent_positions": [
+        {
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 7,
+          "col": 3,
+          "level": 1
+        },
+        {
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 3,
+          "col": 2,
+          "level": 2
+        }
+      ],
+      "initial_foods": [
+        {
+          "row": 1,
+          "col": 4,
+          "level": 3
+        },
+        {
+          "row": 2,
+          "col": 6,
+          "level": 1
+        },
+        {
+          "row": 3,
+          "col": 1,
+          "level": 2
+        },
+        {
+          "row": 3,
+          "col": 3,
+          "level": 2
+        },
+        {
+          "row": 3,
+          "col": 4,
+          "level": 3
+        },
+        {
+          "row": 3,
+          "col": 6,
+          "level": 1
+        },
+        {
+          "row": 4,
+          "col": 5,
+          "level": 1
+        },
+        {
+          "row": 5,
+          "col": 2,
+          "level": 1
+        },
+        {
+          "row": 5,
+          "col": 4,
+          "level": 3
+        },
+        {
+          "row": 6,
+          "col": 4,
+          "level": 1
+        }
+      ],
+      "episode_length": 50,
+      "foods_collected_total": 0,
+      "foods_collected_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "foods_collected_by_agent": {
+        "agent_0": [],
+        "agent_1": []
+      },
+      "foods_collected_events": [],
+      "empty_loads_total": 0,
+      "empty_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "empty_load_events": [],
+      "invalid_loads_total": 0,
+      "invalid_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "invalid_load_events": []
+    },
+    {
+      "initial_agent_positions": [
+        {
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 7,
+          "col": 6,
+          "level": 1
+        },
+        {
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 2,
+          "col": 1,
+          "level": 2
+        }
+      ],
+      "initial_foods": [
+        {
+          "row": 1,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "row": 1,
+          "col": 4,
+          "level": 3
+        },
+        {
+          "row": 2,
+          "col": 4,
+          "level": 3
+        },
+        {
+          "row": 2,
+          "col": 5,
+          "level": 1
+        },
+        {
+          "row": 2,
+          "col": 6,
+          "level": 3
+        },
+        {
+          "row": 3,
+          "col": 4,
+          "level": 2
+        },
+        {
+          "row": 4,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "row": 4,
+          "col": 4,
+          "level": 2
+        },
+        {
+          "row": 5,
+          "col": 2,
+          "level": 1
+        },
+        {
+          "row": 6,
+          "col": 6,
+          "level": 1
+        }
+      ],
+      "episode_length": 50,
+      "foods_collected_total": 0,
+      "foods_collected_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "foods_collected_by_agent": {
+        "agent_0": [],
+        "agent_1": []
+      },
+      "foods_collected_events": [],
+      "empty_loads_total": 0,
+      "empty_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "empty_load_events": [],
+      "invalid_loads_total": 0,
+      "invalid_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "invalid_load_events": []
+    },
+    {
+      "initial_agent_positions": [
+        {
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 5,
+          "col": 2,
+          "level": 1
+        },
+        {
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 7,
+          "col": 5,
+          "level": 2
+        }
+      ],
+      "initial_foods": [
+        {
+          "row": 1,
+          "col": 5,
+          "level": 2
+        },
+        {
+          "row": 2,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "row": 3,
+          "col": 4,
+          "level": 1
+        },
+        {
+          "row": 4,
+          "col": 2,
+          "level": 2
+        },
+        {
+          "row": 4,
+          "col": 6,
+          "level": 1
+        },
+        {
+          "row": 5,
+          "col": 3,
+          "level": 3
+        },
+        {
+          "row": 5,
+          "col": 5,
+          "level": 1
+        },
+        {
+          "row": 6,
+          "col": 1,
+          "level": 3
+        },
+        {
+          "row": 6,
+          "col": 3,
+          "level": 3
+        },
+        {
+          "row": 6,
+          "col": 4,
+          "level": 1
+        }
+      ],
+      "episode_length": 50,
+      "foods_collected_total": 0,
+      "foods_collected_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "foods_collected_by_agent": {
+        "agent_0": [],
+        "agent_1": []
+      },
+      "foods_collected_events": [],
+      "empty_loads_total": 1,
+      "empty_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 1
+      },
+      "empty_load_events": [
+        {
+          "step": 49,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 0
+        }
+      ],
+      "invalid_loads_total": 3,
+      "invalid_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 3
+      },
+      "invalid_load_events": [
+        {
+          "step": 10,
+          "row": 6,
+          "col": 3,
+          "level": 3,
+          "participating_agents": [
+            {
+              "agent": "player_1",
+              "agent_id": 1,
+              "level": 2
+            }
+          ],
+          "total_participating_level": 2
+        },
+        {
+          "step": 21,
+          "row": 6,
+          "col": 1,
+          "level": 3,
+          "participating_agents": [
+            {
+              "agent": "player_1",
+              "agent_id": 1,
+              "level": 2
+            }
+          ],
+          "total_participating_level": 2
+        },
+        {
+          "step": 24,
+          "row": 6,
+          "col": 1,
+          "level": 3,
+          "participating_agents": [
+            {
+              "agent": "player_1",
+              "agent_id": 1,
+              "level": 2
+            }
+          ],
+          "total_participating_level": 2
+        }
+      ]
+    },
+    {
+      "initial_agent_positions": [
+        {
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 4,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 7,
+          "col": 3,
+          "level": 2
+        }
+      ],
+      "initial_foods": [
+        {
+          "row": 1,
+          "col": 1,
+          "level": 3
+        },
+        {
+          "row": 1,
+          "col": 4,
+          "level": 3
+        },
+        {
+          "row": 1,
+          "col": 5,
+          "level": 2
+        },
+        {
+          "row": 2,
+          "col": 2,
+          "level": 1
+        },
+        {
+          "row": 3,
+          "col": 3,
+          "level": 3
+        },
+        {
+          "row": 3,
+          "col": 6,
+          "level": 1
+        },
+        {
+          "row": 5,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "row": 5,
+          "col": 3,
+          "level": 1
+        },
+        {
+          "row": 5,
+          "col": 5,
+          "level": 1
+        },
+        {
+          "row": 6,
+          "col": 1,
+          "level": 2
+        }
+      ],
+      "episode_length": 50,
+      "foods_collected_total": 0,
+      "foods_collected_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "foods_collected_by_agent": {
+        "agent_0": [],
+        "agent_1": []
+      },
+      "foods_collected_events": [],
+      "empty_loads_total": 1,
+      "empty_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 1
+      },
+      "empty_load_events": [
+        {
+          "step": 1,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 7,
+          "col": 3
+        }
+      ],
+      "invalid_loads_total": 0,
+      "invalid_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "invalid_load_events": []
+    },
+    {
+      "initial_agent_positions": [
+        {
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 5,
+          "col": 7,
+          "level": 1
+        },
+        {
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 0,
+          "level": 2
+        }
+      ],
+      "initial_foods": [
+        {
+          "row": 1,
+          "col": 4,
+          "level": 1
+        },
+        {
+          "row": 2,
+          "col": 2,
+          "level": 2
+        },
+        {
+          "row": 3,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "row": 3,
+          "col": 4,
+          "level": 3
+        },
+        {
+          "row": 3,
+          "col": 5,
+          "level": 3
+        },
+        {
+          "row": 4,
+          "col": 3,
+          "level": 3
+        },
+        {
+          "row": 5,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "row": 5,
+          "col": 2,
+          "level": 1
+        },
+        {
+          "row": 5,
+          "col": 6,
+          "level": 1
+        },
+        {
+          "row": 6,
+          "col": 4,
+          "level": 2
+        }
+      ],
+      "episode_length": 50,
+      "foods_collected_total": 0,
+      "foods_collected_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "foods_collected_by_agent": {
+        "agent_0": [],
+        "agent_1": []
+      },
+      "foods_collected_events": [],
+      "empty_loads_total": 0,
+      "empty_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "empty_load_events": [],
+      "invalid_loads_total": 0,
+      "invalid_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "invalid_load_events": []
+    },
+    {
+      "initial_agent_positions": [
+        {
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 4,
+          "col": 6,
+          "level": 1
+        },
+        {
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 6,
+          "col": 1,
+          "level": 2
+        }
+      ],
+      "initial_foods": [
+        {
+          "row": 1,
+          "col": 4,
+          "level": 1
+        },
+        {
+          "row": 1,
+          "col": 6,
+          "level": 1
+        },
+        {
+          "row": 2,
+          "col": 2,
+          "level": 3
+        },
+        {
+          "row": 2,
+          "col": 6,
+          "level": 2
+        },
+        {
+          "row": 3,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "row": 4,
+          "col": 5,
+          "level": 3
+        },
+        {
+          "row": 5,
+          "col": 2,
+          "level": 2
+        },
+        {
+          "row": 5,
+          "col": 3,
+          "level": 1
+        },
+        {
+          "row": 6,
+          "col": 2,
+          "level": 3
+        },
+        {
+          "row": 6,
+          "col": 6,
+          "level": 1
+        }
+      ],
+      "episode_length": 50,
+      "foods_collected_total": 0,
+      "foods_collected_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "foods_collected_by_agent": {
+        "agent_0": [],
+        "agent_1": []
+      },
+      "foods_collected_events": [],
+      "empty_loads_total": 0,
+      "empty_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "empty_load_events": [],
+      "invalid_loads_total": 0,
+      "invalid_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "invalid_load_events": []
+    },
+    {
+      "initial_agent_positions": [
+        {
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 4,
+          "col": 5,
+          "level": 1
+        },
+        {
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 2,
+          "col": 4,
+          "level": 2
+        }
+      ],
+      "initial_foods": [
+        {
+          "row": 1,
+          "col": 2,
+          "level": 1
+        },
+        {
+          "row": 1,
+          "col": 6,
+          "level": 1
+        },
+        {
+          "row": 3,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "row": 3,
+          "col": 3,
+          "level": 2
+        },
+        {
+          "row": 3,
+          "col": 5,
+          "level": 3
+        },
+        {
+          "row": 4,
+          "col": 3,
+          "level": 2
+        },
+        {
+          "row": 5,
+          "col": 6,
+          "level": 3
+        },
+        {
+          "row": 6,
+          "col": 2,
+          "level": 3
+        },
+        {
+          "row": 6,
+          "col": 4,
+          "level": 1
+        },
+        {
+          "row": 6,
+          "col": 6,
+          "level": 1
+        }
+      ],
+      "episode_length": 50,
+      "foods_collected_total": 0,
+      "foods_collected_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "foods_collected_by_agent": {
+        "agent_0": [],
+        "agent_1": []
+      },
+      "foods_collected_events": [],
+      "empty_loads_total": 10,
+      "empty_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 10
+      },
+      "empty_load_events": [
+        {
+          "step": 7,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 4
+        },
+        {
+          "step": 16,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 4
+        },
+        {
+          "step": 25,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 4
+        },
+        {
+          "step": 28,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 4
+        },
+        {
+          "step": 29,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 4
+        },
+        {
+          "step": 37,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 4
+        },
+        {
+          "step": 38,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 4
+        },
+        {
+          "step": 39,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 4
+        },
+        {
+          "step": 40,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 4
+        },
+        {
+          "step": 45,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 4
+        }
+      ],
+      "invalid_loads_total": 0,
+      "invalid_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "invalid_load_events": []
+    },
+    {
+      "initial_agent_positions": [
+        {
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 6,
+          "col": 7,
+          "level": 1
+        },
+        {
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 3,
+          "col": 4,
+          "level": 2
+        }
+      ],
+      "initial_foods": [
+        {
+          "row": 1,
+          "col": 2,
+          "level": 1
+        },
+        {
+          "row": 1,
+          "col": 6,
+          "level": 3
+        },
+        {
+          "row": 2,
+          "col": 2,
+          "level": 2
+        },
+        {
+          "row": 2,
+          "col": 3,
+          "level": 1
+        },
+        {
+          "row": 2,
+          "col": 5,
+          "level": 1
+        },
+        {
+          "row": 3,
+          "col": 3,
+          "level": 2
+        },
+        {
+          "row": 4,
+          "col": 3,
+          "level": 3
+        },
+        {
+          "row": 5,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "row": 5,
+          "col": 6,
+          "level": 3
+        },
+        {
+          "row": 6,
+          "col": 4,
+          "level": 1
+        }
+      ],
+      "episode_length": 50,
+      "foods_collected_total": 0,
+      "foods_collected_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "foods_collected_by_agent": {
+        "agent_0": [],
+        "agent_1": []
+      },
+      "foods_collected_events": [],
+      "empty_loads_total": 2,
+      "empty_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 2
+      },
+      "empty_load_events": [
+        {
+          "step": 28,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 4
+        },
+        {
+          "step": 34,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 4
+        }
+      ],
+      "invalid_loads_total": 0,
+      "invalid_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "invalid_load_events": []
+    },
+    {
+      "initial_agent_positions": [
+        {
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 3,
+          "col": 3,
+          "level": 1
+        },
+        {
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 7,
+          "col": 7,
+          "level": 2
+        }
+      ],
+      "initial_foods": [
+        {
+          "row": 1,
+          "col": 1,
+          "level": 3
+        },
+        {
+          "row": 1,
+          "col": 2,
+          "level": 1
+        },
+        {
+          "row": 2,
+          "col": 4,
+          "level": 1
+        },
+        {
+          "row": 3,
+          "col": 1,
+          "level": 3
+        },
+        {
+          "row": 3,
+          "col": 4,
+          "level": 2
+        },
+        {
+          "row": 3,
+          "col": 5,
+          "level": 3
+        },
+        {
+          "row": 3,
+          "col": 6,
+          "level": 1
+        },
+        {
+          "row": 4,
+          "col": 3,
+          "level": 1
+        },
+        {
+          "row": 5,
+          "col": 5,
+          "level": 1
+        },
+        {
+          "row": 6,
+          "col": 2,
+          "level": 2
+        }
+      ],
+      "episode_length": 50,
+      "foods_collected_total": 1,
+      "foods_collected_per_agent": {
+        "agent_0": 0,
+        "agent_1": 1
+      },
+      "foods_collected_by_agent": {
+        "agent_0": [],
+        "agent_1": [
+          {
+            "step": 7,
+            "row": 5,
+            "col": 5,
+            "level": 1
+          }
+        ]
+      },
+      "foods_collected_events": [
+        {
+          "step": 7,
+          "row": 5,
+          "col": 5,
+          "level": 1,
+          "participating_agents": [
+            {
+              "agent": "player_1",
+              "agent_id": 1,
+              "level": 2
+            }
+          ]
+        }
+      ],
+      "empty_loads_total": 2,
+      "empty_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 2
+      },
+      "empty_load_events": [
+        {
+          "step": 1,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 7,
+          "col": 7
+        },
+        {
+          "step": 4,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 6,
+          "col": 6
+        }
+      ],
+      "invalid_loads_total": 8,
+      "invalid_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 8
+      },
+      "invalid_load_events": [
+        {
+          "step": 11,
+          "row": 3,
+          "col": 5,
+          "level": 3,
+          "participating_agents": [
+            {
+              "agent": "player_1",
+              "agent_id": 1,
+              "level": 2
+            }
+          ],
+          "total_participating_level": 2
+        },
+        {
+          "step": 13,
+          "row": 3,
+          "col": 5,
+          "level": 3,
+          "participating_agents": [
+            {
+              "agent": "player_1",
+              "agent_id": 1,
+              "level": 2
+            }
+          ],
+          "total_participating_level": 2
+        },
+        {
+          "step": 23,
+          "row": 3,
+          "col": 5,
+          "level": 3,
+          "participating_agents": [
+            {
+              "agent": "player_1",
+              "agent_id": 1,
+              "level": 2
+            }
+          ],
+          "total_participating_level": 2
+        },
+        {
+          "step": 32,
+          "row": 3,
+          "col": 5,
+          "level": 3,
+          "participating_agents": [
+            {
+              "agent": "player_1",
+              "agent_id": 1,
+              "level": 2
+            }
+          ],
+          "total_participating_level": 2
+        },
+        {
+          "step": 33,
+          "row": 3,
+          "col": 5,
+          "level": 3,
+          "participating_agents": [
+            {
+              "agent": "player_1",
+              "agent_id": 1,
+              "level": 2
+            }
+          ],
+          "total_participating_level": 2
+        },
+        {
+          "step": 38,
+          "row": 3,
+          "col": 5,
+          "level": 3,
+          "participating_agents": [
+            {
+              "agent": "player_1",
+              "agent_id": 1,
+              "level": 2
+            }
+          ],
+          "total_participating_level": 2
+        },
+        {
+          "step": 42,
+          "row": 3,
+          "col": 5,
+          "level": 3,
+          "participating_agents": [
+            {
+              "agent": "player_1",
+              "agent_id": 1,
+              "level": 2
+            }
+          ],
+          "total_participating_level": 2
+        },
+        {
+          "step": 45,
+          "row": 3,
+          "col": 5,
+          "level": 3,
+          "participating_agents": [
+            {
+              "agent": "player_1",
+              "agent_id": 1,
+              "level": 2
+            }
+          ],
+          "total_participating_level": 2
+        }
+      ]
+    },
+    {
+      "initial_agent_positions": [
+        {
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 7,
+          "col": 4,
+          "level": 1
+        },
+        {
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 3,
+          "col": 5,
+          "level": 2
+        }
+      ],
+      "initial_foods": [
+        {
+          "row": 1,
+          "col": 5,
+          "level": 1
+        },
+        {
+          "row": 2,
+          "col": 2,
+          "level": 3
+        },
+        {
+          "row": 3,
+          "col": 6,
+          "level": 1
+        },
+        {
+          "row": 4,
+          "col": 3,
+          "level": 1
+        },
+        {
+          "row": 4,
+          "col": 4,
+          "level": 1
+        },
+        {
+          "row": 4,
+          "col": 5,
+          "level": 3
+        },
+        {
+          "row": 6,
+          "col": 2,
+          "level": 2
+        },
+        {
+          "row": 6,
+          "col": 3,
+          "level": 1
+        },
+        {
+          "row": 6,
+          "col": 5,
+          "level": 3
+        },
+        {
+          "row": 6,
+          "col": 6,
+          "level": 2
+        }
+      ],
+      "episode_length": 50,
+      "foods_collected_total": 1,
+      "foods_collected_per_agent": {
+        "agent_0": 0,
+        "agent_1": 1
+      },
+      "foods_collected_by_agent": {
+        "agent_0": [],
+        "agent_1": [
+          {
+            "step": 3,
+            "row": 1,
+            "col": 5,
+            "level": 1
+          }
+        ]
+      },
+      "foods_collected_events": [
+        {
+          "step": 3,
+          "row": 1,
+          "col": 5,
+          "level": 1,
+          "participating_agents": [
+            {
+              "agent": "player_1",
+              "agent_id": 1,
+              "level": 2
+            }
+          ]
+        }
+      ],
+      "empty_loads_total": 3,
+      "empty_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 3
+      },
+      "empty_load_events": [
+        {
+          "step": 5,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 1,
+          "col": 5
+        },
+        {
+          "step": 6,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 1,
+          "col": 5
+        },
+        {
+          "step": 7,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 1,
+          "col": 5
+        }
+      ],
+      "invalid_loads_total": 1,
+      "invalid_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 1
+      },
+      "invalid_load_events": [
+        {
+          "step": 1,
+          "row": 4,
+          "col": 5,
+          "level": 3,
+          "participating_agents": [
+            {
+              "agent": "player_1",
+              "agent_id": 1,
+              "level": 2
+            }
+          ],
+          "total_participating_level": 2
+        }
+      ]
+    },
+    {
+      "initial_agent_positions": [
+        {
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 3,
+          "col": 2,
+          "level": 1
+        },
+        {
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 2,
+          "level": 2
+        }
+      ],
+      "initial_foods": [
+        {
+          "row": 1,
+          "col": 5,
+          "level": 1
+        },
+        {
+          "row": 2,
+          "col": 1,
+          "level": 2
+        },
+        {
+          "row": 3,
+          "col": 3,
+          "level": 1
+        },
+        {
+          "row": 3,
+          "col": 4,
+          "level": 1
+        },
+        {
+          "row": 3,
+          "col": 6,
+          "level": 3
+        },
+        {
+          "row": 4,
+          "col": 3,
+          "level": 1
+        },
+        {
+          "row": 4,
+          "col": 4,
+          "level": 2
+        },
+        {
+          "row": 5,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "row": 5,
+          "col": 4,
+          "level": 3
+        },
+        {
+          "row": 6,
+          "col": 5,
+          "level": 3
+        }
+      ],
+      "episode_length": 50,
+      "foods_collected_total": 0,
+      "foods_collected_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "foods_collected_by_agent": {
+        "agent_0": [],
+        "agent_1": []
+      },
+      "foods_collected_events": [],
+      "empty_loads_total": 17,
+      "empty_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 17
+      },
+      "empty_load_events": [
+        {
+          "step": 1,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 2
+        },
+        {
+          "step": 3,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 2
+        },
+        {
+          "step": 7,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 2
+        },
+        {
+          "step": 8,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 2
+        },
+        {
+          "step": 9,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 2
+        },
+        {
+          "step": 18,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 2
+        },
+        {
+          "step": 22,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 2
+        },
+        {
+          "step": 24,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 2
+        },
+        {
+          "step": 25,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 2
+        },
+        {
+          "step": 30,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 2
+        },
+        {
+          "step": 34,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 2
+        },
+        {
+          "step": 38,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 2
+        },
+        {
+          "step": 40,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 2
+        },
+        {
+          "step": 41,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 2
+        },
+        {
+          "step": 43,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 2
+        },
+        {
+          "step": 44,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 2
+        },
+        {
+          "step": 50,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 2
+        }
+      ],
+      "invalid_loads_total": 0,
+      "invalid_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "invalid_load_events": []
+    },
+    {
+      "initial_agent_positions": [
+        {
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 3,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 4,
+          "col": 6,
+          "level": 2
+        }
+      ],
+      "initial_foods": [
+        {
+          "row": 1,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "row": 1,
+          "col": 4,
+          "level": 3
+        },
+        {
+          "row": 2,
+          "col": 2,
+          "level": 1
+        },
+        {
+          "row": 2,
+          "col": 3,
+          "level": 2
+        },
+        {
+          "row": 3,
+          "col": 2,
+          "level": 2
+        },
+        {
+          "row": 3,
+          "col": 6,
+          "level": 3
+        },
+        {
+          "row": 5,
+          "col": 3,
+          "level": 1
+        },
+        {
+          "row": 5,
+          "col": 6,
+          "level": 3
+        },
+        {
+          "row": 6,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "row": 6,
+          "col": 6,
+          "level": 1
+        }
+      ],
+      "episode_length": 50,
+      "foods_collected_total": 0,
+      "foods_collected_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "foods_collected_by_agent": {
+        "agent_0": [],
+        "agent_1": []
+      },
+      "foods_collected_events": [],
+      "empty_loads_total": 0,
+      "empty_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "empty_load_events": [],
+      "invalid_loads_total": 0,
+      "invalid_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "invalid_load_events": []
+    },
+    {
+      "initial_agent_positions": [
+        {
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 6,
+          "col": 2,
+          "level": 1
+        },
+        {
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 7,
+          "col": 1,
+          "level": 2
+        }
+      ],
+      "initial_foods": [
+        {
+          "row": 1,
+          "col": 1,
+          "level": 2
+        },
+        {
+          "row": 1,
+          "col": 6,
+          "level": 3
+        },
+        {
+          "row": 2,
+          "col": 3,
+          "level": 3
+        },
+        {
+          "row": 2,
+          "col": 6,
+          "level": 2
+        },
+        {
+          "row": 3,
+          "col": 5,
+          "level": 1
+        },
+        {
+          "row": 4,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "row": 5,
+          "col": 3,
+          "level": 1
+        },
+        {
+          "row": 6,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "row": 6,
+          "col": 4,
+          "level": 3
+        },
+        {
+          "row": 6,
+          "col": 5,
+          "level": 1
+        }
+      ],
+      "episode_length": 50,
+      "foods_collected_total": 1,
+      "foods_collected_per_agent": {
+        "agent_0": 1,
+        "agent_1": 0
+      },
+      "foods_collected_by_agent": {
+        "agent_0": [
+          {
+            "step": 1,
+            "row": 6,
+            "col": 1,
+            "level": 1
+          }
+        ],
+        "agent_1": []
+      },
+      "foods_collected_events": [
+        {
+          "step": 1,
+          "row": 6,
+          "col": 1,
+          "level": 1,
+          "participating_agents": [
+            {
+              "agent": "player_0",
+              "agent_id": 0,
+              "level": 1
+            }
+          ]
+        }
+      ],
+      "empty_loads_total": 0,
+      "empty_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "empty_load_events": [],
+      "invalid_loads_total": 0,
+      "invalid_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "invalid_load_events": []
+    },
+    {
+      "initial_agent_positions": [
+        {
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 2,
+          "col": 0,
+          "level": 1
+        },
+        {
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 3,
+          "col": 2,
+          "level": 2
+        }
+      ],
+      "initial_foods": [
+        {
+          "row": 1,
+          "col": 2,
+          "level": 2
+        },
+        {
+          "row": 1,
+          "col": 6,
+          "level": 1
+        },
+        {
+          "row": 2,
+          "col": 4,
+          "level": 3
+        },
+        {
+          "row": 3,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "row": 3,
+          "col": 3,
+          "level": 3
+        },
+        {
+          "row": 4,
+          "col": 3,
+          "level": 1
+        },
+        {
+          "row": 4,
+          "col": 6,
+          "level": 3
+        },
+        {
+          "row": 6,
+          "col": 1,
+          "level": 2
+        },
+        {
+          "row": 6,
+          "col": 4,
+          "level": 1
+        },
+        {
+          "row": 6,
+          "col": 5,
+          "level": 1
+        }
+      ],
+      "episode_length": 50,
+      "foods_collected_total": 0,
+      "foods_collected_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "foods_collected_by_agent": {
+        "agent_0": [],
+        "agent_1": []
+      },
+      "foods_collected_events": [],
+      "empty_loads_total": 0,
+      "empty_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "empty_load_events": [],
+      "invalid_loads_total": 0,
+      "invalid_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "invalid_load_events": []
+    },
+    {
+      "initial_agent_positions": [
+        {
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 6,
+          "col": 5,
+          "level": 1
+        },
+        {
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 7,
+          "col": 1,
+          "level": 2
+        }
+      ],
+      "initial_foods": [
+        {
+          "row": 1,
+          "col": 1,
+          "level": 3
+        },
+        {
+          "row": 1,
+          "col": 5,
+          "level": 2
+        },
+        {
+          "row": 1,
+          "col": 6,
+          "level": 1
+        },
+        {
+          "row": 2,
+          "col": 3,
+          "level": 3
+        },
+        {
+          "row": 3,
+          "col": 4,
+          "level": 1
+        },
+        {
+          "row": 4,
+          "col": 1,
+          "level": 3
+        },
+        {
+          "row": 4,
+          "col": 4,
+          "level": 1
+        },
+        {
+          "row": 5,
+          "col": 3,
+          "level": 2
+        },
+        {
+          "row": 5,
+          "col": 5,
+          "level": 1
+        },
+        {
+          "row": 6,
+          "col": 2,
+          "level": 1
+        }
+      ],
+      "episode_length": 50,
+      "foods_collected_total": 0,
+      "foods_collected_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "foods_collected_by_agent": {
+        "agent_0": [],
+        "agent_1": []
+      },
+      "foods_collected_events": [],
+      "empty_loads_total": 2,
+      "empty_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 2
+      },
+      "empty_load_events": [
+        {
+          "step": 42,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 7,
+          "col": 0
+        },
+        {
+          "step": 49,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 7,
+          "col": 0
+        }
+      ],
+      "invalid_loads_total": 0,
+      "invalid_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "invalid_load_events": []
+    },
+    {
+      "initial_agent_positions": [
+        {
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 4,
+          "col": 5,
+          "level": 1
+        },
+        {
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 2,
+          "col": 2,
+          "level": 2
+        }
+      ],
+      "initial_foods": [
+        {
+          "row": 1,
+          "col": 3,
+          "level": 3
+        },
+        {
+          "row": 1,
+          "col": 6,
+          "level": 1
+        },
+        {
+          "row": 2,
+          "col": 1,
+          "level": 2
+        },
+        {
+          "row": 2,
+          "col": 5,
+          "level": 1
+        },
+        {
+          "row": 3,
+          "col": 4,
+          "level": 1
+        },
+        {
+          "row": 4,
+          "col": 6,
+          "level": 2
+        },
+        {
+          "row": 5,
+          "col": 1,
+          "level": 3
+        },
+        {
+          "row": 5,
+          "col": 3,
+          "level": 3
+        },
+        {
+          "row": 5,
+          "col": 4,
+          "level": 1
+        },
+        {
+          "row": 6,
+          "col": 5,
+          "level": 1
+        }
+      ],
+      "episode_length": 50,
+      "foods_collected_total": 0,
+      "foods_collected_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "foods_collected_by_agent": {
+        "agent_0": [],
+        "agent_1": []
+      },
+      "foods_collected_events": [],
+      "empty_loads_total": 0,
+      "empty_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "empty_load_events": [],
+      "invalid_loads_total": 0,
+      "invalid_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "invalid_load_events": []
+    },
+    {
+      "initial_agent_positions": [
+        {
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 3,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 5,
+          "col": 6,
+          "level": 2
+        }
+      ],
+      "initial_foods": [
+        {
+          "row": 1,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "row": 1,
+          "col": 3,
+          "level": 3
+        },
+        {
+          "row": 1,
+          "col": 6,
+          "level": 3
+        },
+        {
+          "row": 3,
+          "col": 2,
+          "level": 3
+        },
+        {
+          "row": 3,
+          "col": 6,
+          "level": 2
+        },
+        {
+          "row": 4,
+          "col": 4,
+          "level": 1
+        },
+        {
+          "row": 5,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "row": 5,
+          "col": 3,
+          "level": 1
+        },
+        {
+          "row": 5,
+          "col": 5,
+          "level": 2
+        },
+        {
+          "row": 6,
+          "col": 5,
+          "level": 1
+        }
+      ],
+      "episode_length": 50,
+      "foods_collected_total": 1,
+      "foods_collected_per_agent": {
+        "agent_0": 0,
+        "agent_1": 1
+      },
+      "foods_collected_by_agent": {
+        "agent_0": [],
+        "agent_1": [
+          {
+            "step": 5,
+            "row": 3,
+            "col": 6,
+            "level": 2
+          }
+        ]
+      },
+      "foods_collected_events": [
+        {
+          "step": 5,
+          "row": 3,
+          "col": 6,
+          "level": 2,
+          "participating_agents": [
+            {
+              "agent": "player_1",
+              "agent_id": 1,
+              "level": 2
+            }
+          ]
+        }
+      ],
+      "empty_loads_total": 12,
+      "empty_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 12
+      },
+      "empty_load_events": [
+        {
+          "step": 10,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 5
+        },
+        {
+          "step": 11,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 5
+        },
+        {
+          "step": 22,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 5
+        },
+        {
+          "step": 23,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 5
+        },
+        {
+          "step": 28,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 5
+        },
+        {
+          "step": 29,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 5
+        },
+        {
+          "step": 33,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 5
+        },
+        {
+          "step": 40,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 5
+        },
+        {
+          "step": 43,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 5
+        },
+        {
+          "step": 44,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 5
+        },
+        {
+          "step": 47,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 5
+        },
+        {
+          "step": 48,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 5
+        }
+      ],
+      "invalid_loads_total": 1,
+      "invalid_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 1
+      },
+      "invalid_load_events": [
+        {
+          "step": 8,
+          "row": 1,
+          "col": 6,
+          "level": 3,
+          "participating_agents": [
+            {
+              "agent": "player_1",
+              "agent_id": 1,
+              "level": 2
+            }
+          ],
+          "total_participating_level": 2
+        }
+      ]
+    },
+    {
+      "initial_agent_positions": [
+        {
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 6,
+          "col": 0,
+          "level": 1
+        },
+        {
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 5,
+          "col": 2,
+          "level": 2
+        }
+      ],
+      "initial_foods": [
+        {
+          "row": 1,
+          "col": 1,
+          "level": 3
+        },
+        {
+          "row": 1,
+          "col": 4,
+          "level": 3
+        },
+        {
+          "row": 2,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "row": 2,
+          "col": 6,
+          "level": 2
+        },
+        {
+          "row": 3,
+          "col": 6,
+          "level": 1
+        },
+        {
+          "row": 4,
+          "col": 2,
+          "level": 1
+        },
+        {
+          "row": 4,
+          "col": 5,
+          "level": 1
+        },
+        {
+          "row": 4,
+          "col": 6,
+          "level": 3
+        },
+        {
+          "row": 6,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "row": 6,
+          "col": 6,
+          "level": 2
+        }
+      ],
+      "episode_length": 50,
+      "foods_collected_total": 1,
+      "foods_collected_per_agent": {
+        "agent_0": 0,
+        "agent_1": 1
+      },
+      "foods_collected_by_agent": {
+        "agent_0": [],
+        "agent_1": [
+          {
+            "step": 4,
+            "row": 4,
+            "col": 2,
+            "level": 1
+          }
+        ]
+      },
+      "foods_collected_events": [
+        {
+          "step": 4,
+          "row": 4,
+          "col": 2,
+          "level": 1,
+          "participating_agents": [
+            {
+              "agent": "player_1",
+              "agent_id": 1,
+              "level": 2
+            }
+          ]
+        }
+      ],
+      "empty_loads_total": 16,
+      "empty_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 16
+      },
+      "empty_load_events": [
+        {
+          "step": 13,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 0
+        },
+        {
+          "step": 15,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 0
+        },
+        {
+          "step": 18,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 0
+        },
+        {
+          "step": 23,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 0
+        },
+        {
+          "step": 26,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 0
+        },
+        {
+          "step": 27,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 0
+        },
+        {
+          "step": 28,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 0
+        },
+        {
+          "step": 30,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 0
+        },
+        {
+          "step": 31,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 0
+        },
+        {
+          "step": 32,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 0
+        },
+        {
+          "step": 37,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 0
+        },
+        {
+          "step": 39,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 0
+        },
+        {
+          "step": 43,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 0
+        },
+        {
+          "step": 46,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 0
+        },
+        {
+          "step": 47,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 0
+        },
+        {
+          "step": 48,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 0
+        }
+      ],
+      "invalid_loads_total": 1,
+      "invalid_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 1
+      },
+      "invalid_load_events": [
+        {
+          "step": 11,
+          "row": 1,
+          "col": 1,
+          "level": 3,
+          "participating_agents": [
+            {
+              "agent": "player_1",
+              "agent_id": 1,
+              "level": 2
+            }
+          ],
+          "total_participating_level": 2
+        }
+      ]
+    },
+    {
+      "initial_agent_positions": [
+        {
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 4,
+          "col": 3,
+          "level": 1
+        },
+        {
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 3,
+          "col": 5,
+          "level": 2
+        }
+      ],
+      "initial_foods": [
+        {
+          "row": 1,
+          "col": 1,
+          "level": 2
+        },
+        {
+          "row": 1,
+          "col": 6,
+          "level": 3
+        },
+        {
+          "row": 2,
+          "col": 5,
+          "level": 3
+        },
+        {
+          "row": 3,
+          "col": 4,
+          "level": 1
+        },
+        {
+          "row": 3,
+          "col": 6,
+          "level": 3
+        },
+        {
+          "row": 4,
+          "col": 2,
+          "level": 1
+        },
+        {
+          "row": 4,
+          "col": 6,
+          "level": 1
+        },
+        {
+          "row": 5,
+          "col": 3,
+          "level": 1
+        },
+        {
+          "row": 6,
+          "col": 1,
+          "level": 2
+        },
+        {
+          "row": 6,
+          "col": 4,
+          "level": 1
+        }
+      ],
+      "episode_length": 50,
+      "foods_collected_total": 1,
+      "foods_collected_per_agent": {
+        "agent_0": 1,
+        "agent_1": 0
+      },
+      "foods_collected_by_agent": {
+        "agent_0": [
+          {
+            "step": 1,
+            "row": 5,
+            "col": 3,
+            "level": 1
+          }
+        ],
+        "agent_1": []
+      },
+      "foods_collected_events": [
+        {
+          "step": 1,
+          "row": 5,
+          "col": 3,
+          "level": 1,
+          "participating_agents": [
+            {
+              "agent": "player_0",
+              "agent_id": 0,
+              "level": 1
+            }
+          ]
+        }
+      ],
+      "empty_loads_total": 0,
+      "empty_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "empty_load_events": [],
+      "invalid_loads_total": 0,
+      "invalid_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "invalid_load_events": []
+    },
+    {
+      "initial_agent_positions": [
+        {
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 5,
+          "col": 3,
+          "level": 1
+        },
+        {
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 7,
+          "col": 6,
+          "level": 2
+        }
+      ],
+      "initial_foods": [
+        {
+          "row": 1,
+          "col": 3,
+          "level": 1
+        },
+        {
+          "row": 1,
+          "col": 6,
+          "level": 3
+        },
+        {
+          "row": 2,
+          "col": 3,
+          "level": 2
+        },
+        {
+          "row": 2,
+          "col": 6,
+          "level": 3
+        },
+        {
+          "row": 4,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "row": 4,
+          "col": 4,
+          "level": 1
+        },
+        {
+          "row": 5,
+          "col": 4,
+          "level": 2
+        },
+        {
+          "row": 6,
+          "col": 2,
+          "level": 1
+        },
+        {
+          "row": 6,
+          "col": 3,
+          "level": 1
+        },
+        {
+          "row": 6,
+          "col": 6,
+          "level": 3
+        }
+      ],
+      "episode_length": 50,
+      "foods_collected_total": 0,
+      "foods_collected_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "foods_collected_by_agent": {
+        "agent_0": [],
+        "agent_1": []
+      },
+      "foods_collected_events": [],
+      "empty_loads_total": 0,
+      "empty_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "empty_load_events": [],
+      "invalid_loads_total": 0,
+      "invalid_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "invalid_load_events": []
+    },
+    {
+      "initial_agent_positions": [
+        {
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 6,
+          "col": 7,
+          "level": 1
+        },
+        {
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 3,
+          "col": 2,
+          "level": 2
+        }
+      ],
+      "initial_foods": [
+        {
+          "row": 1,
+          "col": 4,
+          "level": 1
+        },
+        {
+          "row": 2,
+          "col": 1,
+          "level": 3
+        },
+        {
+          "row": 2,
+          "col": 4,
+          "level": 2
+        },
+        {
+          "row": 2,
+          "col": 6,
+          "level": 1
+        },
+        {
+          "row": 3,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "row": 4,
+          "col": 3,
+          "level": 1
+        },
+        {
+          "row": 5,
+          "col": 2,
+          "level": 3
+        },
+        {
+          "row": 5,
+          "col": 6,
+          "level": 2
+        },
+        {
+          "row": 6,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "row": 6,
+          "col": 2,
+          "level": 3
+        }
+      ],
+      "episode_length": 50,
+      "foods_collected_total": 0,
+      "foods_collected_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "foods_collected_by_agent": {
+        "agent_0": [],
+        "agent_1": []
+      },
+      "foods_collected_events": [],
+      "empty_loads_total": 0,
+      "empty_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "empty_load_events": [],
+      "invalid_loads_total": 0,
+      "invalid_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "invalid_load_events": []
+    },
+    {
+      "initial_agent_positions": [
+        {
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 7,
+          "col": 5,
+          "level": 1
+        },
+        {
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 2,
+          "col": 2,
+          "level": 2
+        }
+      ],
+      "initial_foods": [
+        {
+          "row": 1,
+          "col": 1,
+          "level": 2
+        },
+        {
+          "row": 1,
+          "col": 4,
+          "level": 3
+        },
+        {
+          "row": 2,
+          "col": 6,
+          "level": 1
+        },
+        {
+          "row": 3,
+          "col": 3,
+          "level": 1
+        },
+        {
+          "row": 3,
+          "col": 4,
+          "level": 3
+        },
+        {
+          "row": 4,
+          "col": 1,
+          "level": 2
+        },
+        {
+          "row": 4,
+          "col": 2,
+          "level": 1
+        },
+        {
+          "row": 5,
+          "col": 6,
+          "level": 1
+        },
+        {
+          "row": 6,
+          "col": 4,
+          "level": 3
+        },
+        {
+          "row": 6,
+          "col": 6,
+          "level": 1
+        }
+      ],
+      "episode_length": 50,
+      "foods_collected_total": 0,
+      "foods_collected_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "foods_collected_by_agent": {
+        "agent_0": [],
+        "agent_1": []
+      },
+      "foods_collected_events": [],
+      "empty_loads_total": 15,
+      "empty_loads_per_agent": {
+        "agent_0": 5,
+        "agent_1": 10
+      },
+      "empty_load_events": [
+        {
+          "step": 1,
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 7,
+          "col": 5
+        },
+        {
+          "step": 1,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 2,
+          "col": 2
+        },
+        {
+          "step": 2,
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 7,
+          "col": 5
+        },
+        {
+          "step": 5,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 2,
+          "col": 2
+        },
+        {
+          "step": 9,
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 6,
+          "col": 0
+        },
+        {
+          "step": 11,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 2
+        },
+        {
+          "step": 14,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 2
+        },
+        {
+          "step": 15,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 2
+        },
+        {
+          "step": 18,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 2
+        },
+        {
+          "step": 21,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 2
+        },
+        {
+          "step": 23,
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 3,
+          "col": 0
+        },
+        {
+          "step": 25,
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 2,
+          "col": 0
+        },
+        {
+          "step": 28,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 2
+        },
+        {
+          "step": 36,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 2
+        },
+        {
+          "step": 40,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 2
+        }
+      ],
+      "invalid_loads_total": 1,
+      "invalid_loads_per_agent": {
+        "agent_0": 1,
+        "agent_1": 0
+      },
+      "invalid_load_events": [
+        {
+          "step": 29,
+          "row": 4,
+          "col": 1,
+          "level": 2,
+          "participating_agents": [
+            {
+              "agent": "player_0",
+              "agent_id": 0,
+              "level": 1
+            }
+          ],
+          "total_participating_level": 1
+        }
+      ]
+    },
+    {
+      "initial_agent_positions": [
+        {
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 4,
+          "col": 3,
+          "level": 1
+        },
+        {
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 2,
+          "col": 1,
+          "level": 2
+        }
+      ],
+      "initial_foods": [
+        {
+          "row": 1,
+          "col": 3,
+          "level": 3
+        },
+        {
+          "row": 2,
+          "col": 2,
+          "level": 1
+        },
+        {
+          "row": 2,
+          "col": 6,
+          "level": 3
+        },
+        {
+          "row": 3,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "row": 3,
+          "col": 3,
+          "level": 1
+        },
+        {
+          "row": 3,
+          "col": 4,
+          "level": 3
+        },
+        {
+          "row": 5,
+          "col": 2,
+          "level": 2
+        },
+        {
+          "row": 5,
+          "col": 5,
+          "level": 1
+        },
+        {
+          "row": 6,
+          "col": 3,
+          "level": 1
+        },
+        {
+          "row": 6,
+          "col": 5,
+          "level": 2
+        }
+      ],
+      "episode_length": 50,
+      "foods_collected_total": 1,
+      "foods_collected_per_agent": {
+        "agent_0": 0,
+        "agent_1": 1
+      },
+      "foods_collected_by_agent": {
+        "agent_0": [],
+        "agent_1": [
+          {
+            "step": 1,
+            "row": 3,
+            "col": 1,
+            "level": 1
+          }
+        ]
+      },
+      "foods_collected_events": [
+        {
+          "step": 1,
+          "row": 3,
+          "col": 1,
+          "level": 1,
+          "participating_agents": [
+            {
+              "agent": "player_1",
+              "agent_id": 1,
+              "level": 2
+            }
+          ]
+        }
+      ],
+      "empty_loads_total": 0,
+      "empty_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "empty_load_events": [],
+      "invalid_loads_total": 0,
+      "invalid_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "invalid_load_events": []
+    },
+    {
+      "initial_agent_positions": [
+        {
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 2,
+          "col": 0,
+          "level": 1
+        },
+        {
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 7,
+          "col": 1,
+          "level": 2
+        }
+      ],
+      "initial_foods": [
+        {
+          "row": 1,
+          "col": 2,
+          "level": 1
+        },
+        {
+          "row": 1,
+          "col": 5,
+          "level": 3
+        },
+        {
+          "row": 2,
+          "col": 2,
+          "level": 2
+        },
+        {
+          "row": 2,
+          "col": 5,
+          "level": 1
+        },
+        {
+          "row": 3,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "row": 3,
+          "col": 6,
+          "level": 1
+        },
+        {
+          "row": 4,
+          "col": 4,
+          "level": 1
+        },
+        {
+          "row": 6,
+          "col": 1,
+          "level": 3
+        },
+        {
+          "row": 6,
+          "col": 3,
+          "level": 3
+        },
+        {
+          "row": 6,
+          "col": 5,
+          "level": 2
+        }
+      ],
+      "episode_length": 50,
+      "foods_collected_total": 0,
+      "foods_collected_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "foods_collected_by_agent": {
+        "agent_0": [],
+        "agent_1": []
+      },
+      "foods_collected_events": [],
+      "empty_loads_total": 0,
+      "empty_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "empty_load_events": [],
+      "invalid_loads_total": 0,
+      "invalid_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "invalid_load_events": []
+    },
+    {
+      "initial_agent_positions": [
+        {
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 7,
+          "col": 5,
+          "level": 1
+        },
+        {
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 6,
+          "col": 1,
+          "level": 2
+        }
+      ],
+      "initial_foods": [
+        {
+          "row": 1,
+          "col": 3,
+          "level": 1
+        },
+        {
+          "row": 1,
+          "col": 6,
+          "level": 3
+        },
+        {
+          "row": 2,
+          "col": 1,
+          "level": 2
+        },
+        {
+          "row": 2,
+          "col": 5,
+          "level": 1
+        },
+        {
+          "row": 3,
+          "col": 2,
+          "level": 3
+        },
+        {
+          "row": 3,
+          "col": 4,
+          "level": 1
+        },
+        {
+          "row": 4,
+          "col": 2,
+          "level": 1
+        },
+        {
+          "row": 4,
+          "col": 6,
+          "level": 1
+        },
+        {
+          "row": 5,
+          "col": 5,
+          "level": 2
+        },
+        {
+          "row": 6,
+          "col": 3,
+          "level": 3
+        }
+      ],
+      "episode_length": 50,
+      "foods_collected_total": 1,
+      "foods_collected_per_agent": {
+        "agent_0": 0,
+        "agent_1": 1
+      },
+      "foods_collected_by_agent": {
+        "agent_0": [],
+        "agent_1": [
+          {
+            "step": 19,
+            "row": 4,
+            "col": 2,
+            "level": 1
+          }
+        ]
+      },
+      "foods_collected_events": [
+        {
+          "step": 19,
+          "row": 4,
+          "col": 2,
+          "level": 1,
+          "participating_agents": [
+            {
+              "agent": "player_1",
+              "agent_id": 1,
+              "level": 2
+            }
+          ]
+        }
+      ],
+      "empty_loads_total": 2,
+      "empty_loads_per_agent": {
+        "agent_0": 2,
+        "agent_1": 0
+      },
+      "empty_load_events": [
+        {
+          "step": 17,
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 7,
+          "col": 4
+        },
+        {
+          "step": 18,
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 7,
+          "col": 4
+        }
+      ],
+      "invalid_loads_total": 0,
+      "invalid_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "invalid_load_events": []
+    },
+    {
+      "initial_agent_positions": [
+        {
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 1,
+          "col": 3,
+          "level": 1
+        },
+        {
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 5,
+          "col": 4,
+          "level": 2
+        }
+      ],
+      "initial_foods": [
+        {
+          "row": 1,
+          "col": 2,
+          "level": 1
+        },
+        {
+          "row": 2,
+          "col": 2,
+          "level": 3
+        },
+        {
+          "row": 2,
+          "col": 5,
+          "level": 1
+        },
+        {
+          "row": 3,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "row": 3,
+          "col": 4,
+          "level": 2
+        },
+        {
+          "row": 4,
+          "col": 4,
+          "level": 2
+        },
+        {
+          "row": 4,
+          "col": 5,
+          "level": 1
+        },
+        {
+          "row": 5,
+          "col": 2,
+          "level": 3
+        },
+        {
+          "row": 5,
+          "col": 6,
+          "level": 3
+        },
+        {
+          "row": 6,
+          "col": 3,
+          "level": 1
+        }
+      ],
+      "episode_length": 50,
+      "foods_collected_total": 1,
+      "foods_collected_per_agent": {
+        "agent_0": 0,
+        "agent_1": 1
+      },
+      "foods_collected_by_agent": {
+        "agent_0": [],
+        "agent_1": [
+          {
+            "step": 1,
+            "row": 4,
+            "col": 4,
+            "level": 2
+          }
+        ]
+      },
+      "foods_collected_events": [
+        {
+          "step": 1,
+          "row": 4,
+          "col": 4,
+          "level": 2,
+          "participating_agents": [
+            {
+              "agent": "player_1",
+              "agent_id": 1,
+              "level": 2
+            }
+          ]
+        }
+      ],
+      "empty_loads_total": 4,
+      "empty_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 4
+      },
+      "empty_load_events": [
+        {
+          "step": 2,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 5,
+          "col": 4
+        },
+        {
+          "step": 21,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 3
+        },
+        {
+          "step": 32,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 3
+        },
+        {
+          "step": 33,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 3
+        }
+      ],
+      "invalid_loads_total": 0,
+      "invalid_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "invalid_load_events": []
+    },
+    {
+      "initial_agent_positions": [
+        {
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 7,
+          "col": 5,
+          "level": 1
+        },
+        {
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 1,
+          "col": 1,
+          "level": 2
+        }
+      ],
+      "initial_foods": [
+        {
+          "row": 1,
+          "col": 5,
+          "level": 2
+        },
+        {
+          "row": 2,
+          "col": 1,
+          "level": 2
+        },
+        {
+          "row": 2,
+          "col": 4,
+          "level": 3
+        },
+        {
+          "row": 3,
+          "col": 2,
+          "level": 1
+        },
+        {
+          "row": 3,
+          "col": 3,
+          "level": 3
+        },
+        {
+          "row": 3,
+          "col": 6,
+          "level": 1
+        },
+        {
+          "row": 4,
+          "col": 3,
+          "level": 3
+        },
+        {
+          "row": 5,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "row": 5,
+          "col": 3,
+          "level": 1
+        },
+        {
+          "row": 6,
+          "col": 4,
+          "level": 1
+        }
+      ],
+      "episode_length": 50,
+      "foods_collected_total": 0,
+      "foods_collected_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "foods_collected_by_agent": {
+        "agent_0": [],
+        "agent_1": []
+      },
+      "foods_collected_events": [],
+      "empty_loads_total": 0,
+      "empty_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "empty_load_events": [],
+      "invalid_loads_total": 0,
+      "invalid_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "invalid_load_events": []
+    },
+    {
+      "initial_agent_positions": [
+        {
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 2,
+          "col": 7,
+          "level": 1
+        },
+        {
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 0,
+          "col": 4,
+          "level": 2
+        }
+      ],
+      "initial_foods": [
+        {
+          "row": 1,
+          "col": 2,
+          "level": 2
+        },
+        {
+          "row": 1,
+          "col": 6,
+          "level": 1
+        },
+        {
+          "row": 2,
+          "col": 2,
+          "level": 1
+        },
+        {
+          "row": 2,
+          "col": 6,
+          "level": 3
+        },
+        {
+          "row": 3,
+          "col": 1,
+          "level": 3
+        },
+        {
+          "row": 3,
+          "col": 4,
+          "level": 2
+        },
+        {
+          "row": 4,
+          "col": 3,
+          "level": 1
+        },
+        {
+          "row": 5,
+          "col": 3,
+          "level": 1
+        },
+        {
+          "row": 5,
+          "col": 6,
+          "level": 1
+        },
+        {
+          "row": 6,
+          "col": 1,
+          "level": 3
+        }
+      ],
+      "episode_length": 50,
+      "foods_collected_total": 0,
+      "foods_collected_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "foods_collected_by_agent": {
+        "agent_0": [],
+        "agent_1": []
+      },
+      "foods_collected_events": [],
+      "empty_loads_total": 0,
+      "empty_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "empty_load_events": [],
+      "invalid_loads_total": 0,
+      "invalid_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "invalid_load_events": []
+    },
+    {
+      "initial_agent_positions": [
+        {
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 5,
+          "col": 0,
+          "level": 1
+        },
+        {
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 7,
+          "col": 4,
+          "level": 2
+        }
+      ],
+      "initial_foods": [
+        {
+          "row": 1,
+          "col": 1,
+          "level": 3
+        },
+        {
+          "row": 1,
+          "col": 3,
+          "level": 1
+        },
+        {
+          "row": 2,
+          "col": 3,
+          "level": 2
+        },
+        {
+          "row": 2,
+          "col": 5,
+          "level": 1
+        },
+        {
+          "row": 3,
+          "col": 2,
+          "level": 3
+        },
+        {
+          "row": 4,
+          "col": 4,
+          "level": 1
+        },
+        {
+          "row": 5,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "row": 5,
+          "col": 6,
+          "level": 1
+        },
+        {
+          "row": 6,
+          "col": 2,
+          "level": 2
+        },
+        {
+          "row": 6,
+          "col": 3,
+          "level": 3
+        }
+      ],
+      "episode_length": 50,
+      "foods_collected_total": 0,
+      "foods_collected_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "foods_collected_by_agent": {
+        "agent_0": [],
+        "agent_1": []
+      },
+      "foods_collected_events": [],
+      "empty_loads_total": 0,
+      "empty_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "empty_load_events": [],
+      "invalid_loads_total": 0,
+      "invalid_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "invalid_load_events": []
+    },
+    {
+      "initial_agent_positions": [
+        {
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 6,
+          "col": 4,
+          "level": 1
+        },
+        {
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 2,
+          "col": 5,
+          "level": 2
+        }
+      ],
+      "initial_foods": [
+        {
+          "row": 1,
+          "col": 2,
+          "level": 2
+        },
+        {
+          "row": 1,
+          "col": 5,
+          "level": 1
+        },
+        {
+          "row": 2,
+          "col": 6,
+          "level": 3
+        },
+        {
+          "row": 3,
+          "col": 1,
+          "level": 3
+        },
+        {
+          "row": 3,
+          "col": 6,
+          "level": 3
+        },
+        {
+          "row": 4,
+          "col": 3,
+          "level": 1
+        },
+        {
+          "row": 4,
+          "col": 4,
+          "level": 1
+        },
+        {
+          "row": 6,
+          "col": 2,
+          "level": 1
+        },
+        {
+          "row": 6,
+          "col": 5,
+          "level": 2
+        },
+        {
+          "row": 6,
+          "col": 6,
+          "level": 1
+        }
+      ],
+      "episode_length": 50,
+      "foods_collected_total": 1,
+      "foods_collected_per_agent": {
+        "agent_0": 0,
+        "agent_1": 1
+      },
+      "foods_collected_by_agent": {
+        "agent_0": [],
+        "agent_1": [
+          {
+            "step": 3,
+            "row": 1,
+            "col": 5,
+            "level": 1
+          }
+        ]
+      },
+      "foods_collected_events": [
+        {
+          "step": 3,
+          "row": 1,
+          "col": 5,
+          "level": 1,
+          "participating_agents": [
+            {
+              "agent": "player_1",
+              "agent_id": 1,
+              "level": 2
+            }
+          ]
+        }
+      ],
+      "empty_loads_total": 0,
+      "empty_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "empty_load_events": [],
+      "invalid_loads_total": 0,
+      "invalid_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "invalid_load_events": []
+    },
+    {
+      "initial_agent_positions": [
+        {
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 0,
+          "col": 7,
+          "level": 1
+        },
+        {
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 7,
+          "col": 5,
+          "level": 2
+        }
+      ],
+      "initial_foods": [
+        {
+          "row": 1,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "row": 1,
+          "col": 3,
+          "level": 1
+        },
+        {
+          "row": 1,
+          "col": 6,
+          "level": 1
+        },
+        {
+          "row": 2,
+          "col": 1,
+          "level": 2
+        },
+        {
+          "row": 2,
+          "col": 6,
+          "level": 1
+        },
+        {
+          "row": 3,
+          "col": 2,
+          "level": 3
+        },
+        {
+          "row": 3,
+          "col": 4,
+          "level": 3
+        },
+        {
+          "row": 4,
+          "col": 6,
+          "level": 3
+        },
+        {
+          "row": 5,
+          "col": 2,
+          "level": 1
+        },
+        {
+          "row": 6,
+          "col": 4,
+          "level": 2
+        }
+      ],
+      "episode_length": 50,
+      "foods_collected_total": 1,
+      "foods_collected_per_agent": {
+        "agent_0": 0,
+        "agent_1": 1
+      },
+      "foods_collected_by_agent": {
+        "agent_0": [],
+        "agent_1": [
+          {
+            "step": 11,
+            "row": 6,
+            "col": 4,
+            "level": 2
+          }
+        ]
+      },
+      "foods_collected_events": [
+        {
+          "step": 11,
+          "row": 6,
+          "col": 4,
+          "level": 2,
+          "participating_agents": [
+            {
+              "agent": "player_1",
+              "agent_id": 1,
+              "level": 2
+            }
+          ]
+        }
+      ],
+      "empty_loads_total": 2,
+      "empty_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 2
+      },
+      "empty_load_events": [
+        {
+          "step": 1,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 7,
+          "col": 5
+        },
+        {
+          "step": 2,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 7,
+          "col": 5
+        }
+      ],
+      "invalid_loads_total": 0,
+      "invalid_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "invalid_load_events": []
+    },
+    {
+      "initial_agent_positions": [
+        {
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 6,
+          "col": 3,
+          "level": 1
+        },
+        {
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 4,
+          "col": 0,
+          "level": 2
+        }
+      ],
+      "initial_foods": [
+        {
+          "row": 1,
+          "col": 1,
+          "level": 2
+        },
+        {
+          "row": 1,
+          "col": 4,
+          "level": 2
+        },
+        {
+          "row": 3,
+          "col": 3,
+          "level": 1
+        },
+        {
+          "row": 3,
+          "col": 5,
+          "level": 1
+        },
+        {
+          "row": 4,
+          "col": 1,
+          "level": 3
+        },
+        {
+          "row": 4,
+          "col": 4,
+          "level": 1
+        },
+        {
+          "row": 5,
+          "col": 1,
+          "level": 3
+        },
+        {
+          "row": 5,
+          "col": 4,
+          "level": 1
+        },
+        {
+          "row": 6,
+          "col": 2,
+          "level": 3
+        },
+        {
+          "row": 6,
+          "col": 6,
+          "level": 1
+        }
+      ],
+      "episode_length": 50,
+      "foods_collected_total": 0,
+      "foods_collected_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "foods_collected_by_agent": {
+        "agent_0": [],
+        "agent_1": []
+      },
+      "foods_collected_events": [],
+      "empty_loads_total": 0,
+      "empty_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "empty_load_events": [],
+      "invalid_loads_total": 0,
+      "invalid_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "invalid_load_events": []
+    },
+    {
+      "initial_agent_positions": [
+        {
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 6,
+          "col": 0,
+          "level": 1
+        },
+        {
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 4,
+          "col": 7,
+          "level": 2
+        }
+      ],
+      "initial_foods": [
+        {
+          "row": 1,
+          "col": 1,
+          "level": 3
+        },
+        {
+          "row": 1,
+          "col": 5,
+          "level": 2
+        },
+        {
+          "row": 2,
+          "col": 3,
+          "level": 3
+        },
+        {
+          "row": 2,
+          "col": 6,
+          "level": 3
+        },
+        {
+          "row": 3,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "row": 3,
+          "col": 6,
+          "level": 1
+        },
+        {
+          "row": 4,
+          "col": 2,
+          "level": 1
+        },
+        {
+          "row": 5,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "row": 6,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "row": 6,
+          "col": 5,
+          "level": 2
+        }
+      ],
+      "episode_length": 50,
+      "foods_collected_total": 0,
+      "foods_collected_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "foods_collected_by_agent": {
+        "agent_0": [],
+        "agent_1": []
+      },
+      "foods_collected_events": [],
+      "empty_loads_total": 0,
+      "empty_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "empty_load_events": [],
+      "invalid_loads_total": 0,
+      "invalid_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "invalid_load_events": []
+    },
+    {
+      "initial_agent_positions": [
+        {
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 2,
+          "col": 5,
+          "level": 1
+        },
+        {
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 6,
+          "col": 4,
+          "level": 2
+        }
+      ],
+      "initial_foods": [
+        {
+          "row": 1,
+          "col": 3,
+          "level": 1
+        },
+        {
+          "row": 2,
+          "col": 1,
+          "level": 3
+        },
+        {
+          "row": 2,
+          "col": 6,
+          "level": 2
+        },
+        {
+          "row": 3,
+          "col": 4,
+          "level": 3
+        },
+        {
+          "row": 3,
+          "col": 6,
+          "level": 3
+        },
+        {
+          "row": 5,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "row": 5,
+          "col": 3,
+          "level": 2
+        },
+        {
+          "row": 5,
+          "col": 5,
+          "level": 1
+        },
+        {
+          "row": 6,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "row": 6,
+          "col": 5,
+          "level": 1
+        }
+      ],
+      "episode_length": 50,
+      "foods_collected_total": 1,
+      "foods_collected_per_agent": {
+        "agent_0": 1,
+        "agent_1": 0
+      },
+      "foods_collected_by_agent": {
+        "agent_0": [
+          {
+            "step": 45,
+            "row": 5,
+            "col": 5,
+            "level": 1
+          }
+        ],
+        "agent_1": []
+      },
+      "foods_collected_events": [
+        {
+          "step": 45,
+          "row": 5,
+          "col": 5,
+          "level": 1,
+          "participating_agents": [
+            {
+              "agent": "player_0",
+              "agent_id": 0,
+              "level": 1
+            }
+          ]
+        }
+      ],
+      "empty_loads_total": 1,
+      "empty_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 1
+      },
+      "empty_load_events": [
+        {
+          "step": 45,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 7,
+          "col": 4
+        }
+      ],
+      "invalid_loads_total": 0,
+      "invalid_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "invalid_load_events": []
+    },
+    {
+      "initial_agent_positions": [
+        {
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 2,
+          "col": 0,
+          "level": 1
+        },
+        {
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 5,
+          "col": 5,
+          "level": 2
+        }
+      ],
+      "initial_foods": [
+        {
+          "row": 1,
+          "col": 5,
+          "level": 3
+        },
+        {
+          "row": 2,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "row": 2,
+          "col": 2,
+          "level": 2
+        },
+        {
+          "row": 3,
+          "col": 4,
+          "level": 3
+        },
+        {
+          "row": 4,
+          "col": 3,
+          "level": 2
+        },
+        {
+          "row": 4,
+          "col": 6,
+          "level": 3
+        },
+        {
+          "row": 5,
+          "col": 2,
+          "level": 1
+        },
+        {
+          "row": 5,
+          "col": 6,
+          "level": 1
+        },
+        {
+          "row": 6,
+          "col": 3,
+          "level": 1
+        },
+        {
+          "row": 6,
+          "col": 4,
+          "level": 1
+        }
+      ],
+      "episode_length": 50,
+      "foods_collected_total": 0,
+      "foods_collected_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "foods_collected_by_agent": {
+        "agent_0": [],
+        "agent_1": []
+      },
+      "foods_collected_events": [],
+      "empty_loads_total": 0,
+      "empty_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "empty_load_events": [],
+      "invalid_loads_total": 0,
+      "invalid_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "invalid_load_events": []
+    },
+    {
+      "initial_agent_positions": [
+        {
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 7,
+          "col": 3,
+          "level": 1
+        },
+        {
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 4,
+          "col": 2,
+          "level": 2
+        }
+      ],
+      "initial_foods": [
+        {
+          "row": 1,
+          "col": 4,
+          "level": 1
+        },
+        {
+          "row": 2,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "row": 2,
+          "col": 2,
+          "level": 1
+        },
+        {
+          "row": 2,
+          "col": 5,
+          "level": 2
+        },
+        {
+          "row": 2,
+          "col": 6,
+          "level": 1
+        },
+        {
+          "row": 3,
+          "col": 6,
+          "level": 3
+        },
+        {
+          "row": 4,
+          "col": 5,
+          "level": 1
+        },
+        {
+          "row": 5,
+          "col": 1,
+          "level": 2
+        },
+        {
+          "row": 6,
+          "col": 3,
+          "level": 3
+        },
+        {
+          "row": 6,
+          "col": 6,
+          "level": 3
+        }
+      ],
+      "episode_length": 50,
+      "foods_collected_total": 0,
+      "foods_collected_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "foods_collected_by_agent": {
+        "agent_0": [],
+        "agent_1": []
+      },
+      "foods_collected_events": [],
+      "empty_loads_total": 0,
+      "empty_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "empty_load_events": [],
+      "invalid_loads_total": 0,
+      "invalid_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "invalid_load_events": []
+    },
+    {
+      "initial_agent_positions": [
+        {
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 2,
+          "col": 0,
+          "level": 1
+        },
+        {
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 5,
+          "col": 5,
+          "level": 2
+        }
+      ],
+      "initial_foods": [
+        {
+          "row": 1,
+          "col": 1,
+          "level": 2
+        },
+        {
+          "row": 1,
+          "col": 2,
+          "level": 3
+        },
+        {
+          "row": 1,
+          "col": 6,
+          "level": 3
+        },
+        {
+          "row": 2,
+          "col": 3,
+          "level": 1
+        },
+        {
+          "row": 3,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "row": 3,
+          "col": 4,
+          "level": 2
+        },
+        {
+          "row": 4,
+          "col": 6,
+          "level": 1
+        },
+        {
+          "row": 6,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "row": 6,
+          "col": 3,
+          "level": 3
+        },
+        {
+          "row": 6,
+          "col": 6,
+          "level": 1
+        }
+      ],
+      "episode_length": 50,
+      "foods_collected_total": 0,
+      "foods_collected_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "foods_collected_by_agent": {
+        "agent_0": [],
+        "agent_1": []
+      },
+      "foods_collected_events": [],
+      "empty_loads_total": 0,
+      "empty_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "empty_load_events": [],
+      "invalid_loads_total": 0,
+      "invalid_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "invalid_load_events": []
+    },
+    {
+      "initial_agent_positions": [
+        {
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 7,
+          "col": 4,
+          "level": 1
+        },
+        {
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 6,
+          "col": 1,
+          "level": 2
+        }
+      ],
+      "initial_foods": [
+        {
+          "row": 1,
+          "col": 2,
+          "level": 3
+        },
+        {
+          "row": 1,
+          "col": 6,
+          "level": 3
+        },
+        {
+          "row": 2,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "row": 2,
+          "col": 5,
+          "level": 3
+        },
+        {
+          "row": 3,
+          "col": 1,
+          "level": 1
+        },
+        {
+          "row": 4,
+          "col": 2,
+          "level": 2
+        },
+        {
+          "row": 5,
+          "col": 3,
+          "level": 1
+        },
+        {
+          "row": 5,
+          "col": 4,
+          "level": 1
+        },
+        {
+          "row": 5,
+          "col": 6,
+          "level": 2
+        },
+        {
+          "row": 6,
+          "col": 3,
+          "level": 1
+        }
+      ],
+      "episode_length": 50,
+      "foods_collected_total": 0,
+      "foods_collected_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "foods_collected_by_agent": {
+        "agent_0": [],
+        "agent_1": []
+      },
+      "foods_collected_events": [],
+      "empty_loads_total": 0,
+      "empty_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "empty_load_events": [],
+      "invalid_loads_total": 0,
+      "invalid_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "invalid_load_events": []
+    },
+    {
+      "initial_agent_positions": [
+        {
+          "agent": "player_0",
+          "agent_id": 0,
+          "row": 1,
+          "col": 7,
+          "level": 1
+        },
+        {
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 6,
+          "col": 1,
+          "level": 2
+        }
+      ],
+      "initial_foods": [
+        {
+          "row": 1,
+          "col": 2,
+          "level": 1
+        },
+        {
+          "row": 1,
+          "col": 6,
+          "level": 1
+        },
+        {
+          "row": 2,
+          "col": 3,
+          "level": 3
+        },
+        {
+          "row": 2,
+          "col": 4,
+          "level": 3
+        },
+        {
+          "row": 2,
+          "col": 6,
+          "level": 2
+        },
+        {
+          "row": 3,
+          "col": 1,
+          "level": 2
+        },
+        {
+          "row": 3,
+          "col": 4,
+          "level": 1
+        },
+        {
+          "row": 4,
+          "col": 5,
+          "level": 3
+        },
+        {
+          "row": 5,
+          "col": 2,
+          "level": 1
+        },
+        {
+          "row": 6,
+          "col": 6,
+          "level": 1
+        }
+      ],
+      "episode_length": 50,
+      "foods_collected_total": 0,
+      "foods_collected_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "foods_collected_by_agent": {
+        "agent_0": [],
+        "agent_1": []
+      },
+      "foods_collected_events": [],
+      "empty_loads_total": 6,
+      "empty_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 6
+      },
+      "empty_load_events": [
+        {
+          "step": 23,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 7,
+          "col": 0
+        },
+        {
+          "step": 26,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 7,
+          "col": 0
+        },
+        {
+          "step": 27,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 7,
+          "col": 0
+        },
+        {
+          "step": 34,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 7,
+          "col": 0
+        },
+        {
+          "step": 38,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 7,
+          "col": 0
+        },
+        {
+          "step": 50,
+          "agent": "player_1",
+          "agent_id": 1,
+          "row": 7,
+          "col": 0
+        }
+      ],
+      "invalid_loads_total": 0,
+      "invalid_loads_per_agent": {
+        "agent_0": 0,
+        "agent_1": 0
+      },
+      "invalid_load_events": []
+    }
+  ],
+  "metric_totals": {
+    "episode_count": 50,
+    "episode_lengths": [
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50,
+      50
+    ],
+    "foods_collected_total": 16,
+    "foods_collected_per_agent": {
+      "agent_0": 4,
+      "agent_1": 12
+    },
+    "empty_loads_total": 117,
+    "empty_loads_per_agent": {
+      "agent_0": 7,
+      "agent_1": 110
+    },
+    "invalid_loads_total": 17,
+    "invalid_loads_per_agent": {
+      "agent_0": 2,
+      "agent_1": 15
+    }
+  },
   "agent_labels": [
     "Agent 1",
     "Agent 2"
