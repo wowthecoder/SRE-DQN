@@ -43,6 +43,7 @@ class LBFParallelEnv(ParallelEnv):
         observe_agent_levels: bool = True,
         penalty: float = 0.0,
         empty_load_penalty: float = 0.0,
+        simple_food_rewards: bool = False,
         render_mode: Optional[str] = None,
     ):
         super().__init__()
@@ -91,6 +92,7 @@ class LBFParallelEnv(ParallelEnv):
             observe_agent_levels=observe_agent_levels,
             penalty=penalty,
             empty_load_penalty=empty_load_penalty,
+            simple_food_rewards=simple_food_rewards,
             render_mode=render_mode,
         )
         self.possible_agents = [f"player_{i}" for i in range(players)]
@@ -171,6 +173,7 @@ def make_pz_env(
     observe_agent_levels: bool = True,
     penalty: float = 0.0,
     empty_load_penalty: float = 0.0,
+    simple_food_rewards: bool = False,
     render_mode: Optional[str] = None,
 ) -> LBFParallelEnv:
     """Create the default basic Level-Based Foraging PettingZoo env."""
@@ -192,5 +195,6 @@ def make_pz_env(
         observe_agent_levels=observe_agent_levels,
         penalty=penalty,
         empty_load_penalty=empty_load_penalty,
+        simple_food_rewards=simple_food_rewards,
         render_mode=render_mode,
     )

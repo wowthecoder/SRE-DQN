@@ -103,6 +103,7 @@ class InstrumentedForagingEnv(ForagingEnv):
         player_levels: Sequence[int] | None = None,
         food_levels: Sequence[int] | None = None,
         empty_load_penalty: float = 0.0,
+        simple_food_rewards: bool = False,
         **kwargs,
     ):
         self._player_levels = (
@@ -120,6 +121,7 @@ class InstrumentedForagingEnv(ForagingEnv):
             kwargs["max_food_level"] = list(self._requested_food_levels)
 
         self.empty_load_penalty = float(empty_load_penalty)
+        self.simple_food_rewards = bool(simple_food_rewards)
         super().__init__(*args, **kwargs)
         self._reset_lbf_metrics()
 
@@ -291,6 +293,29 @@ class InstrumentedForagingEnv(ForagingEnv):
                 self.players[agent_id].score -= self.empty_load_penalty
         return rewards
 
+    def _apply_simple_food_rewards(self, events, reward_list):
+        if not self.simple_food_rewards:
+            return reward_list
+
+        rewards = [0.0 for _ in reward_list]
+        for event in events:
+            row, col = int(event["row"]), int(event["col"])
+            if self.field[row, col] != 0:
+                continue
+            participants = event.get("participating_agents") or []
+            if not participants:
+                continue
+            reward_share = float(event["level"]) / float(len(participants))
+            for participant in participants:
+                agent_id = int(participant["agent_id"])
+                rewards[agent_id] += reward_share
+
+        for agent_id, reward in enumerate(rewards):
+            previous_reward = float(self.players[agent_id].reward)
+            self.players[agent_id].reward = float(reward)
+            self.players[agent_id].score += float(reward) - previous_reward
+        return rewards
+
     def _record_invalid_loads(self, events):
         for event in events:
             self._lbf_metrics["invalid_loads_total"] += 1
@@ -325,6 +350,7 @@ class InstrumentedForagingEnv(ForagingEnv):
     def step(self, actions):
         empty_events, invalid_events, success_events = self._load_events_from_actions(actions)
         obs, rewards, done, truncated, info = super().step(actions)
+        rewards = self._apply_simple_food_rewards(success_events, rewards)
         rewards = self._record_empty_loads(empty_events, rewards)
         self._record_invalid_loads(invalid_events)
         self._record_collections(success_events)

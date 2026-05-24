@@ -3,7 +3,9 @@
 PettingZoo-style wrapper around the upstream
 [uoe-agents/lb-foraging](https://github.com/uoe-agents/lb-foraging) package.
 The environment is intentionally basic: no custom walls, traps, fixed starts,
-collision penalties, or reward shaping beyond the package's native LBF rules.
+or collision penalties. The default helper keeps the package's native reward
+rules; the denser benchmark scenarios opt into the simple food-level reward
+mode described below.
 
 ## Installation
 
@@ -57,6 +59,7 @@ env.close()
 | `normalize_reward` | `True` | Use native normalized lb-foraging rewards |
 | `penalty` | `0.0` in wrapper | Penalty subtracted from each failed loader |
 | `empty_load_penalty` | `0.0` in wrapper | Penalty subtracted only when an agent loads with no adjacent food |
+| `simple_food_rewards` | `False` | Replace native collection rewards with food-level rewards split evenly across participating loaders |
 
 `food_levels` must have length `max_food`. For example, `max_food=5,
 food_levels=[1, 1, 2, 2, 3]` keeps food positions random but fixes the spawned
@@ -75,29 +78,31 @@ food-level multiset.
 
 ## Rewards and Penalties
 
-The wrapper uses the upstream `lb-foraging` reward rules plus an optional
-empty-load penalty. Agents otherwise receive reward only when a `LOAD` action
-successfully collects adjacent food.
+The default wrapper uses the upstream `lb-foraging` reward rules plus an
+optional empty-load penalty. The three configured benchmark scenarios set
+`simple_food_rewards=True`, `normalize_reward=False`, `penalty=0.0`, and
+`empty_load_penalty=0.01`.
 
 - Movement actions, `NONE`, invalid movement actions converted to `NONE`, and
   movement collisions have reward `0`.
 - Empty loads have reward `-empty_load_penalty`; the denser benchmark
-  scenarios set this to `0.01`.
+  scenarios subtract `0.01` from the offending agent.
 - A load is considered with the set of loading agents adjacent to the same food.
   If their summed player level is less than the food level, the load fails.
-- Failed loaders receive `-penalty`; the project wrapper default is
-  `penalty=0.0`, so failed loads have no penalty unless explicitly overridden.
-- If the adjacent loaders can collect the food, each participating loader
-  receives `player_level * food_level`.
-- With `normalize_reward=True` (the default), that successful-load reward is
-  divided by `sum_loading_player_levels * total_spawned_food_level`.
-- Non-participating agents receive `0` for that load event.
+- Failed loaders receive `-penalty`; the benchmark scenarios keep
+  `penalty=0.0`, so insufficient-level failed loads have no reward penalty.
+- With `simple_food_rewards=True`, a successful collection grants reward equal
+  to the collected food level, divided evenly across participating loaders.
+  Non-participating agents receive `0` for that load event.
+- With `simple_food_rewards=False`, successful collection follows the native
+  `lb-foraging` reward formula. If `normalize_reward=True`, that native reward
+  is normalized by the total spawned food level as upstream defines it.
 - The food is removed after a successful load. An episode ends when all food is
   collected or `max_episode_steps` is reached.
 
-For example, if two level-1 agents load a level-2 food and the episode spawned
-two level-2 foods in total, then `total_spawned_food_level=4`; each loader gets
-`1 * 2 / (2 * 4) = 0.25`. The joint reward for collecting that food is `0.5`.
+For example, in the benchmark reward mode, if two agents load a level-2 food
+together, each participating loader gets `1.0`; if one level-3 agent collects a
+level-3 food alone, that agent gets `3.0`.
 
 ## Deep SRQ PATH Pool Training Metrics
 
@@ -159,7 +164,6 @@ best_eval_joint_reward
 best_checkpoint_source
 checkpoint_paths
 include_replay_buffer
-rng_state
 agent_labels
 artifact_dir
 stats_path
@@ -233,10 +237,56 @@ lbf_config
   normalize_reward
   food_levels
   force_coop
+  penalty
+  empty_load_penalty
+  simple_food_rewards
 
 periodic_eval[]
   episode_rewards
   joint_rewards
+  episode_lengths
+  episode_metrics
+    initial_agent_positions
+      agent
+      agent_id
+      row
+      col
+      level
+    initial_foods
+      row
+      col
+      level
+    episode_length
+    foods_collected_total
+    foods_collected_per_agent
+      agent_<n>
+    foods_collected_by_agent
+      agent_<n>
+        step
+        row
+        col
+        level
+    foods_collected_events
+    empty_loads_total
+    empty_loads_per_agent
+      agent_<n>
+    empty_load_events
+    invalid_loads_total
+    invalid_loads_per_agent
+      agent_<n>
+    invalid_load_events
+  metric_totals
+    episode_count
+    episode_lengths
+    foods_collected_total
+    foods_collected_per_agent
+      agent_<n>
+    empty_loads_total
+    empty_loads_per_agent
+      agent_<n>
+    invalid_loads_total
+    invalid_loads_per_agent
+      agent_<n>
   mean_joint_reward
   episode
   global_step
@@ -245,12 +295,6 @@ periodic_eval[]
 checkpoint_paths
   best
   final
-
-rng_state
-  python_random
-  numpy_random
-  torch_random_cpu
-  torch_random_cuda
 
 timing
   wall_clock_seconds
@@ -454,8 +498,14 @@ The recorded training metrics are:
 - Optimisation metrics: `gradient_steps`, `best_loss`, and `latest_loss`.
 - Periodic evaluation metrics: `periodic_eval` stores one record per evaluation
   point when `eval_interval` is enabled. Each record contains
-  `episode_rewards`, `joint_rewards`, `mean_joint_reward`, `episode`,
-  `global_step`, and `gradient_step`.
+  `episode_rewards`, `joint_rewards`, `episode_lengths`, `mean_joint_reward`,
+  `episode`, `global_step`, and `gradient_step`.
+- LBF diagnostics: each periodic eval record also stores `episode_metrics` and
+  `metric_totals`. These include agent starting coordinates, starting food
+  coordinates and levels, episode length, total foods collected, foods
+  collected per agent, per-agent lists of collected foods with coordinates and
+  level, empty-load totals and per-agent counts, and invalid-load totals and
+  per-agent counts.
 - Checkpoint metrics: `best_eval_joint_reward`, `best_checkpoint_source`, and
   `checkpoint_paths.best` / `checkpoint_paths.final`.
 - Timing metrics: `timing.wall_clock_seconds`, `timing.episode_time`,
@@ -497,6 +547,10 @@ The notebook registers three local Gymnasium IDs for the requested scenarios:
 | 2 agents with levels 1 and 2, 8x8, 10 foods: 3 level-3, 2 level-2, 5 level-1 | 50 | 50000 |
 | 2 level-1 agents, 8x8, 10 foods: 5 level-1, 5 level-2, forced cooperation | 50 | 50000 |
 | 3 agents with levels 1, 2, and 3, 10x10, 18 foods: 3 each for levels 1-6 | 100 | 100000 |
+
+All three registered scenarios use simple food-level collection rewards, no
+reward normalization, `-0.01` empty-load shaping, and no penalty for
+insufficient-level failed loads.
 
 Set `EPYMARL_ROOT` in the notebook to a local clone of
 `https://github.com/uoe-agents/epymarl` before running the EPyMARL algorithms.

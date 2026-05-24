@@ -224,20 +224,6 @@ def _json_safe(value):
     return value
 
 
-def _rng_state_payload():
-    payload = {
-        "python_random": repr(random.getstate()),
-        "numpy_random": repr(np.random.get_state()),
-    }
-    if torch is not None:
-        payload["torch_random_cpu"] = torch.get_rng_state().cpu().tolist()
-        if torch.cuda.is_available():
-            payload["torch_random_cuda"] = [
-                state.cpu().tolist() for state in torch.cuda.get_rng_state_all()
-            ]
-    return payload
-
-
 def probe_lbf(config: dict, *, seed: int = BASE_SEED) -> tuple[int, int, int, list[str]]:
     env = make_pz_env(**config)
     try:
@@ -825,7 +811,6 @@ def train_lbf_sr_adidas_experiment(
             "final": str(run_dir / "shared_sr_adidas_final.pt"),
         },
         "wall_clock_seconds": float(wall_clock_seconds),
-        "rng_state": _rng_state_payload(),
         "agent_labels": [f"Agent {idx + 1} (SR-ADIDAS)" for idx in range(num_agents)],
         "artifact_dir": str(run_dir),
         "stats_path": str(run_dir / "training_stats.json"),

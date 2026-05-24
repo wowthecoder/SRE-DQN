@@ -156,20 +156,6 @@ def _central_state(obs_dict, agent_order):
     return np.concatenate(parts).astype(np.float32, copy=False)
 
 
-def _rng_state_payload():
-    payload = {
-        "python_random": repr(random.getstate()),
-        "numpy_random": repr(np.random.get_state()),
-    }
-    if torch is not None:
-        payload["torch_random_cpu"] = torch.get_rng_state().cpu().tolist()
-        if torch.cuda.is_available():
-            payload["torch_random_cuda"] = [
-                state.cpu().tolist() for state in torch.cuda.get_rng_state_all()
-            ]
-    return payload
-
-
 def _solver_usage_summary(solver):
     if solver is None:
         return {}
@@ -183,6 +169,134 @@ def _solver_usage_summary(solver):
     if fallback is not None and hasattr(fallback, "get_solve_time_summary"):
         return {"solve_time": fallback.get_solve_time_summary()}
     return {}
+
+
+def _format_agent_metric_counts(counts, num_agents):
+    counts = counts or {}
+    return ", ".join(
+        f"Agent {idx + 1}: {int(counts.get(f'agent_{idx}', 0))}"
+        for idx in range(int(num_agents))
+    )
+
+
+def _format_agent_positions(records):
+    if not records:
+        return "[]"
+    return ", ".join(
+        f"Agent {int(record.get('agent_id', idx)) + 1}: "
+        f"({int(record.get('row', -1))}, {int(record.get('col', -1))}) "
+        f"L{int(record.get('level', 0))}"
+        for idx, record in enumerate(records)
+    )
+
+
+def _format_food_records(records):
+    if not records:
+        return "[]"
+    return ", ".join(
+        f"({int(record.get('row', -1))}, {int(record.get('col', -1))}) "
+        f"L{int(record.get('level', 0))}"
+        for record in records
+    )
+
+
+def _print_lbf_evaluation_metrics(stats, *, max_episode_metrics=None):
+    eval_history = list(stats.get("periodic_eval") or [])
+    if not eval_history:
+        print("\nLBF Evaluation Metrics")
+        print("No periodic evaluation metrics recorded.")
+        return
+
+    latest = eval_history[-1]
+    episode = latest.get("episode")
+    global_step = latest.get("global_step")
+    metrics = [
+        metric for metric in latest.get("episode_metrics", []) if isinstance(metric, dict)
+    ]
+    totals = latest.get("metric_totals") or aggregate_lbf_episode_metrics(
+        metrics,
+        stats.get("num_agents"),
+    )
+    num_agents = int(stats.get("num_agents") or len(totals.get("empty_loads_per_agent", {})))
+    if max_episode_metrics is None:
+        max_episode_metrics = len(metrics)
+
+    print("\nLBF Evaluation Metrics")
+    print(
+        "Latest periodic eval"
+        f" | training_episode={episode}"
+        f" | global_step={global_step}"
+        f" | eval_episodes={len(metrics)}"
+    )
+    print(
+        "Episode lengths: "
+        + ", ".join(str(int(value)) for value in totals.get("episode_lengths", []))
+    )
+    print(f"Foods collected total: {int(totals.get('foods_collected_total', 0))}")
+    print(
+        "Foods collected per agent: "
+        + _format_agent_metric_counts(
+            totals.get("foods_collected_per_agent"),
+            num_agents,
+        )
+    )
+    print(f"Empty loads total: {int(totals.get('empty_loads_total', 0))}")
+    print(
+        "Empty loads per agent: "
+        + _format_agent_metric_counts(totals.get("empty_loads_per_agent"), num_agents)
+    )
+    print(f"Invalid loads total: {int(totals.get('invalid_loads_total', 0))}")
+    print(
+        "Invalid loads per agent: "
+        + _format_agent_metric_counts(totals.get("invalid_loads_per_agent"), num_agents)
+    )
+
+    for eval_idx, metric in enumerate(metrics[: int(max_episode_metrics)], start=1):
+        print(f"\nEval episode {eval_idx}")
+        print(
+            "  Agent starting coordinates: "
+            + _format_agent_positions(metric.get("initial_agent_positions") or [])
+        )
+        print(
+            "  Food coordinates: "
+            + _format_food_records(metric.get("initial_foods") or [])
+        )
+        print(f"  Episode length: {int(metric.get('episode_length', 0))}")
+        print(
+            f"  Foods collected total: "
+            f"{int(metric.get('foods_collected_total', 0))}"
+        )
+        print(
+            "  Foods collected per agent: "
+            + _format_agent_metric_counts(
+                metric.get("foods_collected_per_agent"),
+                num_agents,
+            )
+        )
+        collected_by_agent = metric.get("foods_collected_by_agent") or {}
+        print("  Foods collected by agent:")
+        for agent_id in range(num_agents):
+            key = f"agent_{agent_id}"
+            foods = collected_by_agent.get(key) or []
+            print(f"    Agent {agent_id + 1}: {_format_food_records(foods)}")
+        print(f"  Empty loads total: {int(metric.get('empty_loads_total', 0))}")
+        print(
+            "  Empty loads per agent: "
+            + _format_agent_metric_counts(
+                metric.get("empty_loads_per_agent"),
+                num_agents,
+            )
+        )
+        print(f"  Invalid loads total: {int(metric.get('invalid_loads_total', 0))}")
+        print(
+            "  Invalid loads per agent: "
+            + _format_agent_metric_counts(
+                metric.get("invalid_loads_per_agent"),
+                num_agents,
+            )
+        )
+    if len(metrics) > int(max_episode_metrics):
+        print(f"\n... {len(metrics) - int(max_episode_metrics)} more eval episodes omitted.")
 
 
 def _evaluate_agent_rewards(
@@ -565,7 +679,6 @@ def train_lbf_deep_srq_experiment(
             "final": str(run_dir / "shared_deepsrq_final.pt"),
         },
         "include_replay_buffer": bool(include_replay_buffer),
-        "rng_state": _rng_state_payload(),
         "agent_labels": [
             f"Agent {agent_id + 1} (DeepSRQ)" for agent_id in range(num_agents)
         ],
@@ -583,6 +696,7 @@ def train_lbf_deep_srq_experiment(
         print_stats_payload(stats, f"LBF DeepSRQ - {solver_name}")
     print("\nReward Summary")
     print_summary_table(summarize_rewards(stats))
+    _print_lbf_evaluation_metrics(stats)
     return stats
 
 
