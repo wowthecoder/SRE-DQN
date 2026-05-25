@@ -5,6 +5,7 @@ from .base import (
 )
 from .factory import make_sre_solver
 from .lemkelcp import LemkeLcpBimatrixSreSolver, ProcessPoolLemkeLcpBimatrixSreSolver
+from .logit_qre_homotopy import LogitQreHomotopySreSolver
 from .n_player.path_mcp_nplayer import (
     PathMcpNPlayerSreSolver,
     ProcessPoolPathMcpNPlayerSreSolver,
@@ -43,6 +44,7 @@ __all__ = [
     "NfgTransformerSreSolver",
     "SrAdidasSreSolver",
     "SredGradientSreSolver",
+    "LogitQreHomotopySreSolver",
     "LemkeLcpBimatrixSreSolver",
     "ProcessPoolLemkeLcpBimatrixSreSolver",
     "make_sre_solver",

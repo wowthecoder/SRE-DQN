@@ -19,6 +19,7 @@ BASIC_LBF_CONFIG = {
     "min_food_level": 1,
     "max_food_level": 3,
     "normalize_reward": True,
+    "empty_load_penalty": 0.0,
 }
 
 

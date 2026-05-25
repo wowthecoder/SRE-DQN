@@ -41,7 +41,7 @@ def test_path_wrapper_solves_1d_lcp(path_solver):
         data[0] = 1.0
         return 0
 
-    status = path_solver.solve(n, nnz, z, f, lb, ub, func_eval, jac_eval)
+    status = path_solver.solve_mcp(n, nnz, z, f, lb, ub, func_eval, jac_eval)
     assert status in (1, 2), f"Unexpected PATH status: {status}"
 
     w = np.array([z[0] - 1.0], dtype=np.float64)
@@ -82,7 +82,7 @@ def test_path_wrapper_solves_2d_spd_lcp(path_solver):
                 idx += 1
         return 0
 
-    status = path_solver.solve(n, nnz, z, f, lb, ub, func_eval, jac_eval)
+    status = path_solver.solve_mcp(n, nnz, z, f, lb, ub, func_eval, jac_eval)
     assert status in (1, 2), f"Unexpected PATH status: {status}"
 
     expected = np.array([1.0 / 3.0, 1.0 / 3.0], dtype=np.float64)

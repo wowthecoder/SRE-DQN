@@ -184,6 +184,61 @@ def test_sred_gradient_batch_and_torch_batch_match():
             np.testing.assert_allclose(lhs, rhs, atol=1e-8)
 
 
+def test_sred_gradient_torch_batch_uses_vectorized_path(monkeypatch):
+    q_batch = np.stack([_rps_q_tensor(), _rps_q_tensor() + 0.25], axis=0)
+    solver = make_sre_solver(
+        "sred_gd_sre",
+        max_iters=1,
+        eval_every=1,
+        random_seed=8,
+        device="cpu",
+    )
+
+    def fail_solve_batch(*args, **kwargs):
+        raise AssertionError("solve_batch_torch should not delegate to solve_batch")
+
+    monkeypatch.setattr(solver, "solve_batch", fail_solve_batch)
+    try:
+        results = solver.solve_batch_torch(
+            torch.as_tensor(q_batch, dtype=torch.float32),
+            epsilon=torch.zeros(2),
+            num_repeats=0,
+            include_pure_starts=False,
+            round_digits=None,
+        )
+    finally:
+        solver.close()
+
+    assert len(results) == 2
+    assert all(result.metadata["batched_torch"] for result in results)
+    for result in results:
+        for policy in result.policies:
+            assert np.isclose(policy.sum(), 1.0)
+            assert np.all(policy >= 0.0)
+
+
+def test_sred_gradient_optimizes_inside_no_grad_context():
+    q_tensor = np.random.default_rng(9).normal(size=(2, 2, 2)).astype(np.float32)
+    solver = make_sre_solver(
+        "sred_gd_sre", max_iters=1, eval_every=1, random_seed=9, device="cpu"
+    )
+    try:
+        with torch.no_grad():
+            result = solver.solve(
+                q_tensor,
+                epsilon=0.1,
+                num_repeats=0,
+                include_pure_starts=False,
+                round_digits=None,
+            )
+    finally:
+        solver.close()
+
+    assert result.metadata["iterations"] == 1
+    assert len(result.policies) == 2
+    assert all(np.isclose(policy.sum(), 1.0) for policy in result.policies)
+
+
 def test_deep_srq_accepts_sred_gradient_solver_for_three_agents():
     from dueling_double_dqn_sre import (
         DuelingDoubleDqnSreAgent,

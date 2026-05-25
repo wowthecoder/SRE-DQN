@@ -198,7 +198,6 @@ def test_nfg_transformer_solver_factory_with_tiny_checkpoint(tmp_path):
         "nfg_transformer_sre",
         checkpoint_path=checkpoint,
         device="cpu",
-        fallback_enabled=False,
     )
     try:
         q = np.zeros((2, 2, 2, 3), dtype=np.float32)
@@ -206,10 +205,88 @@ def test_nfg_transformer_solver_factory_with_tiny_checkpoint(tmp_path):
     finally:
         solver.close()
 
+    assert solver.fallback_enabled is False
     assert result.metadata["solver"] == "nfg_transformer_sre"
     assert result.metadata["used_fallback"] is False
     assert len(result.policies) == 3
     assert all(np.allclose(policy.sum(), 1.0) for policy in result.policies)
+
+
+def test_nfg_transformer_solver_ignores_requested_path_fallback(tmp_path):
+    class RaisingFallback:
+        def __init__(self):
+            self.solve_calls = 0
+
+        def solve(self, *args, **kwargs):
+            del args, kwargs
+            self.solve_calls += 1
+            raise AssertionError("NfgTransformer should not call PATH fallback")
+
+        def close(self):
+            pass
+
+    model = _tiny_model(num_players=3, num_actions=2)
+    checkpoint = tmp_path / "nfg_sre.pt"
+    torch.save(
+        {
+            "config": model.config.to_dict(),
+            "model_state_dict": model.state_dict(),
+        },
+        checkpoint,
+    )
+    fallback = RaisingFallback()
+    solver = make_sre_solver(
+        "nfg_transformer_sre",
+        checkpoint_path=checkpoint,
+        device="cpu",
+        fallback_enabled=True,
+        fallback_solver=fallback,
+    )
+    try:
+        q = np.random.default_rng(0).normal(size=(2, 2, 2, 3)).astype(np.float32)
+        result = solver.solve(q, epsilon=1.0, exploitability_tol=0.0)
+        usage = solver.get_usage_summary()
+    finally:
+        solver.close()
+
+    assert solver.requested_fallback_enabled is True
+    assert solver.fallback_enabled is False
+    assert fallback.solve_calls == 0
+    assert result.metadata["used_fallback"] is False
+    assert result.metadata["path_fallback_disabled"] is True
+    assert usage["fallback_count"] == 0
+    assert usage["requested_fallback_enabled"] is True
+
+
+def test_nfg_transformer_solver_can_skip_gap_diagnostics(tmp_path):
+    model = _tiny_model(num_players=3, num_actions=2)
+    checkpoint = tmp_path / "nfg_sre.pt"
+    torch.save(
+        {
+            "config": model.config.to_dict(),
+            "model_state_dict": model.state_dict(),
+        },
+        checkpoint,
+    )
+    solver = make_sre_solver(
+        "nfg_transformer_sre",
+        checkpoint_path=checkpoint,
+        device="cpu",
+        compute_exploitability_diagnostics=False,
+    )
+    try:
+        q = np.random.default_rng(1).normal(size=(2, 2, 2, 3)).astype(np.float32)
+        result = solver.solve(q, epsilon=0.5, exploitability_tol=0.0)
+        usage = solver.get_usage_summary()
+    finally:
+        solver.close()
+
+    assert result.success is True
+    assert result.metadata["diagnostics_skipped"] is True
+    assert result.metadata["neural_robust_exploitability"] is None
+    assert result.metadata["used_fallback"] is False
+    assert usage["compute_exploitability_diagnostics"] is False
+    assert usage["neural_robust_exploitability"]["count"] == 0
 
 
 def test_nfg_transformer_solver_torch_batch_matches_numpy_path(tmp_path):

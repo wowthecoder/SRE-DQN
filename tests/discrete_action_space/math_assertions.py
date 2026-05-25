@@ -1,6 +1,6 @@
 import numpy as np
 
-from path_solver import solve_strategically_robust_bimatrix_game_path
+from path_solver import solve_strategically_robust_bimatrix_game_path_lcp
 
 
 def assert_simplex(p, atol=1e-8):
@@ -58,7 +58,7 @@ def run_nash_solver(path_solver, U1, U2, num_repeats=12, seed=0, round_digits=No
     state = np.random.get_state()
     np.random.seed(seed)
     try:
-        solutions, _, _ = solve_strategically_robust_bimatrix_game_path(
+        solutions, _, _ = solve_strategically_robust_bimatrix_game_path_lcp(
             U1=np.asarray(U1, dtype=np.float64),
             U2=np.asarray(U2, dtype=np.float64),
             epsilon_values=[0.0, 0.0],

@@ -2,6 +2,7 @@ import ast
 import json
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 
@@ -107,12 +108,143 @@ def test_deepsrq_full_resume_checkpoint_contains_replay(tmp_path):
     agent.close()
 
 
+def test_deepsrq_policy_adapter_batches_action_selection():
+    from lbf_grid.robust_notebook_utils import DeepSrqPolicyAdapter
+
+    class FakeAgent:
+        def __init__(self):
+            self.seen_states = None
+            self.closed = False
+
+        def act_joint_batch(self, states):
+            self.seen_states = list(states)
+            return [[idx, idx + 1] for idx, _ in enumerate(states)]
+
+        def close(self):
+            self.closed = True
+
+    agent = FakeAgent()
+    adapter = DeepSrqPolicyAdapter(agent)
+    contexts = [
+        {"state": [1.0, 0.0]},
+        {"state": [0.0, 1.0]},
+        {"state": [1.0, 1.0]},
+    ]
+
+    actions = adapter.act_all_batch(contexts)
+
+    assert actions == [[0, 1], [1, 2], [2, 3]]
+    assert agent.seen_states == [[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]
+    adapter.close()
+    assert agent.closed is True
+
+
+def test_vectorized_lbf_deepsrq_trainer_smoke(tmp_path, monkeypatch):
+    torch = pytest.importorskip("torch")
+    from lbf_grid import deep_srq_lbf
+
+    class FakeActionSpace:
+        n = 2
+
+        def sample(self):
+            return 0
+
+    class FakeEnv:
+        possible_agents = ["agent_0", "agent_1"]
+
+        def __init__(self):
+            self.agents = list(self.possible_agents)
+            self.step_count = 0
+
+        def reset(self, seed=None):
+            del seed
+            self.agents = list(self.possible_agents)
+            self.step_count = 0
+            return {
+                "agent_0": np.array([0.0, 0.0], dtype=np.float32),
+                "agent_1": np.array([1.0, 1.0], dtype=np.float32),
+            }, {}
+
+        def action_space(self, agent):
+            del agent
+            return FakeActionSpace()
+
+        def step(self, action_dict):
+            del action_dict
+            self.step_count += 1
+            self.agents = []
+            obs = {
+                "agent_0": np.array([float(self.step_count), 0.0], dtype=np.float32),
+                "agent_1": np.array([1.0, float(self.step_count)], dtype=np.float32),
+            }
+            rewards = {"agent_0": 1.0, "agent_1": 2.0}
+            terms = {"agent_0": True, "agent_1": True}
+            truncs = {"agent_0": False, "agent_1": False}
+            return obs, rewards, terms, truncs, {}
+
+        def close(self):
+            pass
+
+    class FakeDirectPolicySolver:
+        name = "nfg_transformer_sre"
+        bypass_deep_srq_policy_cache = True
+
+        def solve_policy_batch_torch(self, q_tensors, epsilon):
+            del epsilon
+            batch_size = int(q_tensors.shape[0])
+            return [
+                torch.tensor([[1.0, 0.0]], dtype=torch.float32).expand(batch_size, -1),
+                torch.tensor([[0.0, 1.0]], dtype=torch.float32).expand(batch_size, -1),
+            ]
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(deep_srq_lbf, "make_pz_env", lambda **kwargs: FakeEnv())
+    monkeypatch.setattr(
+        deep_srq_lbf,
+        "_make_solver",
+        lambda solver_name, hp, seed: FakeDirectPolicySolver(),
+    )
+
+    stats = deep_srq_lbf.train_lbf_deep_srq_vectorized_experiment(
+        n_episodes=2,
+        num_envs=2,
+        solver_name="nfg_transformer_sre",
+        epsilon_robust_initial=0.1,
+        epsilon_schedule="constant",
+        seed=123,
+        run_dir=tmp_path,
+        lbf_config_overrides={"max_episode_steps": 1},
+        hyperparameter_overrides={
+            "learning_starts": 99,
+            "batch_size": 2,
+            "action_epsilon_start": 0.0,
+            "action_epsilon_end": 0.0,
+        },
+        use_gpu=False,
+        write_plots=False,
+        include_replay_buffer=True,
+        eval_interval=None,
+        print_full_stats=False,
+    )
+
+    assert stats["training_mode"] == "vectorized"
+    assert stats["num_envs"] == 2
+    assert stats["completed_episodes"] == 2
+    assert stats["total_environment_steps"] == 2
+    assert stats["rewards"] == [[1.0, 1.0], [2.0, 2.0]]
+    assert (tmp_path / "shared_deepsrq_best.pt").exists()
+    assert (tmp_path / "shared_deepsrq_final.pt").exists()
+    assert (tmp_path / "training_stats.json").exists()
+
+
 def test_new_lbf_notebooks_have_parseable_code_cells():
     notebook_paths = [
         ROOT / "discrete_action_space/lbf_grid/deepsrq_nfgtransformer_training.ipynb",
         ROOT / "discrete_action_space/lbf_grid/deepsrq_nfgtransformer_evaluation.ipynb",
-        ROOT / "discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool_training.ipynb",
-        ROOT / "discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool_evaluation.ipynb",
+        ROOT / "discrete_action_space/lbf_grid/deepsrq_path_pool_training.ipynb",
+        ROOT / "discrete_action_space/lbf_grid/deepsrq_path_pool_evaluation.ipynb",
         ROOT / "discrete_action_space/lbf_grid/sr_adidas_training.ipynb",
         ROOT / "discrete_action_space/lbf_grid/sr_adidas_evaluation.ipynb",
     ]

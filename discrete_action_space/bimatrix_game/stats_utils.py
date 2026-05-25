@@ -138,15 +138,7 @@ def collect_timing_stats(
             "approx_hits": int(sum(summary.get("approx_hits", 0) or 0 for summary in cache_summaries)),
             "misses": int(sum(summary.get("misses", 0) or 0 for summary in cache_summaries)),
             "path_solves_avoided": int(sum(summary.get("path_solves_avoided", 0) or 0 for summary in cache_summaries)),
-            "warm_start_uses": int(sum(summary.get("warm_start_uses", 0) or 0 for summary in cache_summaries)),
-            "forced_refreshes": int(sum(summary.get("forced_refreshes", 0) or 0 for summary in cache_summaries)),
-            "stores": int(sum(summary.get("stores", 0) or 0 for summary in cache_summaries)),
             "evictions": int(sum(summary.get("evictions", 0) or 0 for summary in cache_summaries)),
-            "validation_count": int(sum(summary.get("validation_count", 0) or 0 for summary in cache_summaries)),
-            "target_equilibrium_refreshes": int(sum(summary.get("target_equilibrium_refreshes", 0) or 0 for summary in cache_summaries)),
-            "target_equilibrium_cache_only_steps": int(sum(summary.get("target_equilibrium_cache_only_steps", 0) or 0 for summary in cache_summaries)),
-            "target_equilibrium_cache_only_misses": int(sum(summary.get("target_equilibrium_cache_only_misses", 0) or 0 for summary in cache_summaries)),
-            "target_equilibrium_stale_policy_reuses": int(sum(summary.get("target_equilibrium_stale_policy_reuses", 0) or 0 for summary in cache_summaries)),
         }
         requests = timing["sre_policy_cache"]["requests"]
         avoided = timing["sre_policy_cache"]["path_solves_avoided"]

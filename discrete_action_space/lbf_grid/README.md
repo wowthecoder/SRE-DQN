@@ -382,60 +382,25 @@ timing
       requests
       exact_hits
       approx_hits
-      misses
-      hit_rate
-      path_solves_avoided
-      stores
-      evictions
-      warm_start_uses
-      forced_refreshes
-      validation_count
-      validation_mean_seconds
-      validation_mean_microseconds
-      lookup_time
-        count
-        mean_seconds
-        min_seconds
-        max_seconds
-        std_seconds
-        mean_microseconds
-        min_microseconds
-        max_microseconds
-        std_microseconds
-      uniform_fallbacks
-      solver_results
-      candidate_returned
-      candidate_return_rate
-      certified_candidates
-      approx_candidates
-      rejected_candidates
-      malformed_candidates
-      candidate_robust_exploitability
-        count
-        mean
-        std
-        min
-        max
-        p50
-        p90
-        p95
-      solver_starts_attempted
-        count
-        mean
-      solver_early_exits
-      cache_round_digits
-      state_round_digits
-      approx_exploitability_tol
-      solver_exploitability_tol
-      solver_approx_accept_tol
-      target_value_mode
-      target_equilibrium_update_steps
-      target_equilibrium_refreshes
-      target_equilibrium_cache_only_steps
-      target_equilibrium_cache_only_misses
-      target_equilibrium_stale_policy_reuses
-    update_time
-      count
+	      misses
+	      hit_rate
+	      path_solves_avoided
+	      evictions
+	      uniform_fallbacks
+	      candidate_returned
+	      solver_failure_warm_start_reuses
+	      cache_round_digits
+	      state_round_digits
+	      approx_exploitability_tol
+	      solver_exploitability_tol
+	      solver_approx_accept_tol
+	      candidate_selection
+	      exploitability_filter_enabled
+	      target_value_mode
+	      uniform_fallback_enabled
+	      target_equilibrium_update_steps
+	    update_time
+	      count
       mean_seconds
       min_seconds
       max_seconds
@@ -447,19 +412,11 @@ timing
   sre_policy_cache
     requests
     exact_hits
-    approx_hits
-    misses
-    path_solves_avoided
-    warm_start_uses
-    forced_refreshes
-    stores
-    evictions
-    validation_count
-    target_equilibrium_refreshes
-    target_equilibrium_cache_only_steps
-    target_equilibrium_cache_only_misses
-    target_equilibrium_stale_policy_reuses
-    hit_rate
+	    approx_hits
+	    misses
+	    path_solves_avoided
+	    evictions
+	    hit_rate
 
 solver_usage
   solve_time
@@ -520,11 +477,7 @@ The recorded training metrics are:
   `path_solve_time`, `sre_policy_cache`, and `update_time`.
 - Aggregated cache metrics: `timing.sre_policy_cache` stores `requests`,
   `exact_hits`, `approx_hits`, `misses`, `path_solves_avoided`,
-  `warm_start_uses`, `forced_refreshes`, `stores`, `evictions`,
-  `validation_count`, `target_equilibrium_refreshes`,
-  `target_equilibrium_cache_only_steps`,
-  `target_equilibrium_cache_only_misses`,
-  `target_equilibrium_stale_policy_reuses`, and `hit_rate`.
+  `evictions`, and `hit_rate`.
 - Solver metrics: `solver_usage.solve_time` records backend solve duration
   summaries. `nfg_transformer_usage` is populated with the same object for
   compatibility with neural-solver notebooks, even in the PATH pool run.

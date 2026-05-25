@@ -576,7 +576,7 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
             )
             return 0
 
-        status = self.path_solver.solve(n_vars, nnz, z, f, lb, ub, func_eval, jac_eval)
+        status = self.path_solver.solve_mcp(n_vars, nnz, z, f, lb, ub, func_eval, jac_eval)
         return status, z
 
     def solve(

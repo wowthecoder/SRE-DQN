@@ -1,4 +1,5 @@
 from .lemkelcp import LemkeLcpBimatrixSreSolver, ProcessPoolLemkeLcpBimatrixSreSolver
+from .logit_qre_homotopy import LogitQreHomotopySreSolver
 from .n_player.path_mcp_nplayer import (
     PathMcpNPlayerSreSolver,
     ProcessPoolPathMcpNPlayerSreSolver,
@@ -68,4 +69,9 @@ def make_sre_solver(
         if random_seed is not None and "random_seed" not in solver_kwargs:
             solver_kwargs["random_seed"] = random_seed
         return SredGradientSreSolver(**solver_kwargs)
+    if solver_name in {"logit_qre_sre", "qre_homotopy_sre", "logit_qre"}:
+        solver_kwargs = dict(kwargs)
+        if random_seed is not None and "random_seed" not in solver_kwargs:
+            solver_kwargs["random_seed"] = random_seed
+        return LogitQreHomotopySreSolver(**solver_kwargs)
     raise ValueError(f"Unknown SRE solver: {solver_name}")

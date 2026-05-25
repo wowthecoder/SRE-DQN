@@ -7,7 +7,6 @@ import numpy as np
 import torch
 
 from ..base import SreSolveResult, SreStageGameSolver, _empty_duration_summary
-from ..n_player.path_mcp_nplayer import PathMcpNPlayerSreSolver
 from ..nplayer_common import (
     _expected_nominal_values,
     _solution_dict_from_policies,
@@ -23,14 +22,14 @@ from .torch_utils import robust_exploitability_torch
 class NfgTransformerSreSolver(SreStageGameSolver):
     """Checkpoint-backed NfgTransformer approximate SRE solver.
 
-    The neural network proposes product mixed policies.  Each proposal is
-    checked with the repository's robust exploitability metric; if the gap is
-    too large, a PATH MCP fallback is called using the neural policy as a warm
-    start.
+    The neural network proposes product mixed policies.  Deep SRQ treats these
+    proposals as the solver output directly; robust exploitability is reported
+    for diagnostics, but PATH fallback is intentionally disabled.
     """
 
     name = "nfg_transformer_sre"
     bypass_deep_srq_policy_cache = True
+    trust_approximate_policies = True
 
     def __init__(
         self,
@@ -39,10 +38,11 @@ class NfgTransformerSreSolver(SreStageGameSolver):
         device=None,
         num_players=None,
         num_actions=None,
-        fallback_enabled=True,
+        fallback_enabled=False,
         fallback_solver=None,
         pathwrap_path=None,
         accept_exploitability_tol=None,
+        compute_exploitability_diagnostics=True,
     ):
         if torch is None:  # pragma: no cover - torch is a hard dependency here.
             raise ImportError("NfgTransformerSreSolver requires torch.")
@@ -51,8 +51,12 @@ class NfgTransformerSreSolver(SreStageGameSolver):
             device or ("cuda" if torch.cuda.is_available() else "cpu")
         )
         self.checkpoint_path = None if checkpoint_path is None else Path(checkpoint_path)
-        self.fallback_enabled = bool(fallback_enabled)
+        self.requested_fallback_enabled = bool(fallback_enabled)
+        self.fallback_enabled = False
         self.accept_exploitability_tol = accept_exploitability_tol
+        self.compute_exploitability_diagnostics = bool(
+            compute_exploitability_diagnostics
+        )
         self._fallback_solver = fallback_solver
         self._pathwrap_path = pathwrap_path
         self.solve_time_count = 0
@@ -66,6 +70,7 @@ class NfgTransformerSreSolver(SreStageGameSolver):
         self.neural_gap_sumsq = 0.0
         self.neural_gap_min = None
         self.neural_gap_max = None
+        self.neural_gap_count = 0
 
         if self.checkpoint_path is None:
             config = NfgTransformerConfig(
@@ -101,12 +106,7 @@ class NfgTransformerSreSolver(SreStageGameSolver):
         self.model.eval()
 
     def _fallback(self):
-        if self._fallback_solver is None:
-            kwargs = {}
-            if self._pathwrap_path is not None:
-                kwargs["pathwrap_path"] = self._pathwrap_path
-            self._fallback_solver = PathMcpNPlayerSreSolver(**kwargs)
-        return self._fallback_solver
+        raise RuntimeError("PATH fallback is disabled for NfgTransformerSreSolver.")
 
     def _record_solve_time(self, duration, count=1):
         count = max(1, int(count))
@@ -119,10 +119,44 @@ class NfgTransformerSreSolver(SreStageGameSolver):
 
     def _record_neural_gap(self, gap):
         gap = float(gap)
+        self.neural_gap_count += 1
         self.neural_gap_sum += gap
         self.neural_gap_sumsq += gap * gap
         self.neural_gap_min = gap if self.neural_gap_min is None else min(self.neural_gap_min, gap)
         self.neural_gap_max = gap if self.neural_gap_max is None else max(self.neural_gap_max, gap)
+
+    @staticmethod
+    def _trusted_result_from_policies(
+        q_tensor,
+        policies,
+        epsilon,
+        round_digits,
+        start,
+        *,
+        metadata,
+        message="",
+    ):
+        result_metadata = {
+            "solver": NfgTransformerSreSolver.name,
+            "algorithm_family": "nfg_transformer_approx_sre",
+            "epsilon": float(epsilon),
+            "num_agents": int(q_tensor.shape[-1]),
+            "action_sizes": [int(size) for size in q_tensor.shape[:-1]],
+            "wall_seconds": float(time.perf_counter() - start),
+            "diagnostics_skipped": True,
+        }
+        result_metadata.update(metadata)
+        return SreSolveResult(
+            policies=policies,
+            solutions=[
+                _solution_dict_from_policies(policies, round_digits=round_digits)
+            ],
+            utilities_sr=[],
+            utilities_nominal=[],
+            success=True,
+            message=message,
+            metadata=result_metadata,
+        )
 
     @staticmethod
     def _normalize_policies(policies, q_tensor):
@@ -197,6 +231,36 @@ class NfgTransformerSreSolver(SreStageGameSolver):
         q_batch = q_batch.to(device=self.device, dtype=torch.float32)
         epsilon_batch = epsilon_batch.to(device=self.device, dtype=torch.float32)
         return self.model(q_batch, epsilon_batch)
+
+    @torch.no_grad()
+    def solve_policy_batch_torch(self, q_tensors, epsilon):
+        """Return neural policy tensors without Python result wrapping.
+
+        This is the fast Deep SRQ path: it keeps the equilibrium inference in
+        torch and leaves diagnostics/result formatting to explicit solver calls.
+        """
+        if isinstance(q_tensors, torch.Tensor):
+            q_batch = q_tensors.detach().to(device=self.device, dtype=torch.float32)
+        else:
+            q_batch = torch.stack(
+                [
+                    torch.as_tensor(q_tensor, dtype=torch.float32, device=self.device)
+                    for q_tensor in q_tensors
+                ],
+                dim=0,
+            )
+        if q_batch.ndim < 4:
+            raise ValueError(
+                "Expected q_tensors with shape [B, A1, ..., AN, N], "
+                f"got {tuple(q_batch.shape)}."
+            )
+        batch_size = int(q_batch.shape[0])
+        epsilon_batch = torch.as_tensor(
+            self._epsilon_batch(epsilon, batch_size),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        return self._predict_batch_torch(q_batch, epsilon_batch)
 
     @staticmethod
     def _policies_torch_to_numpy_batch(policies_by_player):
@@ -281,84 +345,89 @@ class NfgTransformerSreSolver(SreStageGameSolver):
             epsilons, dtype=torch.float32, device=self.device
         )
         neural_policies_torch = self._predict_batch_torch(q_batch, epsilon_batch)
-        neural_gaps_torch, player_gaps_torch, robust_values_torch = (
-            robust_exploitability_torch(q_batch, neural_policies_torch, epsilon_batch)
-        )
         neural_policies_batch = self._policies_torch_to_numpy_batch(
             neural_policies_torch
         )
-        neural_gaps = neural_gaps_torch.detach().cpu().numpy()
-        player_gaps_batch = player_gaps_torch.detach().cpu().numpy()
-        robust_values_batch = [
-            values.detach().cpu().numpy() for values in robust_values_torch
-        ]
+        if self.compute_exploitability_diagnostics:
+            neural_gaps_torch, player_gaps_torch, robust_values_torch = (
+                robust_exploitability_torch(
+                    q_batch, neural_policies_torch, epsilon_batch
+                )
+            )
+            neural_gaps = neural_gaps_torch.detach().cpu().numpy()
+            player_gaps_batch = player_gaps_torch.detach().cpu().numpy()
+            robust_values_batch = [
+                values.detach().cpu().numpy() for values in robust_values_torch
+            ]
+        else:
+            neural_gaps = None
+            player_gaps_batch = None
+            robust_values_batch = None
 
         results = []
         for batch_id, (q_tensor, epsilon_value, neural_policies, warm_policies) in enumerate(
             zip(q_tensors, epsilons, neural_policies_batch, initial_policies_batch)
         ):
             neural_policies = self._normalize_policies(neural_policies, q_tensor)
-            neural_gap = float(neural_gaps[batch_id])
-            self._record_neural_gap(neural_gap)
-            if neural_gap <= accept_tol or not self.fallback_enabled:
-                self.neural_accept_count += 1
+            self.neural_accept_count += 1
+            if not self.compute_exploitability_diagnostics:
                 results.append(
-                    self._result_from_policies(
+                    self._trusted_result_from_policies(
                         q_tensor,
                         neural_policies,
                         epsilon_value,
                         round_digits,
                         start,
-                        success_tol=accept_tol,
                         metadata={
                             "used_fallback": False,
-                            "neural_robust_exploitability": float(neural_gap),
+                            "path_fallback_disabled": True,
+                            "requested_fallback_enabled": bool(
+                                self.requested_fallback_enabled
+                            ),
+                            "trusted_neural_policy": True,
+                            "neural_robust_exploitability": None,
                             "checkpoint_path": (
-                                None if self.checkpoint_path is None else str(self.checkpoint_path)
+                                None
+                                if self.checkpoint_path is None
+                                else str(self.checkpoint_path)
                             ),
                         },
-                        robust_gap=neural_gap,
-                        player_gaps=player_gaps_batch[batch_id],
-                        robust_values=[
-                            values[batch_id] for values in robust_values_batch
-                        ],
                     )
                 )
                 continue
 
-            initial = neural_policies
-            if warm_policies is not None:
-                warm_gap, _, _ = robust_exploitability(
-                    q_tensor, warm_policies, epsilon_value
+            neural_gap = float(neural_gaps[batch_id])
+            self._record_neural_gap(neural_gap)
+            results.append(
+                self._result_from_policies(
+                    q_tensor,
+                    neural_policies,
+                    epsilon_value,
+                    round_digits,
+                    start,
+                    success_tol=accept_tol,
+                    metadata={
+                        "used_fallback": False,
+                        "path_fallback_disabled": True,
+                        "requested_fallback_enabled": bool(
+                            self.requested_fallback_enabled
+                        ),
+                        "trusted_neural_policy": True,
+                        "neural_policy_exceeded_accept_tol": bool(
+                            neural_gap > accept_tol
+                        ),
+                        "neural_robust_exploitability": float(neural_gap),
+                        "checkpoint_path": (
+                            None if self.checkpoint_path is None else str(self.checkpoint_path)
+                        ),
+                    },
+                    robust_gap=neural_gap,
+                    player_gaps=player_gaps_batch[batch_id],
+                    robust_values=[
+                        values[batch_id] for values in robust_values_batch
+                    ],
                 )
-                if warm_gap < neural_gap:
-                    initial = warm_policies
-            self.fallback_count += 1
-            fallback_result = self._fallback().solve(
-                q_tensor,
-                epsilon_value,
-                num_repeats=num_repeats,
-                round_digits=round_digits,
-                include_pure_starts=include_pure_starts,
-                initial_policies=initial,
-                exploitability_tol=exploitability_tol,
             )
-            fallback_result.metadata = dict(fallback_result.metadata)
-            fallback_result.metadata.update(
-                {
-                    "solver": self.name,
-                    "algorithm_family": "nfg_transformer_with_path_fallback",
-                    "fallback_solver": fallback_result.metadata.get(
-                        "solver", type(self._fallback()).__name__
-                    ),
-                    "used_fallback": True,
-                    "neural_robust_exploitability": float(neural_gap),
-                    "checkpoint_path": (
-                        None if self.checkpoint_path is None else str(self.checkpoint_path)
-                    ),
-                }
-            )
-            results.append(fallback_result)
 
         return results
 
@@ -489,7 +558,8 @@ class NfgTransformerSreSolver(SreStageGameSolver):
         neural = int(self.neural_accept_count)
         fallback = int(self.fallback_count)
         total = neural + fallback
-        if total == 0:
+        gap_count = int(getattr(self, "neural_gap_count", total))
+        if gap_count == 0:
             gap_summary = {
                 "count": 0,
                 "mean": None,
@@ -498,10 +568,10 @@ class NfgTransformerSreSolver(SreStageGameSolver):
                 "max": None,
             }
         else:
-            mean = self.neural_gap_sum / total
-            variance = max(self.neural_gap_sumsq / total - mean * mean, 0.0)
+            mean = self.neural_gap_sum / gap_count
+            variance = max(self.neural_gap_sumsq / gap_count - mean * mean, 0.0)
             gap_summary = {
-                "count": int(total),
+                "count": int(gap_count),
                 "mean": float(mean),
                 "std": float(np.sqrt(variance)),
                 "min": float(self.neural_gap_min),
@@ -511,11 +581,17 @@ class NfgTransformerSreSolver(SreStageGameSolver):
             "solver": self.name,
             "checkpoint_path": None if self.checkpoint_path is None else str(self.checkpoint_path),
             "fallback_enabled": bool(self.fallback_enabled),
+            "requested_fallback_enabled": bool(
+                getattr(self, "requested_fallback_enabled", self.fallback_enabled)
+            ),
             "neural_accept_count": neural,
             "fallback_count": fallback,
             "total_decisions": int(total),
             "neural_accept_rate": None if total == 0 else float(neural / total),
             "fallback_rate": None if total == 0 else float(fallback / total),
+            "compute_exploitability_diagnostics": bool(
+                getattr(self, "compute_exploitability_diagnostics", True)
+            ),
             "neural_robust_exploitability": gap_summary,
         }
 

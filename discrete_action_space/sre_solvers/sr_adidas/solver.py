@@ -8,8 +8,16 @@ import numpy as np
 
 try:
     import torch
+    from ..nfg_transformer.torch_utils import (
+        robust_action_values_torch,
+        robust_exploitability_torch,
+        robust_policy_values_torch,
+    )
 except ImportError:  # pragma: no cover - torch-native handoff is optional
     torch = None
+    robust_action_values_torch = None
+    robust_exploitability_torch = None
+    robust_policy_values_torch = None
 
 from ..base import SreSolveResult, SreStageGameSolver, _empty_duration_summary
 from ..nplayer_common import (
@@ -63,7 +71,6 @@ class SrAdidasSreSolver(SreStageGameSolver):
         random_seed=None,
         device=None,
     ):
-        del device
         self.max_iters = max(1, int(max_iters))
         self.lr = float(np.clip(lr, 1e-6, 1.0))
         self.tau_init = float(tau_init)
@@ -71,6 +78,7 @@ class SrAdidasSreSolver(SreStageGameSolver):
         self.tau_decay = float(tau_decay)
         self.tau_threshold = float(tau_threshold)
         self.pure_start_logit = float(pure_start_logit)
+        self.device = None if device is None or torch is None else torch.device(device)
         self.rng = np.random.default_rng(random_seed)
 
         self.solve_time_sum = 0.0
@@ -367,6 +375,423 @@ class SrAdidasSreSolver(SreStageGameSolver):
             )
         return [float(value) for value in eps]
 
+    def _epsilon_tensor_batch(self, epsilon, batch_size, *, dtype, device):
+        if torch is None:  # pragma: no cover - guarded by solve_batch_torch.
+            raise ImportError("SrAdidasSreSolver.solve_batch_torch requires torch.")
+        if isinstance(epsilon, torch.Tensor):
+            eps = epsilon.detach().to(device=device, dtype=dtype).reshape(-1)
+        elif np.isscalar(epsilon):
+            eps = torch.full((batch_size,), float(epsilon), dtype=dtype, device=device)
+        else:
+            eps = torch.as_tensor(
+                np.asarray(epsilon, dtype=np.float32).reshape(-1),
+                dtype=dtype,
+                device=device,
+            )
+        if eps.numel() == 1:
+            return eps.expand(batch_size)
+        if eps.numel() != batch_size:
+            raise ValueError(
+                f"Expected epsilon scalar or {batch_size} values, got {eps.numel()}."
+            )
+        return eps
+
+    @staticmethod
+    def _uniform_policy_tensor(action_size, batch_size, dtype, device):
+        return torch.full(
+            (batch_size, int(action_size)),
+            1.0 / int(action_size),
+            dtype=dtype,
+            device=device,
+        )
+
+    @staticmethod
+    def _batched_policies_to_logits(policies):
+        return [torch.log(policy.clamp(1e-12, 1.0)) for policy in policies]
+
+    @staticmethod
+    def _batched_policies_from_logits(logits):
+        return [torch.softmax(logit, dim=-1) for logit in logits]
+
+    @staticmethod
+    def _nominal_values_torch(q_batch, policies):
+        joint = policies[0]
+        for policy in policies[1:]:
+            joint = joint.unsqueeze(-1) * policy.reshape(
+                policy.shape[0], *([1] * (joint.ndim - 1)), policy.shape[-1]
+            )
+            joint = joint.reshape(policy.shape[0], -1)
+        q_flat = q_batch.reshape(q_batch.shape[0], -1, q_batch.shape[-1])
+        return torch.sum(joint.unsqueeze(-1) * q_flat, dim=1)
+
+    def _batched_start_specs(
+        self,
+        action_sizes,
+        *,
+        batch_size,
+        num_repeats,
+        include_pure_starts,
+        initial_policies_batch,
+        dtype,
+        device,
+    ):
+        max_starts = max(1, int(num_repeats))
+        uniform = [
+            self._uniform_policy_tensor(size, batch_size, dtype, device)
+            for size in action_sizes
+        ]
+        starts = []
+
+        warm_active = torch.zeros(batch_size, dtype=torch.bool, device=device)
+        if initial_policies_batch is not None:
+            warm = [policy.clone() for policy in uniform]
+            for batch_id, policies in enumerate(initial_policies_batch):
+                normalized = self._normalize_policies(policies, action_sizes)
+                if normalized is None:
+                    continue
+                warm_active[batch_id] = True
+                for player_id, policy in enumerate(normalized):
+                    warm[player_id][batch_id] = torch.as_tensor(
+                        policy, dtype=dtype, device=device
+                    )
+            if bool(warm_active.any().detach().cpu()):
+                starts.append(("warm_start", warm, warm_active))
+
+        uniform_active = torch.ones(batch_size, dtype=torch.bool, device=device)
+        if len(starts) >= max_starts:
+            uniform_active = ~warm_active
+        if bool(uniform_active.any().detach().cpu()):
+            starts.append(
+                ("uniform", [policy.clone() for policy in uniform], uniform_active)
+            )
+
+        if include_pure_starts:
+            for profile in itertools.product(*[range(int(size)) for size in action_sizes]):
+                if len(starts) >= max_starts:
+                    break
+                policies = []
+                for size, action_id in zip(action_sizes, profile):
+                    policy = torch.as_tensor(
+                        self._pure_start_policy(size, action_id),
+                        dtype=dtype,
+                        device=device,
+                    )
+                    policies.append(policy.unsqueeze(0).expand(batch_size, -1))
+                starts.append(
+                    (
+                        "pure_logit",
+                        policies,
+                        torch.ones(batch_size, dtype=torch.bool, device=device),
+                    )
+                )
+
+        while len(starts) < max_starts:
+            policies = [
+                torch.as_tensor(
+                    self.rng.dirichlet(
+                        np.ones(int(size), dtype=np.float64), size=batch_size
+                    ),
+                    dtype=dtype,
+                    device=device,
+                )
+                for size in action_sizes
+            ]
+            starts.append(
+                (
+                    "random",
+                    policies,
+                    torch.ones(batch_size, dtype=torch.bool, device=device),
+                )
+            )
+        return starts
+
+    def _adi_and_gaps_batch_torch(self, q_batch, policies, epsilon_batch, tau):
+        current_values = torch.stack(
+            robust_policy_values_torch(q_batch, policies, epsilon_batch), dim=-1
+        )
+        action_values_by_player = robust_action_values_torch(
+            q_batch, policies, epsilon_batch
+        )
+        deviations = [
+            torch.softmax(action_values / tau.unsqueeze(-1).clamp_min(1e-12), dim=-1)
+            for action_values in action_values_by_player
+        ]
+
+        adi = torch.zeros(q_batch.shape[0], dtype=q_batch.dtype, device=q_batch.device)
+        player_gaps = []
+        for player_id, action_values in enumerate(action_values_by_player):
+            deviated = [policy for policy in policies]
+            deviated[player_id] = deviations[player_id]
+            deviation_value = robust_policy_values_torch(
+                q_batch, deviated, epsilon_batch
+            )[player_id]
+            adi = adi + (deviation_value - current_values[:, player_id]).clamp_min(0.0)
+            player_gaps.append(
+                (action_values.max(dim=-1).values - current_values[:, player_id]).clamp_min(
+                    0.0
+                )
+            )
+        player_gaps = torch.stack(player_gaps, dim=-1)
+        gap = player_gaps.max(dim=-1).values
+        return adi, gap, player_gaps, current_values, deviations
+
+    def _evaluate_policies_batch_torch(self, q_batch, policies, epsilon_batch):
+        gap, player_gaps, _ = robust_exploitability_torch(
+            q_batch, policies, epsilon_batch
+        )
+        robust_values = torch.stack(
+            robust_policy_values_torch(q_batch, policies, epsilon_batch), dim=-1
+        )
+        nominal_values = self._nominal_values_torch(q_batch, policies)
+        return gap, player_gaps, robust_values, nominal_values
+
+    def _solve_batch_torch_vectorized(
+        self,
+        q_tensors,
+        epsilon,
+        *,
+        num_repeats,
+        round_digits,
+        include_pure_starts,
+        initial_policies_batch,
+        exploitability_tol,
+        early_exit,
+        start,
+    ):
+        if torch is None or robust_policy_values_torch is None:
+            raise ImportError("SrAdidasSreSolver.solve_batch_torch requires torch.")
+        if not isinstance(q_tensors, torch.Tensor):
+            q_tensors = torch.as_tensor(q_tensors, dtype=torch.float32)
+        q_batch = q_tensors.detach()
+        device = self.device or q_batch.device
+        q_batch = q_batch.to(device=device, dtype=torch.float32)
+        if q_batch.ndim < 4:
+            raise ValueError(
+                "Expected q_tensors with shape [B, A1, ..., AN, N], "
+                f"got {tuple(q_batch.shape)}."
+            )
+        batch_size = int(q_batch.shape[0])
+        if batch_size == 0:
+            return []
+        num_agents = int(q_batch.shape[-1])
+        if q_batch.ndim != num_agents + 2:
+            raise ValueError(
+                "Expected q_tensors with shape [B, A1, ..., AN, N], "
+                f"got {tuple(q_batch.shape)}."
+            )
+        action_sizes = tuple(int(size) for size in q_batch.shape[1:-1])
+        epsilon_batch = self._epsilon_tensor_batch(
+            epsilon, batch_size, dtype=q_batch.dtype, device=q_batch.device
+        )
+        if initial_policies_batch is None:
+            initial_policies_batch = [None] * batch_size
+        if len(initial_policies_batch) != batch_size:
+            raise ValueError("initial_policies_batch must match q_tensors length.")
+
+        starts = self._batched_start_specs(
+            action_sizes,
+            batch_size=batch_size,
+            num_repeats=num_repeats,
+            include_pure_starts=include_pure_starts,
+            initial_policies_batch=initial_policies_batch,
+            dtype=q_batch.dtype,
+            device=q_batch.device,
+        )
+
+        with torch.no_grad():
+            best_gap = torch.full(
+                (batch_size,), float("inf"), dtype=q_batch.dtype, device=q_batch.device
+            )
+            best_adi = torch.full_like(best_gap, float("inf"))
+            best_tau = torch.full_like(best_gap, max(self.tau_min, self.tau_init))
+            best_player_gaps = torch.zeros(
+                batch_size, num_agents, dtype=q_batch.dtype, device=q_batch.device
+            )
+            best_robust_values = torch.zeros_like(best_player_gaps)
+            best_nominal_values = torch.zeros_like(best_player_gaps)
+            best_policies = [
+                torch.zeros(batch_size, size, dtype=q_batch.dtype, device=q_batch.device)
+                for size in action_sizes
+            ]
+            solved = torch.zeros(batch_size, dtype=torch.bool, device=q_batch.device)
+        best_start_types = ["uniform"] * batch_size
+        best_iterations = [0] * batch_size
+        tol = float(exploitability_tol)
+
+        def update_best(
+            *,
+            policies,
+            adi,
+            gap,
+            player_gaps,
+            robust_values,
+            nominal_values,
+            tau,
+            active,
+            iteration,
+            start_type,
+        ):
+            nonlocal best_gap, best_adi, best_tau, best_player_gaps, best_robust_values
+            nonlocal best_nominal_values, best_policies, solved
+            better = active & (
+                (gap < best_gap) | ((gap <= best_gap) & (adi < best_adi))
+            )
+            if bool(better.any().detach().cpu()):
+                best_gap = torch.where(better, gap, best_gap)
+                best_adi = torch.where(better, adi, best_adi)
+                best_tau = torch.where(better, tau, best_tau)
+                best_player_gaps = torch.where(
+                    better.unsqueeze(-1), player_gaps, best_player_gaps
+                )
+                best_robust_values = torch.where(
+                    better.unsqueeze(-1), robust_values, best_robust_values
+                )
+                best_nominal_values = torch.where(
+                    better.unsqueeze(-1), nominal_values, best_nominal_values
+                )
+                for player_id, policy in enumerate(policies):
+                    best_policies[player_id] = torch.where(
+                        better.unsqueeze(-1), policy, best_policies[player_id]
+                    )
+                for batch_id in torch.nonzero(better, as_tuple=False).flatten().tolist():
+                    best_start_types[int(batch_id)] = str(start_type)
+                    best_iterations[int(batch_id)] = int(iteration)
+            if early_exit:
+                solved = solved | (active & (gap <= tol))
+
+        with torch.no_grad():
+            for start_type, start_policies, start_active in starts:
+                active = start_active & (
+                    ~solved if early_exit else torch.ones_like(start_active)
+                )
+                if not bool(active.any().detach().cpu()):
+                    continue
+
+                policies = [policy.clone() for policy in start_policies]
+                tau = torch.full(
+                    (batch_size,),
+                    max(self.tau_min, self.tau_init),
+                    dtype=q_batch.dtype,
+                    device=q_batch.device,
+                )
+                gap, player_gaps, robust_values, nominal_values = (
+                    self._evaluate_policies_batch_torch(q_batch, policies, epsilon_batch)
+                )
+                adi, _, _, _, _ = self._adi_and_gaps_batch_torch(
+                    q_batch, policies, epsilon_batch, tau
+                )
+                update_best(
+                    policies=policies,
+                    adi=adi,
+                    gap=gap,
+                    player_gaps=player_gaps,
+                    robust_values=robust_values,
+                    nominal_values=nominal_values,
+                    tau=tau,
+                    active=active,
+                    iteration=0,
+                    start_type=start_type,
+                )
+                if early_exit:
+                    active = start_active & ~solved
+                    if not bool(active.any().detach().cpu()):
+                        continue
+
+                logits = self._batched_policies_to_logits(policies)
+                for iteration in range(1, self.max_iters + 1):
+                    policies = self._batched_policies_from_logits(logits)
+                    adi, gap, player_gaps, robust_values, deviations = (
+                        self._adi_and_gaps_batch_torch(
+                            q_batch, policies, epsilon_batch, tau
+                        )
+                    )
+                    nominal_values = self._nominal_values_torch(q_batch, policies)
+                    update_best(
+                        policies=policies,
+                        adi=adi,
+                        gap=gap,
+                        player_gaps=player_gaps,
+                        robust_values=robust_values,
+                        nominal_values=nominal_values,
+                        tau=tau,
+                        active=active,
+                        iteration=iteration,
+                        start_type=start_type,
+                    )
+                    if early_exit:
+                        active = start_active & ~solved
+                        if not bool(active.any().detach().cpu()):
+                            break
+
+                    decay_mask = (adi <= self.tau_threshold) & (tau > self.tau_min)
+                    tau = torch.where(
+                        decay_mask,
+                        (tau * self.tau_decay).clamp_min(self.tau_min),
+                        tau,
+                    )
+                    new_policies = []
+                    for policy, deviation in zip(policies, deviations):
+                        mixed = (1.0 - self.lr) * policy + self.lr * deviation
+                        mixed = mixed.clamp_min(1e-12)
+                        mixed = mixed / mixed.sum(dim=-1, keepdim=True).clamp_min(1e-12)
+                        new_policies.append(mixed)
+                    logits = self._batched_policies_to_logits(new_policies)
+
+                if early_exit and bool(solved.all().detach().cpu()):
+                    break
+
+        q_batch_np = q_batch.detach().cpu().numpy().astype(np.float64, copy=False)
+        policies_np = [
+            policy.detach().cpu().numpy().astype(np.float64, copy=False)
+            for policy in best_policies
+        ]
+        gaps_np = best_gap.detach().cpu().numpy()
+        adi_np = best_adi.detach().cpu().numpy()
+        tau_np = best_tau.detach().cpu().numpy()
+        player_gaps_np = best_player_gaps.detach().cpu().numpy()
+        robust_values_np = best_robust_values.detach().cpu().numpy()
+        nominal_values_np = best_nominal_values.detach().cpu().numpy()
+
+        results = []
+        for batch_id in range(batch_size):
+            candidate = _Candidate(
+                policies=[
+                    policies_np[player_id][batch_id].copy()
+                    for player_id in range(len(action_sizes))
+                ],
+                gap=float(gaps_np[batch_id]),
+                player_gaps=[
+                    float(value) for value in player_gaps_np[batch_id].tolist()
+                ],
+                robust_values=[
+                    float(value) for value in robust_values_np[batch_id].tolist()
+                ],
+                nominal_values=[
+                    float(value) for value in nominal_values_np[batch_id].tolist()
+                ],
+                adi=float(adi_np[batch_id]),
+                iterations=int(best_iterations[batch_id]),
+                tau=float(tau_np[batch_id]),
+                start_type=str(best_start_types[batch_id]),
+                converged=bool(float(gaps_np[batch_id]) <= tol),
+            )
+            result = self._result_from_candidate(
+                candidate,
+                q_batch_np[batch_id],
+                float(epsilon_batch[batch_id].detach().cpu()),
+                round_digits,
+                start,
+                num_repeats=num_repeats,
+                include_pure_starts=include_pure_starts,
+                exploitability_tol=tol,
+                early_exit=early_exit,
+                num_starts_attempted=len(starts),
+            )
+            result.metadata["batched_torch"] = True
+            result.metadata["torch_device"] = str(q_batch.device)
+            results.append(result)
+        return results
+
     def solve(
         self,
         q_tensor,
@@ -478,9 +903,8 @@ class SrAdidasSreSolver(SreStageGameSolver):
         exploitability_tol=1e-4,
         early_exit=True,
     ):
-        if torch is not None and isinstance(q_tensors, torch.Tensor):
-            q_tensors = q_tensors.detach().cpu().numpy()
-        return self.solve_batch(
+        start = time.perf_counter()
+        results = self._solve_batch_torch_vectorized(
             q_tensors,
             epsilon,
             num_repeats=num_repeats,
@@ -489,19 +913,27 @@ class SrAdidasSreSolver(SreStageGameSolver):
             initial_policies_batch=initial_policies_batch,
             exploitability_tol=exploitability_tol,
             early_exit=early_exit,
+            start=start,
         )
+        self._record_solve_time(time.perf_counter() - start, count=len(results))
+        return results
 
     def _record_solve_time(self, elapsed, *, count=1):
         elapsed = float(elapsed)
         count = max(1, int(count))
+        per_solve = elapsed / count
         self.solve_time_sum += elapsed
-        self.solve_time_sumsq += elapsed * elapsed
+        self.solve_time_sumsq += count * per_solve * per_solve
         self.solve_time_count += count
         self.solve_time_min = (
-            elapsed if self.solve_time_min is None else min(self.solve_time_min, elapsed)
+            per_solve
+            if self.solve_time_min is None
+            else min(self.solve_time_min, per_solve)
         )
         self.solve_time_max = (
-            elapsed if self.solve_time_max is None else max(self.solve_time_max, elapsed)
+            per_solve
+            if self.solve_time_max is None
+            else max(self.solve_time_max, per_solve)
         )
 
     def get_solve_time_summary(self):

@@ -799,6 +799,14 @@ def train_pommerman_deep_srq(
     sred_gradient_clip_norm=10.0,
     sred_eval_every=10,
     sred_device=None,
+    logit_qre_precision_max=100.0,
+    logit_qre_precision_growth=1.5,
+    logit_qre_max_homotopy_steps=64,
+    logit_qre_corrector_max_iters=100,
+    logit_qre_qre_tol=1e-6,
+    logit_qre_damping=0.5,
+    logit_qre_min_prob=1e-12,
+    logit_qre_device=None,
     batch_size=32,
     include_replay_buffer=True,
     verbose=True,
@@ -837,6 +845,20 @@ def train_pommerman_deep_srq(
             gradient_clip_norm=sred_gradient_clip_norm,
             eval_every=sred_eval_every,
             device=sred_device,
+        )
+        solver_record_name = solver_name
+    elif solver_name in {"logit_qre_sre", "qre_homotopy_sre", "logit_qre"}:
+        solver = make_sre_solver(
+            solver_name,
+            random_seed=seed,
+            precision_max=logit_qre_precision_max,
+            precision_growth=logit_qre_precision_growth,
+            max_homotopy_steps=logit_qre_max_homotopy_steps,
+            corrector_max_iters=logit_qre_corrector_max_iters,
+            qre_tol=logit_qre_qre_tol,
+            damping=logit_qre_damping,
+            min_prob=logit_qre_min_prob,
+            device=logit_qre_device,
         )
         solver_record_name = solver_name
     elif nfg_checkpoint_path:

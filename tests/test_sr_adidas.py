@@ -132,6 +132,37 @@ def test_sr_adidas_batch_and_torch_batch_match():
         )
 
 
+def test_sr_adidas_torch_batch_uses_vectorized_path(monkeypatch):
+    torch = pytest.importorskip("torch")
+    from sre_solvers import make_sre_solver
+
+    q = np.stack([_rps_q_tensor(), _rps_q_tensor() + 0.25], axis=0)
+    solver = make_sre_solver(
+        "sr_adidas_sre",
+        max_iters=2,
+        tau_init=1.0,
+        tau_min=1e-3,
+        random_seed=12,
+        device="cpu",
+    )
+
+    def fail_solve_batch(*args, **kwargs):
+        raise AssertionError("solve_batch_torch should not delegate to solve_batch")
+
+    monkeypatch.setattr(solver, "solve_batch", fail_solve_batch)
+    results = solver.solve_batch_torch(
+        torch.as_tensor(q, dtype=torch.float32),
+        epsilon=torch.zeros(2),
+        num_repeats=1,
+        include_pure_starts=False,
+        round_digits=None,
+    )
+
+    assert len(results) == 2
+    assert all(result.metadata["batched_torch"] for result in results)
+    assert all(result.metadata["torch_device"] == "cpu" for result in results)
+
+
 def test_warm_start_does_not_increase_iterations():
     from sre_solvers import make_sre_solver
 

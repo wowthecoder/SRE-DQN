@@ -8,8 +8,10 @@ from pettingzoo import ParallelEnv
 
 try:
     from .instrumented_env import InstrumentedForagingEnv
+    from .state_action_encoding import canonical_lbf_state, lbf_action_masks
 except ImportError:  # Script/notebook import from the lbf_grid directory
     from instrumented_env import InstrumentedForagingEnv
+    from state_action_encoding import canonical_lbf_state, lbf_action_masks
 
 
 def _as_level_list(name: str, values: Sequence[int], expected_len: int) -> list[int]:
@@ -108,6 +110,21 @@ class LBFParallelEnv(ParallelEnv):
 
     def action_space(self, agent):
         return self._act_space
+
+    def global_state(self, agent_order: Optional[Sequence[str]] = None):
+        if agent_order is None:
+            agent_order = self.possible_agents
+        return canonical_lbf_state(self, agent_order)
+
+    def action_masks(self, agent_order: Optional[Sequence[str]] = None):
+        if agent_order is None:
+            agent_order = self.possible_agents
+        return lbf_action_masks(self, agent_order)
+
+    def global_state_and_action_masks(self, agent_order: Optional[Sequence[str]] = None):
+        if agent_order is None:
+            agent_order = self.possible_agents
+        return self.global_state(agent_order), self.action_masks(agent_order)
 
     def reset(self, seed=None, options=None):
         obs_list, info = self._inner.reset(seed=seed, options=options)

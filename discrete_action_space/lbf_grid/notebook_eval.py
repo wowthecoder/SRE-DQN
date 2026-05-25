@@ -27,6 +27,34 @@ def central_state(obs_dict, agent_order):
     ).astype(np.float32, copy=False)
 
 
+def global_state(env, obs_dict, agent_order):
+    if hasattr(env, "global_state"):
+        return env.global_state(agent_order)
+    inner = getattr(env, "_inner", env)
+    if getattr(inner, "field", None) is not None and getattr(inner, "players", None) is not None:
+        try:
+            from .state_action_encoding import canonical_lbf_state
+        except ImportError:
+            from state_action_encoding import canonical_lbf_state
+
+        return canonical_lbf_state(env, agent_order)
+    return central_state(obs_dict, agent_order)
+
+
+def action_masks(env, agent_order):
+    if hasattr(env, "action_masks"):
+        return env.action_masks(agent_order)
+    inner = getattr(env, "_inner", env)
+    if getattr(inner, "field", None) is not None and getattr(inner, "players", None) is not None:
+        try:
+            from .state_action_encoding import lbf_action_masks
+        except ImportError:
+            from state_action_encoding import lbf_action_masks
+
+        return lbf_action_masks(env, agent_order)
+    return None
+
+
 def _unwrap_lbf_env(env):
     current = env
     seen = set()
@@ -203,13 +231,14 @@ def sample_lbf_rollout(
             frames.append(np.asarray(frame))
 
         while env.agents and (max_steps is None or steps < int(max_steps)):
-            state = central_state(obs_dict, agent_order)
+            state = global_state(env, obs_dict, agent_order)
             action_list = policy_fn(
                 state=state,
                 obs_dict=obs_dict,
                 agent_order=agent_order,
                 env=env,
                 step=steps,
+                action_masks=action_masks(env, agent_order),
             )
             action_list = [int(action) for action in action_list]
             action_dict = {
@@ -352,7 +381,7 @@ def sample_lbf_rollouts_vectorized(
                 ):
                     finished_indices.append(slot_index)
                     continue
-                state = central_state(slot["obs_dict"], slot["agent_order"])
+                state = global_state(env, slot["obs_dict"], slot["agent_order"])
                 contexts.append(
                     {
                         "state": state,
@@ -361,6 +390,7 @@ def sample_lbf_rollouts_vectorized(
                         "env": env,
                         "step": slot["steps"],
                         "episode_idx": slot["episode_idx"],
+                        "action_masks": action_masks(env, slot["agent_order"]),
                     }
                 )
                 context_slots.append(slot_index)

@@ -43,8 +43,12 @@ try:
     from .deep_srq_lbf import (
         BASE_SEED,
         DEEP_SRQ_LBF_HYPERPARAMS,
+        NFG_TRANSFORMER_SOLVER_NAMES,
         _central_state,
+        _action_masks,
+        _global_state,
         train_lbf_deep_srq_experiment,
+        train_lbf_deep_srq_vectorized_experiment,
     )
     from .epymarl_lbf_env import EPYMARL_LBF_SCENARIOS
     from .instrumented_env import aggregate_lbf_episode_metrics, extract_lbf_metrics
@@ -59,8 +63,12 @@ except ImportError:  # Script/notebook import from the lbf_grid directory
     from deep_srq_lbf import (  # type: ignore
         BASE_SEED,
         DEEP_SRQ_LBF_HYPERPARAMS,
+        NFG_TRANSFORMER_SOLVER_NAMES,
         _central_state,
+        _action_masks,
+        _global_state,
         train_lbf_deep_srq_experiment,
+        train_lbf_deep_srq_vectorized_experiment,
     )
     from epymarl_lbf_env import EPYMARL_LBF_SCENARIOS  # type: ignore
     from instrumented_env import aggregate_lbf_episode_metrics, extract_lbf_metrics  # type: ignore
@@ -86,8 +94,10 @@ DEFAULT_NFG_TRANSFORMER_CHECKPOINT = (
 )
 DEEPSRQ_NFGTRANSFORMER_FAMILY = "deepsrq_nfgtransformer"
 DEEPSRQ_PATH_MCP_NPLAYER_POOL_FAMILY = "deepsrq_path_mcp_nplayer_pool"
+DEEPSRQ_SRED_GRADIENT_FAMILY = "deepsrq_sred_gradient"
 PATH_C_POOL_SOLVER = "path_c_pool"
 PATH_MCP_NPLAYER_POOL_SOLVER = "path_mcp_nplayer_pool"
+SRED_GRADIENT_SOLVER = "sred_gd_sre"
 DEFAULT_PATH_MCP_NPLAYER_POOL_WORKERS = 8
 
 
@@ -202,6 +212,36 @@ def deepsrq_path_mcp_pool_evaluation_dir(
     )
 
 
+def deepsrq_sred_gradient_training_dir(
+    scenario_key: str,
+    epsilon: float,
+    *,
+    repo_root=None,
+) -> Path:
+    return robust_artifact_dir(
+        DEEPSRQ_SRED_GRADIENT_FAMILY,
+        "training",
+        scenario_key,
+        epsilon,
+        repo_root=repo_root,
+    )
+
+
+def deepsrq_sred_gradient_evaluation_dir(
+    scenario_key: str,
+    epsilon: float,
+    *,
+    repo_root=None,
+) -> Path:
+    return robust_artifact_dir(
+        DEEPSRQ_SRED_GRADIENT_FAMILY,
+        "evaluation",
+        scenario_key,
+        epsilon,
+        repo_root=repo_root,
+    )
+
+
 def sr_adidas_training_dir(scenario_key: str, epsilon: float, *, repo_root=None) -> Path:
     return robust_artifact_dir("sr_adidas", "training", scenario_key, epsilon, repo_root=repo_root)
 
@@ -229,7 +269,7 @@ def probe_lbf(config: dict, *, seed: int = BASE_SEED) -> tuple[int, int, int, li
     try:
         obs_dict, _ = env.reset(seed=seed)
         agent_order = list(env.possible_agents)
-        obs_dim = int(_central_state(obs_dict, agent_order).shape[0])
+        obs_dim = int(_global_state(env, obs_dict, agent_order).shape[0])
         num_agents = len(agent_order)
         num_actions = int(env.action_space(agent_order[0]).n)
         return obs_dim, num_agents, num_actions, agent_order
@@ -391,10 +431,13 @@ def train_deepsrq_nfgtransformer_for_epsilon(
     scenarios: tuple[LbfNotebookScenario, ...] | None = None,
     nfg_checkpoint_path: str | Path = DEFAULT_NFG_TRANSFORMER_CHECKPOINT,
     nfg_accept_gap: float = 0.1,
+    nfg_fallback_enabled: bool = False,
     base_seed: int = BASE_SEED,
     use_gpu: bool = True,
     eval_interval: int | None = 100,
     eval_episodes: int = 5,
+    num_envs: int = 1,
+    eval_num_envs: int | None = None,
     hyperparameter_overrides: dict | None = None,
     repo_root: str | Path | None = None,
 ) -> dict[str, dict]:
@@ -410,11 +453,25 @@ def train_deepsrq_nfgtransformer_for_epsilon(
             {
                 "nfg_checkpoint_path": str(checkpoint),
                 "nfg_accept_gap": nfg_accept_gap,
-                "nfg_fallback_enabled": True,
+                "nfg_fallback_enabled": False,
+                "sre_uniform_fallback_enabled": False,
             }
         )
         seed = int(base_seed + scenario_index)
-        stats = train_lbf_deep_srq_experiment(
+        trainer = (
+            train_lbf_deep_srq_vectorized_experiment
+            if int(num_envs) > 1
+            else train_lbf_deep_srq_experiment
+        )
+        trainer_kwargs = {}
+        if int(num_envs) > 1:
+            trainer_kwargs.update(
+                {
+                    "num_envs": int(num_envs),
+                    "eval_num_envs": int(eval_num_envs or num_envs),
+                }
+            )
+        stats = trainer(
             n_episodes=n_episodes,
             solver_name="nfg_transformer_sre",
             epsilon_robust_initial=float(epsilon),
@@ -431,6 +488,7 @@ def train_deepsrq_nfgtransformer_for_epsilon(
             print_full_stats=False,
             scenario_key=scenario.key,
             scenario_name=scenario.name,
+            **trainer_kwargs,
         )
         stats.update(
             {
@@ -440,6 +498,8 @@ def train_deepsrq_nfgtransformer_for_epsilon(
                 "gym_id": scenario.gym_id,
                 "time_limit": scenario.time_limit,
                 "epsilon_schedule": "constant",
+                "num_envs": int(num_envs),
+                "eval_num_envs": int(eval_num_envs or num_envs),
             }
         )
         stats["training_reward_plot_paths"] = write_training_reward_plots(stats, run_dir)
@@ -449,6 +509,8 @@ def train_deepsrq_nfgtransformer_for_epsilon(
         results[scenario.key] = stats
     manifest = {
         "algorithm": "deep_srq_nfgtransformer",
+        "num_envs": int(num_envs),
+        "eval_num_envs": int(eval_num_envs or num_envs),
         "epsilon": float(epsilon),
         "results": results,
     }
@@ -543,6 +605,102 @@ def train_deepsrq_path_mcp_pool_for_epsilon(
     return results
 
 
+def train_deepsrq_sred_gradient_for_epsilon(
+    epsilon: float,
+    *,
+    n_episodes: int,
+    scenarios: tuple[LbfNotebookScenario, ...] | None = None,
+    base_seed: int = BASE_SEED,
+    use_gpu: bool = True,
+    eval_interval: int | None = 100,
+    eval_episodes: int = 5,
+    num_envs: int = 1,
+    eval_num_envs: int | None = None,
+    hyperparameter_overrides: dict | None = None,
+    repo_root: str | Path | None = None,
+) -> dict[str, dict]:
+    scenarios = scenarios or robust_lbf_scenarios()
+    results = {}
+    for scenario_index, scenario in enumerate(scenarios):
+        run_dir = deepsrq_sred_gradient_training_dir(
+            scenario.key,
+            epsilon,
+            repo_root=repo_root,
+        )
+        hp = dict(hyperparameter_overrides or {})
+        seed = int(base_seed + scenario_index)
+        trainer = (
+            train_lbf_deep_srq_vectorized_experiment
+            if int(num_envs) > 1
+            else train_lbf_deep_srq_experiment
+        )
+        trainer_kwargs = {}
+        if int(num_envs) > 1:
+            trainer_kwargs.update(
+                {
+                    "num_envs": int(num_envs),
+                    "eval_num_envs": int(eval_num_envs or num_envs),
+                }
+            )
+        stats = trainer(
+            n_episodes=n_episodes,
+            solver_name=SRED_GRADIENT_SOLVER,
+            epsilon_robust_initial=float(epsilon),
+            epsilon_schedule="constant",
+            seed=seed,
+            run_dir=run_dir,
+            lbf_config_overrides=scenario.config,
+            hyperparameter_overrides=hp,
+            use_gpu=use_gpu,
+            write_plots=False,
+            include_replay_buffer=True,
+            eval_interval=eval_interval,
+            eval_episodes=eval_episodes,
+            print_full_stats=False,
+            scenario_key=scenario.key,
+            scenario_name=scenario.name,
+            **trainer_kwargs,
+        )
+        stats.update(
+            {
+                "algorithm": DEEPSRQ_SRED_GRADIENT_FAMILY,
+                "scenario_key": scenario.key,
+                "scenario_name": scenario.name,
+                "gym_id": scenario.gym_id,
+                "time_limit": scenario.time_limit,
+                "epsilon_schedule": "constant",
+                "solver_name": SRED_GRADIENT_SOLVER,
+                "num_envs": int(num_envs),
+                "eval_num_envs": int(eval_num_envs or num_envs),
+            }
+        )
+        stats["training_reward_plot_paths"] = write_training_reward_plots(stats, run_dir)
+        stats["summary_path"] = str(write_training_summary(stats, run_dir))
+        save_training_stats(run_dir / "training_stats.json", stats)
+        _print_live_training_status(
+            f"DeepSRQ SRED gradient {scenario.key} eps={epsilon_slug(epsilon)}",
+            n_episodes,
+            stats,
+        )
+        results[scenario.key] = stats
+    manifest = {
+        "algorithm": DEEPSRQ_SRED_GRADIENT_FAMILY,
+        "solver_name": SRED_GRADIENT_SOLVER,
+        "num_envs": int(num_envs),
+        "eval_num_envs": int(eval_num_envs or num_envs),
+        "epsilon": float(epsilon),
+        "results": results,
+    }
+    save_training_stats(
+        lbf_grid_dir(repo_root)
+        / DEEPSRQ_SRED_GRADIENT_FAMILY
+        / "training"
+        / f"manifest_eps_{epsilon_slug(epsilon)}.json",
+        manifest,
+    )
+    return results
+
+
 def _evaluate_sr_adidas_agent(agent, *, lbf_env_config, seed, n_episodes, max_steps=None):
     old_start = agent.action_eps_schedule.start
     old_end = agent.action_eps_schedule.end
@@ -612,12 +770,27 @@ def train_lbf_sr_adidas_experiment(
     use_gpu: bool = True,
     eval_interval: int | None = 100,
     eval_episodes: int = 5,
+    num_envs: int = 1,
+    eval_num_envs: int | None = None,
     hyperparameter_overrides: dict | None = None,
 ) -> dict:
     if torch is None:
         raise ImportError("SR-ADIDAS LBF training requires torch.")
     hp = dict(hyperparameter_overrides or {})
-    return train_lbf_deep_srq_experiment(
+    trainer = (
+        train_lbf_deep_srq_vectorized_experiment
+        if int(num_envs) > 1
+        else train_lbf_deep_srq_experiment
+    )
+    trainer_kwargs = {}
+    if int(num_envs) > 1:
+        trainer_kwargs.update(
+            {
+                "num_envs": int(num_envs),
+                "eval_num_envs": int(eval_num_envs or num_envs),
+            }
+        )
+    return trainer(
         n_episodes=n_episodes,
         solver_name="sr_adidas_sre",
         epsilon_robust_initial=float(epsilon),
@@ -634,6 +807,7 @@ def train_lbf_sr_adidas_experiment(
         print_full_stats=False,
         scenario_key=scenario.key,
         scenario_name=scenario.name,
+        **trainer_kwargs,
     )
     random.seed(seed)
     np.random.seed(seed)
@@ -830,6 +1004,8 @@ def train_sr_adidas_for_epsilon(
     use_gpu: bool = True,
     eval_interval: int | None = 100,
     eval_episodes: int = 5,
+    num_envs: int = 1,
+    eval_num_envs: int | None = None,
     hyperparameter_overrides: dict | None = None,
     repo_root: str | Path | None = None,
 ) -> dict[str, dict]:
@@ -846,12 +1022,33 @@ def train_sr_adidas_for_epsilon(
             use_gpu=use_gpu,
             eval_interval=eval_interval,
             eval_episodes=eval_episodes,
+            num_envs=num_envs,
+            eval_num_envs=eval_num_envs,
             hyperparameter_overrides=hyperparameter_overrides,
         )
+        stats.update(
+            {
+                "algorithm": "sr_adidas",
+                "solver_name": "sr_adidas_sre",
+                "scenario_key": scenario.key,
+                "scenario_name": scenario.name,
+                "gym_id": scenario.gym_id,
+                "time_limit": scenario.time_limit,
+                "epsilon_schedule": "constant",
+                "num_envs": int(num_envs),
+                "eval_num_envs": int(eval_num_envs or num_envs),
+            }
+        )
+        stats["training_reward_plot_paths"] = write_training_reward_plots(stats, run_dir)
+        stats["summary_path"] = str(write_training_summary(stats, run_dir))
+        save_training_stats(run_dir / "training_stats.json", stats)
         _print_live_training_status(f"SR-ADIDAS {scenario.key} eps={epsilon_slug(epsilon)}", n_episodes, stats)
         results[scenario.key] = stats
     manifest = {
         "algorithm": "sr_adidas",
+        "solver_name": "sr_adidas_sre",
+        "num_envs": int(num_envs),
+        "eval_num_envs": int(eval_num_envs or num_envs),
         "epsilon": float(epsilon),
         "results": results,
     }
@@ -884,51 +1081,21 @@ class DeepSrqPolicyAdapter:
     def __init__(self, agent: DuelingDoubleDqnSreAgent):
         self.agent = agent
 
-    def act_all(self, *, state, **_kwargs):
-        return self.agent.act_joint(state)
+    def act_all(self, *, state, action_masks=None, **_kwargs):
+        return self.agent.act_joint(state, action_masks=action_masks)
 
     def act_all_batch(self, contexts):
-        states_arr = np.stack(
-            [self.agent._state_to_vector(context["state"]) for context in contexts],
-            axis=0,
-        )
-        batch_size = int(states_arr.shape[0])
-        explore_mask = (
-            np.random.rand(batch_size, self.agent.config.num_agents)
-            < self.agent.config.epsilon_explore
-        )
-        actions = np.empty(
-            (batch_size, self.agent.config.num_agents), dtype=np.int64
-        )
-        random_entries = np.argwhere(explore_mask)
-        for batch_idx, agent_id in random_entries:
-            actions[int(batch_idx), int(agent_id)] = np.random.choice(
-                self.agent.config.num_actions
+        states = [context["state"] for context in contexts]
+        action_masks_batch = [context.get("action_masks") for context in contexts]
+        try:
+            return self.agent.act_joint_batch(
+                states,
+                action_masks_batch=action_masks_batch,
             )
-
-        pending_indices = np.flatnonzero(~np.all(explore_mask, axis=1))
-        if pending_indices.size:
-            states_t = torch.as_tensor(
-                states_arr[pending_indices],
-                dtype=torch.float32,
-                device=self.agent.device,
-            )
-            with torch.no_grad():
-                q_tensors = self.agent.q_net(states_t).detach()
-            policies_batch = self.agent._solve_sre_batch(
-                q_tensors,
-                states=states_arr[pending_indices],
-            )
-            for local_idx, batch_idx in enumerate(pending_indices):
-                policies = policies_batch[local_idx]
-                for agent_id in range(self.agent.config.num_agents):
-                    if not explore_mask[batch_idx, agent_id]:
-                        policy = self.agent._normalize_policy(policies[agent_id])
-                        actions[batch_idx, agent_id] = np.random.choice(
-                            self.agent.config.num_actions,
-                            p=policy,
-                        )
-        return actions.astype(int).tolist()
+        except TypeError as exc:
+            if "action_masks_batch" not in str(exc):
+                raise
+            return self.agent.act_joint_batch(states)
 
     def close(self):
         self.agent.close()
@@ -1120,13 +1287,34 @@ def load_deepsrq_policy(
             tau_threshold=hp.get("sr_adidas_tau_threshold", 1e-4),
             device=hp.get("sr_adidas_device"),
         )
+    elif solver_name in {"sred_gradient_sre", "sred_gd_sre", "sred_gd"}:
+        solver = make_sre_solver(
+            solver_name,
+            random_seed=int(stats.get("seed", BASE_SEED)),
+            max_iters=hp.get("sred_max_iters", 250),
+            lr=hp.get("sred_lr", 0.05),
+            optimizer=hp.get("sred_optimizer", "adam"),
+            br_temperature=hp.get("sred_br_temperature", 0.05),
+            gap_temperature=hp.get("sred_gap_temperature", 0.01),
+            gradient_clip_norm=hp.get("sred_gradient_clip_norm", 10.0),
+            eval_every=hp.get("sred_eval_every", 10),
+            device=hp.get("sred_device"),
+        )
     else:
         solver = make_sre_solver(
             solver_name,
             random_seed=int(stats.get("seed", BASE_SEED)),
             checkpoint_path=hp.get("nfg_checkpoint_path"),
             device=hp.get("nfg_device"),
-            fallback_enabled=hp.get("nfg_fallback_enabled", True),
+            fallback_enabled=False
+            if solver_name in NFG_TRANSFORMER_SOLVER_NAMES
+            else hp.get(
+                "nfg_fallback_enabled",
+                DEEP_SRQ_LBF_HYPERPARAMS["nfg_fallback_enabled"],
+            ),
+            compute_exploitability_diagnostics=False
+            if solver_name in NFG_TRANSFORMER_SOLVER_NAMES
+            else hp.get("nfg_compute_exploitability_diagnostics", True),
             accept_exploitability_tol=hp.get("nfg_accept_gap"),
         )
     agent = DuelingDoubleDqnSreAgent(
@@ -1164,7 +1352,9 @@ def load_deepsrq_policy(
             sre_uniform_fallback_enabled=hp.get(
                 "sre_uniform_fallback_enabled",
                 DEEP_SRQ_LBF_HYPERPARAMS["sre_uniform_fallback_enabled"],
-            ),
+            )
+            if solver_name not in NFG_TRANSFORMER_SOLVER_NAMES
+            else False,
             sre_target_value_mode=hp.get("sre_target_value_mode", "robust"),
         )
     )
@@ -1259,6 +1449,26 @@ def load_deepsrq_path_mcp_pool_policy(
     agent.config.epsilon_explore = 0.0
     agent.config.epsilon_robust = float(epsilon)
     return DeepSrqPolicyAdapter(agent)
+
+
+def load_deepsrq_sred_gradient_policy(
+    scenario: LbfNotebookScenario,
+    epsilon: float,
+    *,
+    repo_root: str | Path | None = None,
+    use_gpu: bool = True,
+) -> DeepSrqPolicyAdapter:
+    return load_deepsrq_policy(
+        scenario,
+        epsilon,
+        repo_root=repo_root,
+        use_gpu=use_gpu,
+        run_dir_override=deepsrq_sred_gradient_training_dir(
+            scenario.key,
+            epsilon,
+            repo_root=repo_root,
+        ),
+    )
 
 
 def load_sr_adidas_policy(
@@ -1476,6 +1686,7 @@ def evaluate_deepsrq_suite_for_epsilon(
     n_episodes: int = DEFAULT_EVAL_EPISODES,
     repo_root: str | Path | None = None,
     use_gpu: bool = True,
+    num_envs: int = 1,
 ) -> dict[str, dict]:
     scenarios = scenarios or robust_lbf_scenarios()
     results = {}
@@ -1490,6 +1701,7 @@ def evaluate_deepsrq_suite_for_epsilon(
                     output_dir=base_dir / "self_play",
                     primary_label="deepsrq_nfgtransformer",
                     n_episodes=n_episodes,
+                    num_envs=num_envs,
                 )
             }
             for baseline in BASELINE_ALGORITHMS:
@@ -1505,6 +1717,7 @@ def evaluate_deepsrq_suite_for_epsilon(
                             primary_label="deepsrq_nfgtransformer",
                             opponent_label=baseline,
                             n_episodes=n_episodes,
+                            num_envs=num_envs,
                         )
                     finally:
                         opponent.close()
@@ -1528,6 +1741,7 @@ def evaluate_deepsrq_suite_for_epsilon(
                         primary_label="deepsrq_nfgtransformer",
                         opponent_label="sr_adidas",
                         n_episodes=n_episodes,
+                        num_envs=num_envs,
                     )
                 finally:
                     opponent.close()
@@ -1544,7 +1758,12 @@ def evaluate_deepsrq_suite_for_epsilon(
             primary.close()
     save_training_stats(
         lbf_grid_dir(repo_root) / "deepsrq_nfgtransformer" / "evaluation" / f"manifest_eps_{epsilon_slug(epsilon)}.json",
-        {"algorithm": "deepsrq_nfgtransformer", "epsilon": float(epsilon), "results": results},
+        {
+            "algorithm": "deepsrq_nfgtransformer",
+            "num_envs": int(num_envs),
+            "epsilon": float(epsilon),
+            "results": results,
+        },
     )
     return results
 
@@ -1658,6 +1877,114 @@ def evaluate_deepsrq_path_mcp_pool_suite_for_epsilon(
     return results
 
 
+def evaluate_deepsrq_sred_gradient_suite_for_epsilon(
+    epsilon: float,
+    *,
+    scenarios: tuple[LbfNotebookScenario, ...] | None = None,
+    n_episodes: int = DEFAULT_EVAL_EPISODES,
+    repo_root: str | Path | None = None,
+    use_gpu: bool = True,
+    num_envs: int = 1,
+) -> dict[str, dict]:
+    scenarios = scenarios or robust_lbf_scenarios()
+    results = {}
+    primary_label = DEEPSRQ_SRED_GRADIENT_FAMILY
+    for scenario in scenarios:
+        base_dir = deepsrq_sred_gradient_evaluation_dir(
+            scenario.key,
+            epsilon,
+            repo_root=repo_root,
+        )
+        primary = load_deepsrq_sred_gradient_policy(
+            scenario,
+            epsilon,
+            repo_root=repo_root,
+            use_gpu=use_gpu,
+        )
+        try:
+            scenario_results = {
+                "self_play": evaluate_policy_matchup(
+                    scenario=scenario,
+                    primary_policy=primary,
+                    output_dir=base_dir / "self_play",
+                    primary_label=primary_label,
+                    n_episodes=n_episodes,
+                    num_envs=num_envs,
+                )
+            }
+            for baseline in BASELINE_ALGORITHMS:
+                out_dir = base_dir / f"vs_{baseline}"
+                try:
+                    opponent = load_baseline_policy(baseline, scenario, use_gpu=use_gpu)
+                    try:
+                        scenario_results[f"vs_{baseline}"] = evaluate_policy_matchup(
+                            scenario=scenario,
+                            primary_policy=primary,
+                            opponent_policy=opponent,
+                            output_dir=out_dir,
+                            primary_label=primary_label,
+                            opponent_label=baseline,
+                            n_episodes=n_episodes,
+                            num_envs=num_envs,
+                        )
+                    finally:
+                        opponent.close()
+                except Exception as exc:
+                    scenario_results[f"vs_{baseline}"] = _skip_record(
+                        out_dir,
+                        scenario=scenario,
+                        primary_label=primary_label,
+                        opponent_label=baseline,
+                        exc=exc,
+                    )
+            out_dir = base_dir / "vs_sr_adidas"
+            try:
+                opponent = load_sr_adidas_policy(
+                    scenario,
+                    epsilon,
+                    repo_root=repo_root,
+                    use_gpu=use_gpu,
+                )
+                try:
+                    scenario_results["vs_sr_adidas"] = evaluate_policy_matchup(
+                        scenario=scenario,
+                        primary_policy=primary,
+                        opponent_policy=opponent,
+                        output_dir=out_dir,
+                        primary_label=primary_label,
+                        opponent_label="sr_adidas",
+                        n_episodes=n_episodes,
+                        num_envs=num_envs,
+                    )
+                finally:
+                    opponent.close()
+            except Exception as exc:
+                scenario_results["vs_sr_adidas"] = _skip_record(
+                    out_dir,
+                    scenario=scenario,
+                    primary_label=primary_label,
+                    opponent_label="sr_adidas",
+                    exc=exc,
+                )
+            results[scenario.key] = scenario_results
+        finally:
+            primary.close()
+    save_training_stats(
+        lbf_grid_dir(repo_root)
+        / DEEPSRQ_SRED_GRADIENT_FAMILY
+        / "evaluation"
+        / f"manifest_eps_{epsilon_slug(epsilon)}.json",
+        {
+            "algorithm": DEEPSRQ_SRED_GRADIENT_FAMILY,
+            "solver_name": SRED_GRADIENT_SOLVER,
+            "num_envs": int(num_envs),
+            "epsilon": float(epsilon),
+            "results": results,
+        },
+    )
+    return results
+
+
 def evaluate_sr_adidas_suite_for_epsilon(
     epsilon: float,
     *,
@@ -1665,6 +1992,7 @@ def evaluate_sr_adidas_suite_for_epsilon(
     n_episodes: int = DEFAULT_EVAL_EPISODES,
     repo_root: str | Path | None = None,
     use_gpu: bool = True,
+    num_envs: int = 1,
 ) -> dict[str, dict]:
     scenarios = scenarios or robust_lbf_scenarios()
     results = {}
@@ -1679,6 +2007,7 @@ def evaluate_sr_adidas_suite_for_epsilon(
                     output_dir=base_dir / "self_play",
                     primary_label="sr_adidas",
                     n_episodes=n_episodes,
+                    num_envs=num_envs,
                 )
             }
             for baseline in BASELINE_ALGORITHMS:
@@ -1694,6 +2023,7 @@ def evaluate_sr_adidas_suite_for_epsilon(
                             primary_label="sr_adidas",
                             opponent_label=baseline,
                             n_episodes=n_episodes,
+                            num_envs=num_envs,
                         )
                     finally:
                         opponent.close()
@@ -1717,6 +2047,7 @@ def evaluate_sr_adidas_suite_for_epsilon(
                         primary_label="sr_adidas",
                         opponent_label="deepsrq_nfgtransformer",
                         n_episodes=n_episodes,
+                        num_envs=num_envs,
                     )
                 finally:
                     opponent.close()
@@ -1733,6 +2064,12 @@ def evaluate_sr_adidas_suite_for_epsilon(
             primary.close()
     save_training_stats(
         lbf_grid_dir(repo_root) / "sr_adidas" / "evaluation" / f"manifest_eps_{epsilon_slug(epsilon)}.json",
-        {"algorithm": "sr_adidas", "epsilon": float(epsilon), "results": results},
+        {
+            "algorithm": "sr_adidas",
+            "solver_name": "sr_adidas_sre",
+            "num_envs": int(num_envs),
+            "epsilon": float(epsilon),
+            "results": results,
+        },
     )
     return results

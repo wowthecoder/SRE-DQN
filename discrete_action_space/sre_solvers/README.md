@@ -38,6 +38,7 @@ An SRE policy profile is evaluated by robust exploitability: for each player, co
 | `path_mcp_nplayer_pool`, `path_nplayer_pool`, `path_mcp_pool` | `ProcessPoolPathMcpNPlayerSreSolver` | N-player | Parallel batch wrapper around `path_mcp_nplayer`. |
 | `sr_adidas_sre`, `sr_adidas` | `SrAdidasSreSolver` | N-player | Approximate full-tensor SR-ADIDAS homotopy solver for Deep SRQ inner loops. |
 | `sred_gradient_sre`, `sred_gd_sre`, `sred_gd` | `SredGradientSreSolver` | N-player | Direct smoothed SRE-distance gradient solver inspired by NashD. |
+| `logit_qre_sre`, `qre_homotopy_sre`, `logit_qre` | `LogitQreHomotopySreSolver` | N-player | Robust Logit-QRE continuation solver with exact SRE exploitability certification. |
 
 ## Bimatrix Solvers
 
@@ -150,6 +151,28 @@ Factory aliases:
 - `sred_gradient_sre`
 - `sred_gd_sre`
 - `sred_gd`
+
+### `LogitQreHomotopySreSolver`
+
+File: `logit_qre_homotopy/solver.py`
+
+This solver traces a robust Logit-QRE continuation path. At each precision value
+`beta`, it computes each player's exact TV-robust action values under the
+current policy profile, then applies the fixed-point update
+`p_i = softmax(beta * robust_action_values_i)`. The precision increases along a
+homotopy path, so the path starts near diffuse logit responses and moves toward
+an SRE-like best-response profile.
+
+Like the other approximate solvers, the Logit-QRE path is only the internal
+search method. Final candidate ranking and reporting use the exact helpers from
+`nplayer_common.py`: `robust_exploitability(..., value_mode="mixed_policy")` and
+`robust_policy_values(...)`.
+
+Factory aliases:
+
+- `logit_qre_sre`
+- `qre_homotopy_sre`
+- `logit_qre`
 
 ## Support Modules
 

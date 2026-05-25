@@ -36,7 +36,7 @@ SRE computation is the core of SRQ. The SRE of the bimatrix stage game is formul
 The Python layer (`path_solver.py`) connects to this compiled library via `ctypes`:
 
 1. `PathSolverWrapper` loads `pathwrap.so` with `ctypes.CDLL`, sets up function signatures for `path_create`, `path_solve`, and `path_destroy`, and manages the solver context lifetime.
-2. `solve_strategically_robust_bimatrix_game_path` constructs the LCP variables and their bounds, then defines Python callbacks (`func_eval`, `jac_eval`) for the residual function and its Jacobian — these are passed as C function pointers to the PATH solver.
+2. `solve_strategically_robust_bimatrix_game_path_lcp` constructs the LCP matrix, vector, bounds, and sparse column data, then passes them to the PATH solver.
 3. The LCP variables include the mixed strategies `p1`, `p2`, dual Lagrange multipliers `λ1`, `λ2`, transport coupling variables `η1`, `η2`, and auxiliary equality variables `ξ1`, `ξ2`, `κ1`, `κ2`.
 4. To find multiple equilibria (the LCP may have more than one solution), the solver is run from multiple starting points: all `|A|² = 16` pure-strategy profiles are tried first, then `num_repeats = 20` random restarts with `p1`, `p2` drawn uniformly and dual variables drawn uniformly from `[−50, 50]`. Duplicate solutions (rounded to 4 decimal places) are discarded.
 5. Among the solutions found, the one with highest expected joint reward is selected — matching Jack's MATLAB setup.
@@ -75,7 +75,7 @@ The output has shape `(batch, |A|, |A|, num_agents)` — a Q-value for every joi
 
 **SRE in the deep setting:**
 
-At each forward pass during action selection and at each training step, the Q-tensor produced by the network is treated exactly like the tabular Q-tensor in SRQ — it is passed to `solve_strategically_robust_bimatrix_game_path` (via the same `PathSolverWrapper` / PATH solver pipeline) to compute the SRE policy. This means the PATH solver is called once per environment step (for action selection) and once per sample in the training minibatch.
+At each forward pass during action selection and at each training step, the Q-tensor produced by the network is treated exactly like the tabular Q-tensor in SRQ — it is passed to `solve_strategically_robust_bimatrix_game_path_lcp` (via the same `PathSolverWrapper` / PATH solver pipeline) to compute the SRE policy. This means the PATH solver is called once per environment step (for action selection) and once per sample in the training minibatch.
 
 ---
 
@@ -145,3 +145,6 @@ The evaluation notebook is separate from training. It:
    - Rolling average over a 50-episode window (blue line)
    - Final-100-episode mean (red dashed line)
    - Saved to `eval_results_scenario{1,2,3}.png`
+
+## Notes
+The `full_pair_comparison_runs_old` stores the runs of the old Deep SRQ algorithm with robust exploitability gap filter and uniform fallback policy.

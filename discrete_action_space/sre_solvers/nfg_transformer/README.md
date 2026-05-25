@@ -94,7 +94,7 @@ stats = train_lbf_deep_srq_experiment(
     hyperparameter_overrides={
         "nfg_checkpoint_path": "discrete_action_space/sre_solvers/nfg_transformer/nfg_sre_checkpoints/nfg_sre_lbf3.pt",
         "nfg_accept_gap": 1e-3,
-        "nfg_fallback_enabled": True,
+        "nfg_fallback_enabled": False,
     },
 )
 ```
@@ -107,11 +107,12 @@ stats = train_lbf_deep_srq_experiment(
 - The model receives `epsilon` as an input, so one checkpoint can represent
   different robustness radii for the same payoff tensor.
 - The default notebook run is a smoke-quality run. If `mean_gap` is around
-  `1e-1`, then `accept_rate` at `1e-3` can be zero; use it as a warm start with
-  fallback, train longer, or raise `nfg_accept_gap` intentionally.
+  `1e-1`, then `accept_rate` at `1e-3` can be zero; enable fallback explicitly,
+  train longer, or raise `nfg_accept_gap` intentionally.
 - `--label-mode path` calls PATH MCP for labels and is intended for comparison
   or diagnostics, not default training.
-- If the neural policy has robust exploitability above `nfg_accept_gap`, the
-  integrated solver falls back to PATH MCP.
+- If `nfg_fallback_enabled=True`, neural policies above `nfg_accept_gap` fall
+  back to PATH MCP. By default the Deep SRQ integration uses the neural policy
+  directly.
 - Running without a checkpoint is allowed for smoke tests only; real experiments
   should use a trained checkpoint.
