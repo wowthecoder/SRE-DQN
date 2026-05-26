@@ -2,16 +2,11 @@ from __future__ import annotations
 
 import itertools
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
-
-try:
-    import torch
-    import torch.nn.functional as F
-except ImportError:  # pragma: no cover - torch is a project dependency.
-    torch = None
-    F = None
+import torch
+import torch.nn.functional as F
 
 from ..base import SreSolveResult, SreStageGameSolver, _empty_duration_summary
 from ..nplayer_common import (
@@ -41,6 +36,40 @@ class _Candidate:
     converged: bool
 
 
+@dataclass(frozen=True)
+class SredGradientSreSolverConfig:
+    max_iters: int = 250
+    lr: float = 0.05
+    optimizer: str = "adam"
+    br_temperature: float = 0.05
+    gap_temperature: float = 0.01
+    gradient_clip_norm: float | None = 10.0
+    eval_every: int = 10
+    random_seed: int | None = None
+    device: object = None
+    pure_start_logit: float = 20.0
+
+    def __post_init__(self):
+        object.__setattr__(self, "max_iters", max(0, int(self.max_iters)))
+        object.__setattr__(self, "lr", float(self.lr))
+        optimizer = str(self.optimizer).lower()
+        if optimizer not in {"adam", "sgd"}:
+            raise ValueError("optimizer must be 'adam' or 'sgd'.")
+        object.__setattr__(self, "optimizer", optimizer)
+        object.__setattr__(self, "br_temperature", float(max(self.br_temperature, 1e-8)))
+        object.__setattr__(self, "gap_temperature", float(max(self.gap_temperature, 1e-8)))
+        gradient_clip_norm = (
+            None if self.gradient_clip_norm is None else float(self.gradient_clip_norm)
+        )
+        object.__setattr__(self, "gradient_clip_norm", gradient_clip_norm)
+        object.__setattr__(self, "eval_every", max(1, int(self.eval_every)))
+        object.__setattr__(self, "pure_start_logit", float(self.pure_start_logit))
+        device = torch.device(
+            self.device or ("cuda" if torch.cuda.is_available() else "cpu")
+        )
+        object.__setattr__(self, "device", device)
+
+
 class SredGradientSreSolver(SreStageGameSolver):
     """Smoothed SRE-distance gradient solver for finite normal-form games.
 
@@ -53,39 +82,13 @@ class SredGradientSreSolver(SreStageGameSolver):
     name = "sred_gradient_sre"
     bypass_deep_srq_policy_cache = True
 
-    def __init__(
-        self,
-        *,
-        max_iters=250,
-        lr=0.05,
-        optimizer="adam",
-        br_temperature=0.05,
-        gap_temperature=0.01,
-        gradient_clip_norm=10.0,
-        eval_every=10,
-        random_seed=None,
-        device=None,
-        pure_start_logit=20.0,
-    ):
-        if torch is None:  # pragma: no cover - import guard.
-            raise ImportError("SredGradientSreSolver requires torch.")
-
-        self.max_iters = max(0, int(max_iters))
-        self.lr = float(lr)
-        self.optimizer = str(optimizer).lower()
-        if self.optimizer not in {"adam", "sgd"}:
-            raise ValueError("optimizer must be 'adam' or 'sgd'.")
-        self.br_temperature = float(max(br_temperature, 1e-8))
-        self.gap_temperature = float(max(gap_temperature, 1e-8))
-        self.gradient_clip_norm = (
-            None if gradient_clip_norm is None else float(gradient_clip_norm)
-        )
-        self.eval_every = max(1, int(eval_every))
-        self.pure_start_logit = float(pure_start_logit)
-        self.device = torch.device(
-            device or ("cuda" if torch.cuda.is_available() else "cpu")
-        )
-        self.rng = np.random.default_rng(random_seed)
+    def __init__(self, config: SredGradientSreSolverConfig | None = None, **overrides):
+        if config is None:
+            config = SredGradientSreSolverConfig(**overrides)
+        elif overrides:
+            config = replace(config, **overrides)
+        self.config = config
+        self.rng = np.random.default_rng(self.config.random_seed)
 
         self.solve_time_sum = 0.0
         self.solve_time_sumsq = 0.0
@@ -129,7 +132,7 @@ class SredGradientSreSolver(SreStageGameSolver):
 
     def _pure_start_policy(self, action_size, action_id):
         logits = np.zeros(int(action_size), dtype=np.float64)
-        logits[int(action_id)] = self.pure_start_logit
+        logits[int(action_id)] = self.config.pure_start_logit
         return self._softmax_np(logits)
 
     def _random_policies(self, action_sizes):
@@ -202,13 +205,13 @@ class SredGradientSreSolver(SreStageGameSolver):
         return torch.stack(distribution)
 
     def _smooth_min(self, values):
-        return -self.br_temperature * torch.logsumexp(
-            -values / self.br_temperature, dim=-1
+        return -self.config.br_temperature * torch.logsumexp(
+            -values / self.config.br_temperature, dim=-1
         )
 
     def _smooth_max(self, values):
-        return self.br_temperature * torch.logsumexp(
-            values / self.br_temperature, dim=-1
+        return self.config.br_temperature * torch.logsumexp(
+            values / self.config.br_temperature, dim=-1
         )
 
     def _smooth_tv_worst_case(self, nominal_distribution, values, epsilon):
@@ -257,8 +260,8 @@ class SredGradientSreSolver(SreStageGameSolver):
                 opponent_distribution, mixed_values, epsilon
             )
             gap = self._smooth_max(action_values) - current_value
-            loss = loss + self.gap_temperature * F.softplus(
-                gap / self.gap_temperature
+            loss = loss + self.config.gap_temperature * F.softplus(
+                gap / self.config.gap_temperature
             )
         return loss
 
@@ -309,15 +312,15 @@ class SredGradientSreSolver(SreStageGameSolver):
                 opponent_distribution, mixed_values, epsilon_batch
             )
             gap = self._smooth_max(action_values) - current_value
-            loss = loss + self.gap_temperature * F.softplus(
-                gap / self.gap_temperature
+            loss = loss + self.config.gap_temperature * F.softplus(
+                gap / self.config.gap_temperature
             )
         return loss
 
     def _make_optimizer(self, logits):
-        if self.optimizer == "sgd":
-            return torch.optim.SGD(logits, lr=self.lr)
-        return torch.optim.Adam(logits, lr=self.lr)
+        if self.config.optimizer == "sgd":
+            return torch.optim.SGD(logits, lr=self.config.lr)
+        return torch.optim.Adam(logits, lr=self.config.lr)
 
     def _policies_from_logits(self, logits):
         return [torch.softmax(logit, dim=-1) for logit in logits]
@@ -395,18 +398,18 @@ class SredGradientSreSolver(SreStageGameSolver):
 
     def _epsilon_tensor_batch(self, epsilon, batch_size):
         if isinstance(epsilon, torch.Tensor):
-            eps = epsilon.detach().to(device=self.device, dtype=torch.float32).reshape(
+            eps = epsilon.detach().to(device=self.config.device, dtype=torch.float32).reshape(
                 -1
             )
         elif np.isscalar(epsilon):
             eps = torch.full(
-                (batch_size,), float(epsilon), dtype=torch.float32, device=self.device
+                (batch_size,), float(epsilon), dtype=torch.float32, device=self.config.device
             )
         else:
             eps = torch.as_tensor(
                 np.asarray(epsilon, dtype=np.float32).reshape(-1),
                 dtype=torch.float32,
-                device=self.device,
+                device=self.config.device,
             )
         if eps.numel() == 1:
             return eps.expand(batch_size)
@@ -553,7 +556,7 @@ class SredGradientSreSolver(SreStageGameSolver):
             torch.tensor(
                 values,
                 dtype=torch.float32,
-                device=self.device,
+                device=self.config.device,
                 requires_grad=True,
             )
             for values in self._policies_to_logits(policies)
@@ -577,16 +580,16 @@ class SredGradientSreSolver(SreStageGameSolver):
             return best
 
         with torch.enable_grad():
-            for iteration in range(1, self.max_iters + 1):
+            for iteration in range(1, self.config.max_iters + 1):
                 optimizer.zero_grad(set_to_none=True)
                 torch_policies = self._policies_from_logits(logits)
                 loss = self._sred_loss(q_tensor_torch, torch_policies, epsilon)
                 loss.backward()
-                if self.gradient_clip_norm is not None and self.gradient_clip_norm > 0.0:
-                    torch.nn.utils.clip_grad_norm_(logits, self.gradient_clip_norm)
+                if self.config.gradient_clip_norm is not None and self.config.gradient_clip_norm > 0.0:
+                    torch.nn.utils.clip_grad_norm_(logits, self.config.gradient_clip_norm)
                 optimizer.step()
 
-                if iteration % self.eval_every != 0 and iteration != self.max_iters:
+                if iteration % self.config.eval_every != 0 and iteration != self.config.max_iters:
                     continue
                 candidate = self._evaluate_candidate(
                     q_tensor_np,
@@ -632,17 +635,17 @@ class SredGradientSreSolver(SreStageGameSolver):
             "joint_nominal_welfare": float(np.sum(candidate.nominal_values)),
             "loss": float(candidate.loss),
             "iterations": int(candidate.iterations),
-            "max_iters": int(self.max_iters),
-            "lr": float(self.lr),
-            "optimizer": self.optimizer,
-            "br_temperature": float(self.br_temperature),
-            "gap_temperature": float(self.gap_temperature),
+            "max_iters": int(self.config.max_iters),
+            "lr": float(self.config.lr),
+            "optimizer": self.config.optimizer,
+            "br_temperature": float(self.config.br_temperature),
+            "gap_temperature": float(self.config.gap_temperature),
             "gradient_clip_norm": (
                 None
-                if self.gradient_clip_norm is None
-                else float(self.gradient_clip_norm)
+                if self.config.gradient_clip_norm is None
+                else float(self.config.gradient_clip_norm)
             ),
-            "eval_every": int(self.eval_every),
+            "eval_every": int(self.config.eval_every),
             "num_repeats": int(num_repeats),
             "include_pure_starts": bool(include_pure_starts),
             "num_starts_attempted": int(num_starts_attempted),
@@ -667,7 +670,7 @@ class SredGradientSreSolver(SreStageGameSolver):
     def _epsilon_batch(epsilon, batch_size):
         if np.isscalar(epsilon):
             return [float(epsilon)] * batch_size
-        if torch is not None and isinstance(epsilon, torch.Tensor):
+        if isinstance(epsilon, torch.Tensor):
             eps = epsilon.detach().cpu().numpy().astype(np.float64, copy=False).reshape(-1)
         else:
             eps = np.asarray(epsilon, dtype=np.float64).reshape(-1)
@@ -694,7 +697,7 @@ class SredGradientSreSolver(SreStageGameSolver):
     ):
         q_tensor_np = validate_nplayer_q_tensor(q_tensor_np)
         q_tensor_torch = torch.as_tensor(
-            q_tensor_np, dtype=torch.float32, device=self.device
+            q_tensor_np, dtype=torch.float32, device=self.config.device
         )
         action_sizes = q_tensor_np.shape[:-1]
         starts = self._starts(
@@ -759,7 +762,7 @@ class SredGradientSreSolver(SreStageGameSolver):
         q_batch = self._validate_q_batch_torch(q_batch)
         if q_batch is None or int(q_batch.shape[0]) == 0:
             return []
-        q_batch = q_batch.detach().to(device=self.device, dtype=torch.float32)
+        q_batch = q_batch.detach().to(device=self.config.device, dtype=torch.float32)
         batch_size = int(q_batch.shape[0])
         action_sizes = tuple(int(size) for size in q_batch.shape[1:-1])
         epsilon_batch = self._epsilon_tensor_batch(epsilon, batch_size)
@@ -876,7 +879,7 @@ class SredGradientSreSolver(SreStageGameSolver):
                     continue
 
             with torch.enable_grad():
-                for iteration in range(1, self.max_iters + 1):
+                for iteration in range(1, self.config.max_iters + 1):
                     optimizer.zero_grad(set_to_none=True)
                     policies = self._batched_policies_from_logits(logits)
                     losses = self._sred_loss_batch(q_batch, policies, epsilon_batch)
@@ -886,13 +889,13 @@ class SredGradientSreSolver(SreStageGameSolver):
                     ).sum().clamp_min(1.0)
                     objective.backward()
                     if (
-                        self.gradient_clip_norm is not None
-                        and self.gradient_clip_norm > 0.0
+                        self.config.gradient_clip_norm is not None
+                        and self.config.gradient_clip_norm > 0.0
                     ):
-                        torch.nn.utils.clip_grad_norm_(logits, self.gradient_clip_norm)
+                        torch.nn.utils.clip_grad_norm_(logits, self.config.gradient_clip_norm)
                     optimizer.step()
 
-                    if iteration % self.eval_every != 0 and iteration != self.max_iters:
+                    if iteration % self.config.eval_every != 0 and iteration != self.config.max_iters:
                         continue
                     with torch.no_grad():
                         policies = self._batched_policies_from_logits(logits)

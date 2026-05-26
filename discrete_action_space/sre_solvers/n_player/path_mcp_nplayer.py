@@ -1,15 +1,12 @@
 import itertools
+from dataclasses import dataclass, replace
 from functools import lru_cache
 import multiprocessing as mp
 from pathlib import Path
 import time
 
 import numpy as np
-
-try:
-    from path_solver import PathSolverWrapper
-except ImportError:  # Package import from repository root.
-    from ...path_solver import PathSolverWrapper
+from path_solver import PathSolverWrapper
 
 from ..base import (
     SreSolveResult,
@@ -29,6 +26,25 @@ from ..nplayer_common import (
 
 DEFAULT_PATHWRAP_PATH = Path(__file__).resolve().parent.parent / "pathwrap.so"
 INF = 1e20
+
+
+@dataclass(frozen=True)
+class PathMcpNPlayerSreSolverConfig:
+    pathwrap_path: object = DEFAULT_PATHWRAP_PATH
+    random_seed: int | None = None
+
+
+@dataclass(frozen=True)
+class ProcessPoolPathMcpNPlayerSreSolverConfig:
+    pathwrap_path: object = DEFAULT_PATHWRAP_PATH
+    max_workers: int = 4
+    start_method: str | None = None
+    random_seed: int | None = None
+
+    def __post_init__(self):
+        object.__setattr__(self, "max_workers", int(self.max_workers))
+        if self.max_workers <= 0:
+            raise ValueError("max_workers must be positive for process-pool SRE.")
 
 
 def _normalize_candidate_selection(candidate_selection):
@@ -78,10 +94,16 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
     """
 
     name = "path_mcp_nplayer"
+    algorithm_family = "path_mcp_multilinear_complementarity"
 
-    def __init__(self, pathwrap_path=DEFAULT_PATHWRAP_PATH, random_seed=None):
-        self.path_solver = PathSolverWrapper(pathwrap_path)
-        self.rng = np.random.default_rng(random_seed)
+    def __init__(self, config: PathMcpNPlayerSreSolverConfig | None = None, **overrides):
+        if config is None:
+            config = PathMcpNPlayerSreSolverConfig(**overrides)
+        elif overrides:
+            config = replace(config, **overrides)
+        self.config = config
+        self.path_solver = PathSolverWrapper(self.config.pathwrap_path)
+        self.rng = np.random.default_rng(self.config.random_seed)
         self._structure_cache = {}
 
     @staticmethod
@@ -447,8 +469,8 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
                 f"Sparse Jacobian filled {idx} entries, expected {data.shape[0]}."
             )
 
-    @staticmethod
     def _result_from_candidate(
+        self,
         *,
         q_tensor,
         policies,
@@ -465,8 +487,8 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
         robust_policy_values_result = robust_policy_values(q_tensor, policies, epsilon)
         success = bool(exploitability <= success_tol)
         result_metadata = {
-            "solver": PathMcpNPlayerSreSolver.name,
-            "algorithm_family": "path_mcp_multilinear_complementarity",
+            "solver": self.name,
+            "algorithm_family": self.algorithm_family,
             "epsilon": float(epsilon),
             "exploitability_tol": float(success_tol),
             "num_agents": int(q_tensor.shape[-1]),
@@ -738,7 +760,7 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
                 message="PATH MCP failed to return a candidate. " + "; ".join(messages[:3]),
                 metadata={
                     "solver": self.name,
-                    "algorithm_family": "path_mcp_multilinear_complementarity",
+                    "algorithm_family": self.algorithm_family,
                     "path_failed": True,
                     "path_failure_messages": messages[:3],
                     "epsilon": float(epsilon),
@@ -771,7 +793,7 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
             message="" if best["robust_exploitability"] <= exploitability_tol else "Returned best PATH MCP candidate.",
             metadata={
                 "solver": self.name,
-                "algorithm_family": "path_mcp_multilinear_complementarity",
+                "algorithm_family": self.algorithm_family,
                 "epsilon": float(epsilon),
                 "exploitability_tol": float(exploitability_tol),
                 "num_agents": int(q_tensor.shape[-1]),
@@ -798,7 +820,287 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
         self.path_solver.close()
 
 
+class PathTvcMcpNPlayerSreSolver(PathMcpNPlayerSreSolver):
+    """PATH-backed N-player SRE MCP specialized for total-variation cost.
+
+    For the 0/1 total-variation ground cost used by SRQ, the generic transport
+    block with one eta variable per pair of opponent profiles can be compressed
+    to linear-size constraints against each profile and a global minimum payoff
+    variable. This preserves the same TV robust value semantics as
+    ``robust_policy_values`` while avoiding the ``|A_-i|^2`` eta block.
+    """
+
+    name = "path_tvc_mcp_nplayer"
+    algorithm_family = "path_tvc_mcp_multilinear_complementarity"
+
+    @staticmethod
+    def _build_index(action_sizes):
+        index = {
+            "prob": [],
+            "lambda": [],
+            "xi": [],
+            "rho": [],
+            "alpha": [],
+            "beta": [],
+            "gamma": [],
+            "kappa": [],
+        }
+        pos = 0
+        opponent_data = []
+        for player_id, action_size in enumerate(action_sizes):
+            opponent_ids, profiles = PathMcpNPlayerSreSolver._opponent_profiles(
+                action_sizes, player_id
+            )
+            opponent_data.append((opponent_ids, profiles))
+            num_opp_profiles = len(profiles)
+
+            index["prob"].append(slice(pos, pos + action_size))
+            pos += action_size
+            index["lambda"].append(pos)
+            pos += 1
+            index["xi"].append(slice(pos, pos + num_opp_profiles))
+            pos += num_opp_profiles
+            index["rho"].append(pos)
+            pos += 1
+            index["alpha"].append(slice(pos, pos + num_opp_profiles))
+            pos += num_opp_profiles
+            index["beta"].append(slice(pos, pos + num_opp_profiles))
+            pos += num_opp_profiles
+            index["gamma"].append(slice(pos, pos + num_opp_profiles))
+            pos += num_opp_profiles
+            index["kappa"].append(pos)
+            pos += 1
+        return index, opponent_data, pos
+
+    def _structure_for_action_sizes(self, action_sizes):
+        key = tuple(int(size) for size in action_sizes)
+        structure = self._structure_cache.get(key)
+        if structure is not None:
+            return structure
+
+        index, opponent_data, n_vars = self._build_index(key)
+        sparse_pattern = self._build_sparse_jacobian_pattern(
+            index, key, opponent_data, None
+        )
+        lb_template = np.full(n_vars, -INF, dtype=np.float64)
+        ub_template = np.full(n_vars, INF, dtype=np.float64)
+        for player_id in range(len(key)):
+            lb_template[index["prob"][player_id]] = 0.0
+            lb_template[index["lambda"][player_id]] = 0.0
+            lb_template[index["alpha"][player_id]] = 0.0
+            lb_template[index["beta"][player_id]] = 0.0
+            lb_template[index["gamma"][player_id]] = 0.0
+        structure = {
+            "index": index,
+            "opponent_data": opponent_data,
+            "n_vars": n_vars,
+            "distances_by_player": None,
+            "sparse_pattern": sparse_pattern,
+            "nnz": int(sum(len(entries) for entries in sparse_pattern)),
+            "lb_template": lb_template,
+            "ub_template": ub_template,
+        }
+        self._structure_cache[key] = structure
+        return structure
+
+    def _make_start(self, index, action_sizes, opponent_data, policies=None):
+        del opponent_data
+        n_vars = index["kappa"][-1] + 1
+        z = np.zeros(n_vars, dtype=np.float64)
+        for player_id, action_size in enumerate(action_sizes):
+            if policies is None:
+                policy = self.rng.dirichlet(np.ones(action_size, dtype=np.float64))
+            else:
+                policy = np.asarray(policies[player_id], dtype=np.float64)
+            z[index["prob"][player_id]] = policy
+            z[index["lambda"][player_id]] = self.rng.random() + 1e-2
+            xi_slice = index["xi"][player_id]
+            z[xi_slice] = 100.0 * self.rng.random(xi_slice.stop - xi_slice.start) - 50.0
+            z[index["rho"][player_id]] = 100.0 * self.rng.random() - 50.0
+            z[index["alpha"][player_id]] = self.rng.random(xi_slice.stop - xi_slice.start)
+            z[index["beta"][player_id]] = self.rng.random(xi_slice.stop - xi_slice.start)
+            z[index["gamma"][player_id]] = self.rng.random(xi_slice.stop - xi_slice.start)
+            z[index["kappa"][player_id]] = 100.0 * self.rng.random() - 50.0
+        return z
+
+    def _compute_f_and_jacobian(
+        self,
+        z,
+        q_tensor,
+        epsilon,
+        index,
+        opponent_data,
+        payoffs_by_player,
+        distances_by_player=None,
+        compute_jac=True,
+    ):
+        del distances_by_player
+        action_sizes = q_tensor.shape[:-1]
+        n_vars = z.shape[0]
+        f = np.zeros(n_vars, dtype=np.float64)
+        jac = np.zeros((n_vars, n_vars), dtype=np.float64) if compute_jac else None
+
+        for player_id, action_size in enumerate(action_sizes):
+            prob_slice = index["prob"][player_id]
+            lambda_idx = index["lambda"][player_id]
+            xi_slice = index["xi"][player_id]
+            rho_idx = index["rho"][player_id]
+            alpha_slice = index["alpha"][player_id]
+            beta_slice = index["beta"][player_id]
+            gamma_slice = index["gamma"][player_id]
+            kappa_idx = index["kappa"][player_id]
+
+            opponent_ids, profiles = opponent_data[player_id]
+            payoffs = payoffs_by_player[player_id]
+            xi = z[xi_slice]
+            alpha = z[alpha_slice]
+            beta = z[beta_slice]
+            gamma = z[gamma_slice]
+            own_expected_payoff = z[prob_slice] @ payoffs
+
+            f[prob_slice] = -z[kappa_idx] - payoffs @ (alpha + gamma)
+            if compute_jac:
+                jac[prob_slice, kappa_idx] = -1.0
+                jac[prob_slice, alpha_slice] = -payoffs
+                jac[prob_slice, gamma_slice] = -payoffs
+
+            f[lambda_idx] = float(epsilon) - float(np.sum(beta))
+            if compute_jac:
+                jac[lambda_idx, beta_slice] = -1.0
+
+            opponent_distribution, distribution_grads = self._opponent_distribution_and_gradients(
+                z, index, player_id, opponent_ids, profiles
+            )
+            f[xi_slice] = -opponent_distribution + alpha + beta
+            if compute_jac:
+                for profile_idx, profile_grads in enumerate(distribution_grads):
+                    row = xi_slice.start + profile_idx
+                    for opponent_id, grad in profile_grads:
+                        opponent_prob_slice = index["prob"][opponent_id]
+                        jac[row, opponent_prob_slice] -= grad
+                    jac[row, alpha_slice.start + profile_idx] = 1.0
+                    jac[row, beta_slice.start + profile_idx] = 1.0
+
+            f[rho_idx] = float(np.sum(beta) - np.sum(gamma))
+            if compute_jac:
+                jac[rho_idx, beta_slice] = 1.0
+                jac[rho_idx, gamma_slice] = -1.0
+
+            f[alpha_slice] = own_expected_payoff - xi
+            if compute_jac:
+                jac[alpha_slice, prob_slice] = payoffs.T
+                for profile_idx in range(xi_slice.stop - xi_slice.start):
+                    jac[alpha_slice.start + profile_idx, xi_slice.start + profile_idx] = -1.0
+
+            f[beta_slice] = z[lambda_idx] + z[rho_idx] - xi
+            if compute_jac:
+                jac[beta_slice, lambda_idx] = 1.0
+                jac[beta_slice, rho_idx] = 1.0
+                for profile_idx in range(xi_slice.stop - xi_slice.start):
+                    jac[beta_slice.start + profile_idx, xi_slice.start + profile_idx] = -1.0
+
+            f[gamma_slice] = own_expected_payoff - z[rho_idx]
+            if compute_jac:
+                jac[gamma_slice, prob_slice] = payoffs.T
+                jac[gamma_slice, rho_idx] = -1.0
+
+            f[kappa_idx] = 1.0 - float(np.sum(z[prob_slice]))
+            if compute_jac:
+                jac[kappa_idx, prob_slice] = -1.0
+
+        return f, jac
+
+    @staticmethod
+    def _build_sparse_jacobian_pattern(index, action_sizes, opponent_data, distances_by_player):
+        del distances_by_player
+        n_vars = index["kappa"][-1] + 1
+        entries_by_col = [[] for _ in range(n_vars)]
+
+        def add(row, col, kind, payload):
+            entries_by_col[int(col)].append((int(row), kind, payload))
+
+        for player_id, action_size in enumerate(action_sizes):
+            prob_slice = index["prob"][player_id]
+            lambda_idx = index["lambda"][player_id]
+            xi_slice = index["xi"][player_id]
+            rho_idx = index["rho"][player_id]
+            alpha_slice = index["alpha"][player_id]
+            beta_slice = index["beta"][player_id]
+            gamma_slice = index["gamma"][player_id]
+            kappa_idx = index["kappa"][player_id]
+            opponent_ids, profiles = opponent_data[player_id]
+            num_opp_profiles = len(profiles)
+
+            for action_id in range(action_size):
+                row = prob_slice.start + action_id
+                add(row, kappa_idx, "const", -1.0)
+                for profile_idx in range(num_opp_profiles):
+                    add(
+                        row,
+                        alpha_slice.start + profile_idx,
+                        "neg_payoff",
+                        (player_id, action_id, profile_idx),
+                    )
+                    add(
+                        row,
+                        gamma_slice.start + profile_idx,
+                        "neg_payoff",
+                        (player_id, action_id, profile_idx),
+                    )
+
+            for profile_idx in range(num_opp_profiles):
+                add(lambda_idx, beta_slice.start + profile_idx, "const", -1.0)
+
+            for profile_idx, profile in enumerate(profiles):
+                row = xi_slice.start + profile_idx
+                for local_idx, opponent_id in enumerate(opponent_ids):
+                    action_id = profile[local_idx]
+                    col = index["prob"][opponent_id].start + action_id
+                    add(
+                        row,
+                        col,
+                        "neg_profile_grad",
+                        (tuple(opponent_ids), tuple(profile), local_idx),
+                    )
+                add(row, alpha_slice.start + profile_idx, "const", 1.0)
+                add(row, beta_slice.start + profile_idx, "const", 1.0)
+
+            for profile_idx in range(num_opp_profiles):
+                add(rho_idx, beta_slice.start + profile_idx, "const", 1.0)
+                add(rho_idx, gamma_slice.start + profile_idx, "const", -1.0)
+
+            for profile_idx in range(num_opp_profiles):
+                row = alpha_slice.start + profile_idx
+                for action_id in range(action_size):
+                    add(row, prob_slice.start + action_id, "payoff", (player_id, action_id, profile_idx))
+                add(row, xi_slice.start + profile_idx, "const", -1.0)
+
+            for profile_idx in range(num_opp_profiles):
+                row = beta_slice.start + profile_idx
+                add(row, lambda_idx, "const", 1.0)
+                add(row, rho_idx, "const", 1.0)
+                add(row, xi_slice.start + profile_idx, "const", -1.0)
+
+            for profile_idx in range(num_opp_profiles):
+                row = gamma_slice.start + profile_idx
+                for action_id in range(action_size):
+                    add(row, prob_slice.start + action_id, "payoff", (player_id, action_id, profile_idx))
+                add(row, rho_idx, "const", -1.0)
+
+            for action_id in range(action_size):
+                add(kappa_idx, prob_slice.start + action_id, "const", -1.0)
+
+        for col_entries in entries_by_col:
+            col_entries.sort(key=lambda entry: entry[0])
+        return entries_by_col
+
+
+class ProcessPoolPathTvcMcpNPlayerSreSolverConfig(ProcessPoolPathMcpNPlayerSreSolverConfig):
+    pass
+
+
 _NPLAYER_POOL_SOLVER = None
+_TVC_NPLAYER_POOL_SOLVER = None
 
 
 def _path_mcp_nplayer_pool_initializer(pathwrap_path, random_seed):
@@ -850,28 +1152,25 @@ class ProcessPoolPathMcpNPlayerSreSolver(SreStageGameSolver):
 
     def __init__(
         self,
-        pathwrap_path=DEFAULT_PATHWRAP_PATH,
-        max_workers=4,
-        start_method=None,
-        random_seed=None,
+        config: ProcessPoolPathMcpNPlayerSreSolverConfig | None = None,
+        **overrides,
     ):
-        self.pathwrap_path = pathwrap_path
-        self.max_workers = int(max_workers)
-        self.start_method = start_method
-        self.random_seed = random_seed
+        if config is None:
+            config = ProcessPoolPathMcpNPlayerSreSolverConfig(**overrides)
+        elif overrides:
+            config = replace(config, **overrides)
+        self.config = config
         self._task_counter = 0
         self.solve_time_count = 0
         self.solve_time_sum = 0.0
         self.solve_time_sumsq = 0.0
         self.solve_time_min = None
         self.solve_time_max = None
-        if self.max_workers <= 0:
-            raise ValueError("max_workers must be positive for process-pool SRE.")
-        ctx = mp.get_context(start_method) if start_method else mp.get_context()
+        ctx = mp.get_context(self.config.start_method) if self.config.start_method else mp.get_context()
         self._pool = ctx.Pool(
-            processes=self.max_workers,
+            processes=self.config.max_workers,
             initializer=_path_mcp_nplayer_pool_initializer,
-            initargs=(self.pathwrap_path, self.random_seed),
+            initargs=(self.config.pathwrap_path, self.config.random_seed),
         )
 
     def _record_solve_time(self, duration):
@@ -884,9 +1183,9 @@ class ProcessPoolPathMcpNPlayerSreSolver(SreStageGameSolver):
             self.solve_time_max = duration
 
     def _task_seed(self, batch_offset):
-        if self.random_seed is None:
+        if self.config.random_seed is None:
             return None
-        return int(self.random_seed) + int(self._task_counter) + int(batch_offset)
+        return int(self.config.random_seed) + int(self._task_counter) + int(batch_offset)
 
     def solve(
         self,
@@ -960,7 +1259,7 @@ class ProcessPoolPathMcpNPlayerSreSolver(SreStageGameSolver):
             duration = float(result.metadata.get("worker_sre_wall_seconds", 0.0))
             self._record_solve_time(duration)
             result.metadata["solver"] = self.name
-            result.metadata["max_workers"] = self.max_workers
+            result.metadata["max_workers"] = self.config.max_workers
         return results
 
     def get_solve_time_summary(self):
@@ -989,3 +1288,124 @@ class ProcessPoolPathMcpNPlayerSreSolver(SreStageGameSolver):
             pool.close()
             pool.join()
             self._pool = None
+
+
+def _path_tvc_mcp_nplayer_pool_initializer(pathwrap_path, random_seed):
+    global _TVC_NPLAYER_POOL_SOLVER
+    _TVC_NPLAYER_POOL_SOLVER = PathTvcMcpNPlayerSreSolver(
+        pathwrap_path=pathwrap_path,
+        random_seed=random_seed,
+    )
+
+
+def _path_tvc_mcp_nplayer_pool_solve_task(payload):
+    (
+        q_tensor,
+        epsilon,
+        num_repeats,
+        round_digits,
+        include_pure_starts,
+        initial_policies,
+        exploitability_tol,
+        early_exit,
+        candidate_selection,
+        task_seed,
+    ) = payload
+    if task_seed is not None:
+        _TVC_NPLAYER_POOL_SOLVER.rng = np.random.default_rng(task_seed)
+
+    start = time.perf_counter()
+    result = _TVC_NPLAYER_POOL_SOLVER.solve(
+        q_tensor,
+        epsilon,
+        num_repeats=num_repeats,
+        round_digits=round_digits,
+        include_pure_starts=include_pure_starts,
+        initial_policies=initial_policies,
+        exploitability_tol=exploitability_tol,
+        early_exit=early_exit,
+        candidate_selection=candidate_selection,
+    )
+    elapsed = time.perf_counter() - start
+    result.metadata = dict(result.metadata)
+    result.metadata["worker_sre_wall_seconds"] = float(elapsed)
+    return result
+
+
+class ProcessPoolPathTvcMcpNPlayerSreSolver(ProcessPoolPathMcpNPlayerSreSolver):
+    """Multiprocessing batch wrapper for the TVC-compressed PATH MCP solver."""
+
+    name = "path_tvc_mcp_nplayer_pool"
+
+    def __init__(
+        self,
+        config: ProcessPoolPathTvcMcpNPlayerSreSolverConfig | None = None,
+        **overrides,
+    ):
+        if config is None:
+            config = ProcessPoolPathTvcMcpNPlayerSreSolverConfig(**overrides)
+        elif overrides:
+            config = replace(config, **overrides)
+        self.config = config
+        self._task_counter = 0
+        self.solve_time_count = 0
+        self.solve_time_sum = 0.0
+        self.solve_time_sumsq = 0.0
+        self.solve_time_min = None
+        self.solve_time_max = None
+        ctx = mp.get_context(self.config.start_method) if self.config.start_method else mp.get_context()
+        self._pool = ctx.Pool(
+            processes=self.config.max_workers,
+            initializer=_path_tvc_mcp_nplayer_pool_initializer,
+            initargs=(self.config.pathwrap_path, self.config.random_seed),
+        )
+
+    def solve_batch(
+        self,
+        q_tensors,
+        epsilon,
+        *,
+        num_repeats=20,
+        round_digits=4,
+        include_pure_starts=True,
+        initial_policies_batch=None,
+        exploitability_tol=1e-4,
+        early_exit=True,
+        candidate_selection="robust_exploitability",
+    ):
+        q_tensors = [validate_nplayer_q_tensor(q_tensor) for q_tensor in q_tensors]
+        if not q_tensors:
+            return []
+        if initial_policies_batch is None:
+            initial_policies_batch = [None] * len(q_tensors)
+        if len(initial_policies_batch) != len(q_tensors):
+            raise ValueError(
+                "initial_policies_batch must be None or match q_tensors length."
+            )
+
+        payloads = [
+            (
+                q_tensor,
+                float(epsilon),
+                int(num_repeats),
+                round_digits,
+                bool(include_pure_starts),
+                initial_policies,
+                float(exploitability_tol),
+                bool(early_exit),
+                _normalize_candidate_selection(candidate_selection),
+                self._task_seed(batch_offset),
+            )
+            for batch_offset, (q_tensor, initial_policies) in enumerate(
+                zip(q_tensors, initial_policies_batch)
+            )
+        ]
+        self._task_counter += len(payloads)
+
+        results = self._pool.map(_path_tvc_mcp_nplayer_pool_solve_task, payloads)
+        for result in results:
+            duration = float(result.metadata.get("worker_sre_wall_seconds", 0.0))
+            self._record_solve_time(duration)
+            result.metadata["solver"] = self.name
+            result.metadata["max_workers"] = self.config.max_workers
+        return results

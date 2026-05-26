@@ -2,7 +2,7 @@
 
 This folder contains interchangeable stage-game solvers for Strategically Robust Equilibria (SRE) in finite-action games. The Deep SRQ agents call these solvers on learned Q tensors, then use the returned mixed policies as robust equilibrium policies for the current state.
 
-The common entry point is `make_sre_solver(...)` in `factory.py`. Every solver implements the `SreStageGameSolver` interface from `base.py`:
+Every solver implements the `SreStageGameSolver` interface from `base.py`:
 
 ```python
 result = solver.solve(q_tensor, epsilon)
@@ -24,9 +24,9 @@ The finite-action solvers use a total-variation transport ball, implemented as a
 
 An SRE policy profile is evaluated by robust exploitability: for each player, compare the robust value of the current mixed policy against the best robust action value. A profile is close to SRE when no player has a profitable robust unilateral deviation.
 
-## Factory Names
+## Solver Names
 
-`factory.py` exposes the following names:
+The package-level `make_sre_solver(...)` compatibility helper recognizes these names:
 
 | Name | Solver class | Game size | Main use |
 | --- | --- | --- | --- |
@@ -178,7 +178,7 @@ Factory aliases:
 
 - `base.py`: abstract solver interface, result dataclass, bimatrix validation, and common timing summary shape.
 - `nplayer_common.py`: N-player tensor validation, nominal expected values, total-variation worst-case values, robust exploitability, and solution formatting.
-- `factory.py`: solver construction by string name.
+- `__init__.py`: solver exports and the backwards-compatible string-name constructor.
 - `path_c.py`, `n_player/path_mcp_nplayer.py`, and `path_solver.py`: PATH wrapper usage for LCP/MCP solving.
 - `pathwrap.c`, `pathwrap.so`, `path.opt`, and `pathlib/`: compiled and vendored PATH integration files.
 

@@ -14,13 +14,11 @@ from pathlib import Path
 
 import numpy as np
 
-from .epymarl_lbf_env import (
-    get_epymarl_lbf_scenario,
-    register_epymarl_lbf_envs,
-)
+from .epymarl_lbf_env import get_epymarl_lbf_scenario
+from .notebook_eval import plot_training_reward_curve, plot_training_reward_max_curve
 
 
-EPYMARL_ALGORITHMS = ("random", "iql", "ippo", "mappo", "qmix", "maa2c")
+EPYMARL_ALGORITHMS = ("iql", "ippo", "mappo", "qmix", "maa2c")
 UNSUPPORTED_EPYMARL_OVERRIDES = frozenset({"env_args.disable_env_checker"})
 
 
@@ -220,62 +218,51 @@ def _align_curve_to_episode_budget(
     return episodes, values, appended_final_budget_point
 
 
-def _save_reward_curve(curves: dict[str, list[float]], out_path: Path, *, title: str) -> None:
+def _aggregate_reward_curve(curves: dict[str, list[float]]) -> tuple[list[float], list[float]]:
+    episodes = curves.get("episodes") or []
+    for key in ("joint", "total", "shared"):
+        values = curves.get(key)
+        if values:
+            return list(episodes), list(values)
+
+    agent_curves = [
+        np.asarray(values, dtype=np.float64)
+        for label, values in curves.items()
+        if label.startswith("agent_") and values
+    ]
+    if not agent_curves:
+        return [], []
+    length = min(series.size for series in agent_curves)
+    joint = np.stack([series[:length] for series in agent_curves], axis=0).sum(axis=0)
+    return list(episodes)[:length], joint.tolist()
+
+
+def _save_reward_curve(curves: dict[str, list[float]], out_path: Path, *, title: str) -> Path | None:
     if not curves:
-        return
+        return None
 
     import matplotlib.pyplot as plt
 
-    episodes = curves.get("episodes")
-    if not episodes:
-        return
+    episodes, values = _aggregate_reward_curve(curves)
+    if not episodes or not values:
+        return None
 
-    aggregate_labels = {"joint", "total", "shared"}
-    has_agent_curves = any(
-        label.startswith("agent_") and values
-        for label, values in curves.items()
-    )
-
-    fig, ax = plt.subplots(figsize=(10, 4))
-    for label, values in curves.items():
-        if label == "episodes":
-            continue
-        if has_agent_curves and label in aggregate_labels:
-            continue
-        ax.plot(episodes, values, linewidth=1.8, marker="", label=label.replace("_", " ").title())
-    ax.set_xlabel("Episode")
-    ax.set_ylabel("Training reward")
-    ax.set_title(title)
-    ax.legend()
-    ax.grid(alpha=0.25)
-    fig.tight_layout()
+    fig = plot_training_reward_curve(episodes, values, title=title)
+    if fig is None:
+        return None
     fig.savefig(out_path)
     plt.close(fig)
 
-
-def _build_random_reward_artifacts(stats: dict) -> tuple[dict, dict[str, list[float]]]:
-    rewards = np.asarray(stats["rewards"], dtype=np.float64)
-    joint = rewards.sum(axis=0)
-    curves = {
-        "episodes": list(range(1, int(stats["n_episodes"]) + 1)),
-        **{f"agent_{i}": rewards[i].tolist() for i in range(rewards.shape[0])},
-        "joint": joint.tolist(),
-    }
-    reward_stats = {
-        "algorithm": "random",
-        "seed": int(stats["seed"]),
-        "t_max": int(stats["t_max"]),
-        "n_episodes": int(stats["n_episodes"]),
-        "reward_statistics": {
-            **{
-                f"agent_{i}": _series_summary(rewards[i])
-                for i in range(rewards.shape[0])
-            },
-            "joint": _series_summary(joint),
-        },
-        "reward_curve": curves,
-    }
-    return reward_stats, curves
+    max_path = out_path.with_name(f"{out_path.stem}_max_100{out_path.suffix}")
+    max_fig = plot_training_reward_max_curve(
+        episodes,
+        values,
+        title=f"{title} - max reward per 100 episodes",
+    )
+    if max_fig is not None:
+        max_fig.savefig(max_path)
+        plt.close(max_fig)
+    return max_path
 
 
 def _build_epymarl_reward_artifacts(
@@ -333,96 +320,6 @@ def n_frames_for_episodes(scenario_key: str, n_episodes: int = 1000) -> int:
     """Convert an episode budget to EPyMARL environment timesteps."""
     scenario = get_epymarl_lbf_scenario(scenario_key)
     return int(n_episodes) * int(scenario.time_limit)
-
-
-def run_random_policy_baseline(
-    scenario_key: str,
-    *,
-    n_episodes: int = 1000,
-    seed: int = 2025,
-    output_root: str | Path = "lbf_epymarl_baseline_runs",
-):
-    """Run a random policy directly in Gymnasium LBF for reward-scale baselines."""
-    import gymnasium as gym
-
-    register_epymarl_lbf_envs()
-    scenario = get_epymarl_lbf_scenario(scenario_key)
-    rewards_by_agent = [[] for _ in range(scenario.n_agents)]
-    episode_lengths = []
-    out_dir = Path(output_root) / scenario.key / "random"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    metrics_dir = out_dir / "episode_metrics" / "training"
-    metrics_dir.mkdir(parents=True, exist_ok=True)
-    for path in metrics_dir.glob("*.jsonl"):
-        path.unlink()
-
-    old_metrics_env = {
-        key: os.environ.get(key)
-        for key in (
-            "SREDQN_LBF_METRICS_DIR",
-            "SREDQN_LBF_METRICS_RUN_ID",
-            "SREDQN_LBF_METRICS_PHASE",
-        )
-    }
-    os.environ["SREDQN_LBF_METRICS_DIR"] = str(metrics_dir)
-    os.environ["SREDQN_LBF_METRICS_RUN_ID"] = f"{scenario.key}_random_seed{int(seed)}"
-    os.environ["SREDQN_LBF_METRICS_PHASE"] = "training"
-
-    try:
-        for episode in range(int(n_episodes)):
-            env = gym.make(scenario.gym_id, disable_env_checker=True)
-            try:
-                env.reset(seed=int(seed) + episode)
-                done = False
-                truncated = False
-                ep_rewards = np.zeros(scenario.n_agents, dtype=np.float64)
-                ep_steps = 0
-                while not (done or truncated):
-                    _, rewards, done, truncated, _ = env.step(env.action_space.sample())
-                    ep_rewards += np.asarray(rewards, dtype=np.float64)
-                    ep_steps += 1
-            finally:
-                env.close()
-
-            for agent_id, reward in enumerate(ep_rewards):
-                rewards_by_agent[agent_id].append(float(reward))
-            episode_lengths.append(int(ep_steps))
-    finally:
-        for key, value in old_metrics_env.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
-
-    stats = {
-        "algorithm": "random",
-        "scenario_key": scenario.key,
-        "scenario_name": scenario.description,
-        "gym_id": scenario.gym_id,
-        "n_episodes": int(n_episodes),
-        "t_max": n_frames_for_episodes(scenario.key, n_episodes),
-        "seed": int(seed),
-        "rewards": rewards_by_agent,
-        "episode_lengths": episode_lengths,
-        "mean_joint_reward": float(np.sum(rewards_by_agent, axis=0).mean()),
-        "mean_last_100_joint_reward": float(np.sum(rewards_by_agent, axis=0)[-100:].mean()),
-    }
-
-    reward_stats, curves = _build_random_reward_artifacts(stats)
-    episode_metrics = _load_episode_metrics(metrics_dir)
-    episode_metrics_path = out_dir / "training_episode_metrics.json"
-    episode_metrics_path.write_text(json.dumps(_json_safe(episode_metrics), indent=2))
-    reward_stats["episode_metrics"] = episode_metrics
-    reward_stats["episode_metric_totals"] = _episode_metric_totals(episode_metrics)
-    reward_stats["episode_metrics_path"] = str(episode_metrics_path)
-    stats_path = out_dir / "reward_stats.json"
-    curve_path = out_dir / "reward_curve.png"
-    stats_path.write_text(json.dumps(_json_safe(reward_stats), indent=2))
-    _save_reward_curve(curves, curve_path, title=f"Random - {scenario.key}")
-    stats["reward_stats_path"] = str(stats_path)
-    stats["reward_curve_path"] = str(curve_path)
-    stats["episode_metrics_path"] = str(episode_metrics_path)
-    return stats
 
 
 def build_epymarl_command(
@@ -509,15 +406,10 @@ def run_epymarl_baseline(
     check: bool = True,
     show_progress: bool = False,
 ):
-    """Run one baseline (random or EPyMARL) for a single scenario."""
+    """Run one EPyMARL baseline for a single scenario."""
     algorithm = str(algorithm).lower()
-    if str(algorithm).lower() == "random":
-        return run_random_policy_baseline(
-            scenario_key,
-            n_episodes=n_episodes,
-            seed=seed,
-            output_root=output_root,
-        )
+    if algorithm not in EPYMARL_ALGORITHMS:
+        raise ValueError(f"Unsupported EPyMARL algorithm: {algorithm}")
 
     command = build_epymarl_command(
         epymarl_root,
@@ -666,7 +558,7 @@ def run_epymarl_baseline(
     reward_stats["episode_metrics_path"] = str(episode_metrics_path)
 
     reward_stats_path.write_text(json.dumps(_json_safe(reward_stats), indent=2))
-    _save_reward_curve(
+    reward_max_curve_path = _save_reward_curve(
         curves,
         reward_curve_path,
         title=f"{str(algorithm).upper()} - {scenario.key}",
@@ -684,6 +576,9 @@ def run_epymarl_baseline(
         "config_overrides": _normalize_config_overrides(config_overrides),
         "reward_stats_path": str(reward_stats_path),
         "reward_curve_path": str(reward_curve_path),
+        "reward_max_curve_path": None
+        if reward_max_curve_path is None
+        else str(reward_max_curve_path),
         "episode_metrics_path": str(episode_metrics_path),
         "model_root": str(model_root),
         "sacred_metrics_path": sacred_metrics_path,

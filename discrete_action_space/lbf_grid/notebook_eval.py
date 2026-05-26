@@ -9,36 +9,10 @@ from typing import Callable, Iterable
 
 import numpy as np
 import matplotlib.pyplot as plt
+from tqdm.auto import tqdm
 
-try:
-    from .instrumented_env import aggregate_lbf_episode_metrics, extract_lbf_metrics
-except ImportError:  # Script/notebook import from the lbf_grid directory
-    from instrumented_env import aggregate_lbf_episode_metrics, extract_lbf_metrics
-
-try:
-    from tqdm.auto import tqdm
-except Exception:  # pragma: no cover - tqdm is optional in plain scripts.
-    tqdm = None
-
-
-def central_state(obs_dict, agent_order):
-    return np.concatenate(
-        [np.asarray(obs_dict[agent], dtype=np.float32).reshape(-1) for agent in agent_order]
-    ).astype(np.float32, copy=False)
-
-
-def global_state(env, obs_dict, agent_order):
-    if hasattr(env, "global_state"):
-        return env.global_state(agent_order)
-    inner = getattr(env, "_inner", env)
-    if getattr(inner, "field", None) is not None and getattr(inner, "players", None) is not None:
-        try:
-            from .state_action_encoding import canonical_lbf_state
-        except ImportError:
-            from state_action_encoding import canonical_lbf_state
-
-        return canonical_lbf_state(env, agent_order)
-    return central_state(obs_dict, agent_order)
+from .instrumented_env import aggregate_lbf_episode_metrics, extract_lbf_metrics
+from .state_action_encoding import canonical_lbf_state, lbf_action_masks
 
 
 def action_masks(env, agent_order):
@@ -46,11 +20,6 @@ def action_masks(env, agent_order):
         return env.action_masks(agent_order)
     inner = getattr(env, "_inner", env)
     if getattr(inner, "field", None) is not None and getattr(inner, "players", None) is not None:
-        try:
-            from .state_action_encoding import lbf_action_masks
-        except ImportError:
-            from state_action_encoding import lbf_action_masks
-
         return lbf_action_masks(env, agent_order)
     return None
 
@@ -231,7 +200,7 @@ def sample_lbf_rollout(
             frames.append(np.asarray(frame))
 
         while env.agents and (max_steps is None or steps < int(max_steps)):
-            state = global_state(env, obs_dict, agent_order)
+            state = canonical_lbf_state(env, agent_order)
             action_list = policy_fn(
                 state=state,
                 obs_dict=obs_dict,
@@ -381,7 +350,7 @@ def sample_lbf_rollouts_vectorized(
                 ):
                     finished_indices.append(slot_index)
                     continue
-                state = global_state(env, slot["obs_dict"], slot["agent_order"])
+                state = canonical_lbf_state(env, slot["agent_order"])
                 contexts.append(
                     {
                         "state": state,
@@ -691,6 +660,134 @@ def _is_nonflat_series(values, *, atol: float = 1e-12) -> bool:
     return bool(np.ptp(values) > float(atol))
 
 
+TRAINING_REWARD_ROLLING_WINDOW = 100
+TRAINING_REWARD_TAIL_WINDOW = 1000
+
+
+def _rolling_mean(values, window: int = TRAINING_REWARD_ROLLING_WINDOW) -> np.ndarray:
+    values = np.asarray(values, dtype=np.float64)
+    if values.size == 0:
+        return values
+    window = max(1, int(window))
+    prefix = np.concatenate(([0.0], np.cumsum(values)))
+    ends = np.arange(1, values.size + 1)
+    starts = np.maximum(0, ends - window)
+    sums = prefix[ends] - prefix[starts]
+    counts = ends - starts
+    return sums / counts
+
+
+def _reward_summary_box_text(
+    values,
+    *,
+    tail: int = TRAINING_REWARD_TAIL_WINDOW,
+) -> str:
+    values = np.asarray(values, dtype=np.float64)
+    if values.size == 0:
+        return "mean=n/a\nstd=n/a\nlast1000_mean=n/a\nlast1000_std=n/a"
+    tail_values = values[-min(int(tail), values.size):]
+    return (
+        f"mean={float(values.mean()):.4f}\n"
+        f"std={float(values.std()):.4f}\n"
+        f"last{int(tail)}_mean={float(tail_values.mean()):.4f}\n"
+        f"last{int(tail)}_std={float(tail_values.std()):.4f}"
+    )
+
+
+def _windowed_episode_max(
+    episodes,
+    values,
+    *,
+    window: int = TRAINING_REWARD_ROLLING_WINDOW,
+) -> tuple[np.ndarray, np.ndarray]:
+    episodes = np.asarray(episodes, dtype=np.float64)
+    values = np.asarray(values, dtype=np.float64)
+    length = min(episodes.size, values.size)
+    if length == 0:
+        return np.asarray([], dtype=np.float64), np.asarray([], dtype=np.float64)
+    episodes = episodes[:length]
+    values = values[:length]
+    window = max(1, int(window))
+    block_ids = np.floor((episodes - 1.0) / float(window)).astype(int)
+    xs = []
+    ys = []
+    max_episode = float(episodes.max())
+    for block_id in np.unique(block_ids):
+        mask = block_ids == block_id
+        xs.append(min(float((int(block_id) + 1) * window), max_episode))
+        ys.append(float(values[mask].max()))
+    return np.asarray(xs, dtype=np.float64), np.asarray(ys, dtype=np.float64)
+
+
+def plot_training_reward_curve(
+    episodes,
+    values,
+    *,
+    title: str,
+    window: int = TRAINING_REWARD_ROLLING_WINDOW,
+    tail: int = TRAINING_REWARD_TAIL_WINDOW,
+    ylabel: str | None = None,
+):
+    """Plot a standardized rolling-mean training reward curve."""
+    import matplotlib.pyplot as plt
+
+    episodes = np.asarray(episodes, dtype=np.float64)
+    values = np.asarray(values, dtype=np.float64)
+    length = min(episodes.size, values.size)
+    if length == 0:
+        return None
+    episodes = episodes[:length]
+    values = values[:length]
+    smoothed = _rolling_mean(values, window)
+    mean = float(values.mean())
+
+    fig, ax = plt.subplots(figsize=(10, 3.8))
+    ax.plot(episodes, smoothed, linewidth=2.0)
+    ax.axhline(mean, color="black", linestyle=":", linewidth=1.4)
+    ax.text(
+        0.99,
+        0.95,
+        _reward_summary_box_text(values, tail=tail),
+        transform=ax.transAxes,
+        ha="right",
+        va="top",
+        bbox={"boxstyle": "round,pad=0.25", "facecolor": "white", "alpha": 0.82},
+    )
+    ax.set_title(title)
+    ax.set_xlabel("Episode")
+    ax.set_ylabel(
+        ylabel
+        if ylabel is not None
+        else f"Training reward ({int(window)}-episode rolling mean)"
+    )
+    ax.grid(alpha=0.25)
+    fig.tight_layout()
+    return fig
+
+
+def plot_training_reward_max_curve(
+    episodes,
+    values,
+    *,
+    title: str | None = None,
+    window: int = TRAINING_REWARD_ROLLING_WINDOW,
+):
+    """Plot the maximum reward in each episode window as one bare line."""
+    import matplotlib.pyplot as plt
+
+    xs, ys = _windowed_episode_max(episodes, values, window=window)
+    if xs.size == 0:
+        return None
+    fig, ax = plt.subplots(figsize=(10, 3.2))
+    ax.plot(xs, ys, linewidth=2.0)
+    if title:
+        ax.set_title(title)
+    ax.set_xlabel("Episode")
+    ax.set_ylabel(f"Max reward per {int(window)} episodes")
+    fig.tight_layout()
+    return fig
+
+
 def agent_training_reward_series(record: dict) -> tuple[list[float], list[tuple[str, np.ndarray]]]:
     """Return per-agent training reward curves from ablation or EPyMARL artifacts."""
     rewards = record.get("rewards")
@@ -737,9 +834,46 @@ def agent_training_reward_series(record: dict) -> tuple[list[float], list[tuple[
     return list(episodes), series
 
 
+def joint_training_reward_series(record: dict) -> tuple[list[float], np.ndarray]:
+    """Return a joint/aggregate training reward curve for either stats format."""
+    rewards = record.get("rewards")
+    if rewards is not None:
+        arr = np.asarray(rewards, dtype=np.float64)
+        if arr.ndim == 2 and arr.size:
+            return list(range(1, arr.shape[1] + 1)), arr.sum(axis=0)
+        if arr.ndim == 1 and arr.size:
+            return list(range(1, arr.size + 1)), arr
+
+    payload = _load_reward_payload(record)
+    curves = payload.get("reward_curve", {})
+    for key in ("joint", "total", "shared"):
+        values = curves.get(key)
+        if values:
+            episodes = _episode_axis_from_payload(payload) or curves.get("episodes")
+            if not episodes:
+                episodes = list(range(1, len(values) + 1))
+            return list(episodes), np.asarray(
+                _align_values_to_axis(values, episodes),
+                dtype=np.float64,
+            )
+
+    episodes = _episode_axis_from_payload(payload) or curves.get("episodes")
+    agent_curves = [
+        np.asarray(_align_values_to_axis(values, episodes), dtype=np.float64)
+        for label, values in curves.items()
+        if label.startswith("agent_") and values
+    ]
+    if agent_curves:
+        length = min(series.size for series in agent_curves)
+        if not episodes:
+            episodes = list(range(1, length + 1))
+        joint = np.stack([series[:length] for series in agent_curves], axis=0).sum(axis=0)
+        return list(episodes)[:length], joint
+    return [], np.asarray([], dtype=np.float64)
+
+
 def plot_individual_agent_training_rewards(record: dict, *, title_prefix: str | None = None):
-    """Plot one line/mean/std training reward figure per agent."""
-    import matplotlib.pyplot as plt
+    """Plot one standardized rolling-mean training reward figure per agent."""
 
     episodes, series = agent_training_reward_series(record)
     if not episodes or not series:
@@ -749,46 +883,109 @@ def plot_individual_agent_training_rewards(record: dict, *, title_prefix: str | 
     run_label = title_prefix or _record_label(record)
     figs = []
     for label, values in series:
-        x = np.asarray(episodes[: values.size], dtype=np.float64)
-        mean = float(values.mean())
-        std = float(values.std())
-        fig, ax = plt.subplots(figsize=(10, 3.6))
-        ax.plot(x, values, linewidth=1.3, alpha=0.8, marker="", label=label)
-        ax.axhline(mean, color="black", linestyle=":", linewidth=1.4)
-        ax.text(
-            0.99,
-            0.95,
-            f"mean={mean:.4f}\nstd={std:.4f}",
-            transform=ax.transAxes,
-            ha="right",
-            va="top",
-            bbox={"boxstyle": "round,pad=0.25", "facecolor": "white", "alpha": 0.8},
+        fig = plot_training_reward_curve(
+            episodes[: values.size],
+            values,
+            title=f"{run_label} - {label}",
         )
-        ax.set_title(f"{run_label} - {label}")
-        ax.set_xlabel("Scenario episode")
-        ax.set_ylabel("Training reward")
-        ax.grid(alpha=0.25)
-        fig.tight_layout()
-        figs.append(fig)
+        if fig is not None:
+            figs.append(fig)
+    return figs
+
+
+def plot_individual_agent_training_reward_maxes(record: dict):
+    """Plot one max-per-100-episodes reward figure per agent."""
+    episodes, series = agent_training_reward_series(record)
+    if not episodes or not series:
+        print(f"[no per-agent training rewards for {_record_label(record)}]")
+        return []
+    figs = []
+    run_label = _record_label(record)
+    for label, values in series:
+        fig = plot_training_reward_max_curve(
+            episodes[: values.size],
+            values,
+            title=f"{run_label} - {label} max reward per 100 episodes",
+        )
+        if fig is not None:
+            figs.append(fig)
     return figs
 
 
 def plot_combined_agent_training_rewards(record: dict, *, title: str | None = None):
-    """Plot one clean line chart comparing agent reward trajectories."""
+    """Plot one standardized rolling-mean joint reward curve."""
+    episodes, values = joint_training_reward_series(record)
+    if not episodes or values.size == 0:
+        print(f"[no joint training rewards for {_record_label(record)}]")
+        return None
+    return plot_training_reward_curve(
+        episodes[: values.size],
+        values,
+        title=title or f"{_record_label(record)} - joint training reward",
+    )
+
+
+def plot_combined_agent_training_reward_max(record: dict):
+    """Plot the joint max-per-100-episodes reward curve."""
+    episodes, values = joint_training_reward_series(record)
+    if not episodes or values.size == 0:
+        print(f"[no joint training rewards for {_record_label(record)}]")
+        return None
+    return plot_training_reward_max_curve(
+        episodes[: values.size],
+        values,
+        title=f"{_record_label(record)} - joint max reward per 100 episodes",
+    )
+
+
+def periodic_eval_reward_series(record: dict) -> tuple[np.ndarray, list[tuple[str, np.ndarray]]]:
+    """Return training episodes and mean per-agent rewards from periodic eval records."""
+    eval_history = record.get("periodic_eval") or []
+    episodes = []
+    reward_rows = []
+    for item in eval_history:
+        episode = item.get("episode")
+        rewards = item.get("episode_rewards")
+        if episode is None or rewards is None:
+            continue
+        rewards_arr = np.asarray(rewards, dtype=np.float64)
+        if rewards_arr.ndim == 1:
+            rewards_arr = rewards_arr.reshape(-1, 1)
+        if rewards_arr.ndim != 2 or rewards_arr.size == 0:
+            continue
+        episodes.append(float(episode))
+        reward_rows.append(rewards_arr.mean(axis=0))
+
+    if not reward_rows:
+        return np.asarray([], dtype=np.float64), []
+
+    width = min(row.size for row in reward_rows)
+    values = np.stack([row[:width] for row in reward_rows], axis=0)
+    labels = record.get("agent_labels")
+    if labels is None or len(labels) != width:
+        labels = [f"Agent {idx + 1}" for idx in range(width)]
+    series = [
+        (str(labels[idx]), values[:, idx].astype(np.float64, copy=False))
+        for idx in range(width)
+    ]
+    return np.asarray(episodes, dtype=np.float64), series
+
+
+def plot_periodic_eval_reward_curve(record: dict, *, title: str | None = None):
+    """Plot periodic per-agent eval rewards against training episode."""
     import matplotlib.pyplot as plt
 
-    episodes, series = agent_training_reward_series(record)
-    if not episodes or not series:
-        print(f"[no per-agent training rewards for {_record_label(record)}]")
+    episodes, series = periodic_eval_reward_series(record)
+    if episodes.size == 0 or not series:
         return None
-
     fig, ax = plt.subplots(figsize=(10, 3.8))
     for label, values in series:
-        x = np.asarray(episodes[: values.size], dtype=np.float64)
-        ax.plot(x, values, linewidth=1.6, marker="", label=label)
-    ax.set_title(title or f"{_record_label(record)} - agent reward comparison")
-    ax.set_xlabel("Scenario episode")
-    ax.set_ylabel("Training reward")
+        length = min(episodes.size, values.size)
+        if length:
+            ax.plot(episodes[:length], values[:length], linewidth=2.0, label=label)
+    ax.set_title(title or f"{_record_label(record)} - periodic eval reward")
+    ax.set_xlabel("Training episode")
+    ax.set_ylabel("Mean eval reward")
     ax.grid(alpha=0.25)
     ax.legend()
     fig.tight_layout()
@@ -807,14 +1004,31 @@ def display_training_reward_plots(records: Iterable[dict]):
             display(fig)
             plt.close(fig)
             displayed.append(fig)
+        for fig in plot_individual_agent_training_reward_maxes(record):
+            display(fig)
+            plt.close(fig)
+            displayed.append(fig)
         combined = plot_combined_agent_training_rewards(
             record,
-            title=f"{run_label} - agent reward comparison",
+            title=f"{run_label} - joint training reward",
         )
         if combined is not None:
             display(combined)
             plt.close(combined)
             displayed.append(combined)
+        combined_max = plot_combined_agent_training_reward_max(record)
+        if combined_max is not None:
+            display(combined_max)
+            plt.close(combined_max)
+            displayed.append(combined_max)
+        eval_fig = plot_periodic_eval_reward_curve(
+            record,
+            title=f"{run_label} - periodic eval reward",
+        )
+        if eval_fig is not None:
+            display(eval_fig)
+            plt.close(eval_fig)
+            displayed.append(eval_fig)
     return displayed
 
 
@@ -873,29 +1087,8 @@ def plot_evaluation_agent_reward_boxplot(eval_record: dict, *, title: str):
 
 def reward_series(record: dict) -> np.ndarray:
     """Return a joint/aggregate reward series for either repo stats format."""
-    rewards = record.get("rewards")
-    if rewards is not None:
-        arr = np.asarray(rewards, dtype=np.float64)
-        if arr.ndim == 2 and arr.size:
-            return arr.sum(axis=0)
-        if arr.ndim == 1:
-            return arr
-
-    payload = _load_reward_payload(record)
-    curves = payload.get("reward_curve", {})
-    for key in ("joint", "total", "shared"):
-        values = curves.get(key)
-        if values:
-            return np.asarray(values, dtype=np.float64)
-    agent_curves = [
-        np.asarray(values, dtype=np.float64)
-        for label, values in curves.items()
-        if label.startswith("agent_") and values
-    ]
-    if agent_curves:
-        length = min(series.size for series in agent_curves)
-        return np.stack([series[:length] for series in agent_curves], axis=0).sum(axis=0)
-    return np.asarray([], dtype=np.float64)
+    _, values = joint_training_reward_series(record)
+    return values
 
 
 def reward_summary_rows(records: Iterable[dict], *, tail: int = 100) -> list[dict]:

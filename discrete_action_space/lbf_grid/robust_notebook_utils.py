@@ -10,13 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-
-try:
-    import torch
-    import torch.nn as nn
-except ImportError:  # pragma: no cover - notebooks require torch for learned policies
-    torch = None
-    nn = None
+import torch
+import torch.nn as nn
 
 _THIS_DIR = Path(__file__).resolve().parent
 _DISCRETE_DIR = _THIS_DIR.parent
@@ -28,57 +23,32 @@ for _path in (str(_DISCRETE_DIR), str(_BIMATRIX_DIR)):
 from stats_utils import save_training_stats
 
 from dueling_double_dqn_sre import DuelingDoubleDqnSreAgent, DuelingDoubleDqnSreAgentConfig
+from srac import SracAgent, SracConfig
 from sre_solvers import make_sre_solver
 
-SrAdidasAgent = None
-
-
-def _raise_standalone_sr_adidas_removed():
-    raise RuntimeError(
-        "Standalone SR-ADIDAS training was removed. Use Deep SRQ with "
-        "solver_name='sr_adidas_sre' to run SR-ADIDAS as a stage-game solver."
-    )
-
-try:
-    from .deep_srq_lbf import (
-        BASE_SEED,
-        DEEP_SRQ_LBF_HYPERPARAMS,
-        NFG_TRANSFORMER_SOLVER_NAMES,
-        _central_state,
-        _action_masks,
-        _global_state,
-        train_lbf_deep_srq_experiment,
-        train_lbf_deep_srq_vectorized_experiment,
-    )
-    from .epymarl_lbf_env import EPYMARL_LBF_SCENARIOS
-    from .instrumented_env import aggregate_lbf_episode_metrics, extract_lbf_metrics
-    from .notebook_eval import (
-        plot_evaluation_agent_reward_boxplot,
-        sample_lbf_rollouts,
-        sample_lbf_rollouts_vectorized,
-        save_rollout_video,
-    )
-    from .pz_wrapper import make_pz_env
-except ImportError:  # Script/notebook import from the lbf_grid directory
-    from deep_srq_lbf import (  # type: ignore
-        BASE_SEED,
-        DEEP_SRQ_LBF_HYPERPARAMS,
-        NFG_TRANSFORMER_SOLVER_NAMES,
-        _central_state,
-        _action_masks,
-        _global_state,
-        train_lbf_deep_srq_experiment,
-        train_lbf_deep_srq_vectorized_experiment,
-    )
-    from epymarl_lbf_env import EPYMARL_LBF_SCENARIOS  # type: ignore
-    from instrumented_env import aggregate_lbf_episode_metrics, extract_lbf_metrics  # type: ignore
-    from notebook_eval import (  # type: ignore
-        plot_evaluation_agent_reward_boxplot,
-        sample_lbf_rollouts,
-        sample_lbf_rollouts_vectorized,
-        save_rollout_video,
-    )
-    from pz_wrapper import make_pz_env  # type: ignore
+from .deep_srq_lbf import (
+    BASE_SEED,
+    NFG_TRANSFORMER_SOLVER_NAMES,
+    _action_masks,
+    deep_srq_lbf_hyperparams,
+    train_lbf_deep_srq_vectorized,
+)
+from .srac_lbf import _local_obs_matrix, train_lbf_srac_vectorized
+from .epymarl_lbf_env import EPYMARL_LBF_SCENARIOS
+from .instrumented_env import aggregate_lbf_episode_metrics, extract_lbf_metrics
+from .notebook_eval import (
+    agent_training_reward_series,
+    joint_training_reward_series,
+    plot_evaluation_agent_reward_boxplot,
+    plot_periodic_eval_reward_curve,
+    plot_training_reward_curve,
+    plot_training_reward_max_curve,
+    sample_lbf_rollouts,
+    sample_lbf_rollouts_vectorized,
+    save_rollout_video,
+)
+from .pz_wrapper import LBFParallelEnv
+from .state_action_encoding import canonical_lbf_state
 
 
 ROBUST_EPSILONS = (0.01, 0.1, 0.5, 1.0)
@@ -94,11 +64,54 @@ DEFAULT_NFG_TRANSFORMER_CHECKPOINT = (
 )
 DEEPSRQ_NFGTRANSFORMER_FAMILY = "deepsrq_nfgtransformer"
 DEEPSRQ_PATH_MCP_NPLAYER_POOL_FAMILY = "deepsrq_path_mcp_nplayer_pool"
-DEEPSRQ_SRED_GRADIENT_FAMILY = "deepsrq_sred_gradient"
+SRAC_FAMILY = "srac"
 PATH_C_POOL_SOLVER = "path_c_pool"
 PATH_MCP_NPLAYER_POOL_SOLVER = "path_mcp_nplayer_pool"
-SRED_GRADIENT_SOLVER = "sred_gd_sre"
+PATH_TVC_MCP_NPLAYER_POOL_SOLVER = "path_tvc_mcp_nplayer_pool"
+DEFAULT_PATH_POOL_NPLAYER_SOLVER = PATH_MCP_NPLAYER_POOL_SOLVER
 DEFAULT_PATH_MCP_NPLAYER_POOL_WORKERS = 8
+_DEFAULT_DEEP_SRQ_LBF_HP = deep_srq_lbf_hyperparams()
+
+
+def _merge_hyperparameter_overrides(base: dict | None, updates: dict) -> dict:
+    merged = {
+        key: dict(value) if isinstance(value, dict) else value
+        for key, value in dict(base or {}).items()
+    }
+    for section, section_updates in updates.items():
+        if isinstance(section_updates, dict):
+            existing = merged.get(section)
+            payload = dict(existing) if isinstance(existing, dict) else {}
+            payload.update(section_updates)
+            merged[section] = payload
+        else:
+            merged[section] = section_updates
+    return merged
+
+
+def _hp_section(hp: dict, section: str) -> dict:
+    payload = hp.get(section)
+    return payload if isinstance(payload, dict) else {}
+
+
+def _hp_value(hp: dict, section: str, field: str, default, *legacy_keys):
+    for key in legacy_keys:
+        if key in hp:
+            return hp[key]
+    if field in hp:
+        return hp[field]
+    section_payload = _hp_section(hp, section)
+    return section_payload.get(field, default)
+
+
+def _agent_hp(hp: dict, field: str, *legacy_keys):
+    return _hp_value(
+        hp,
+        "agent",
+        field,
+        getattr(_DEFAULT_DEEP_SRQ_LBF_HP.agent, field),
+        *legacy_keys,
+    )
 
 
 @dataclass(frozen=True)
@@ -141,8 +154,12 @@ def scenario_num_agents(scenario: LbfNotebookScenario) -> int:
     return int(num_agents)
 
 
-def deepsrq_path_pool_solver_for_scenario(scenario: LbfNotebookScenario) -> str:
-    return PATH_C_POOL_SOLVER if scenario_num_agents(scenario) == 2 else PATH_MCP_NPLAYER_POOL_SOLVER
+def deepsrq_path_pool_solver_for_scenario(
+    scenario: LbfNotebookScenario,
+    *,
+    nplayer_solver_name: str = DEFAULT_PATH_POOL_NPLAYER_SOLVER,
+) -> str:
+    return PATH_C_POOL_SOLVER if scenario_num_agents(scenario) == 2 else str(nplayer_solver_name)
 
 
 def lbf_grid_dir(repo_root: str | Path | None = None) -> Path:
@@ -212,42 +229,12 @@ def deepsrq_path_mcp_pool_evaluation_dir(
     )
 
 
-def deepsrq_sred_gradient_training_dir(
-    scenario_key: str,
-    epsilon: float,
-    *,
-    repo_root=None,
-) -> Path:
-    return robust_artifact_dir(
-        DEEPSRQ_SRED_GRADIENT_FAMILY,
-        "training",
-        scenario_key,
-        epsilon,
-        repo_root=repo_root,
-    )
+def srac_training_dir(scenario_key: str, epsilon: float, *, repo_root=None) -> Path:
+    return robust_artifact_dir(SRAC_FAMILY, "training", scenario_key, epsilon, repo_root=repo_root)
 
 
-def deepsrq_sred_gradient_evaluation_dir(
-    scenario_key: str,
-    epsilon: float,
-    *,
-    repo_root=None,
-) -> Path:
-    return robust_artifact_dir(
-        DEEPSRQ_SRED_GRADIENT_FAMILY,
-        "evaluation",
-        scenario_key,
-        epsilon,
-        repo_root=repo_root,
-    )
-
-
-def sr_adidas_training_dir(scenario_key: str, epsilon: float, *, repo_root=None) -> Path:
-    return robust_artifact_dir("sr_adidas", "training", scenario_key, epsilon, repo_root=repo_root)
-
-
-def sr_adidas_evaluation_dir(scenario_key: str, epsilon: float, *, repo_root=None) -> Path:
-    return robust_artifact_dir("sr_adidas", "evaluation", scenario_key, epsilon, repo_root=repo_root)
+def srac_evaluation_dir(scenario_key: str, epsilon: float, *, repo_root=None) -> Path:
+    return robust_artifact_dir(SRAC_FAMILY, "evaluation", scenario_key, epsilon, repo_root=repo_root)
 
 
 def _json_safe(value):
@@ -265,11 +252,11 @@ def _json_safe(value):
 
 
 def probe_lbf(config: dict, *, seed: int = BASE_SEED) -> tuple[int, int, int, list[str]]:
-    env = make_pz_env(**config)
+    env = LBFParallelEnv(**config)
     try:
         obs_dict, _ = env.reset(seed=seed)
         agent_order = list(env.possible_agents)
-        obs_dim = int(_global_state(env, obs_dict, agent_order).shape[0])
+        obs_dim = int(canonical_lbf_state(env, agent_order).shape[0])
         num_agents = len(agent_order)
         num_actions = int(env.action_space(agent_order[0]).n)
         return obs_dim, num_agents, num_actions, agent_order
@@ -277,108 +264,77 @@ def probe_lbf(config: dict, *, seed: int = BASE_SEED) -> tuple[int, int, int, li
         env.close()
 
 
-def _rolling_mean(values, window: int):
-    values = np.asarray(values, dtype=np.float64)
-    if values.size == 0:
-        return values
-    window = max(1, min(int(window), int(values.size)))
-    prefix = np.concatenate(([0.0], np.cumsum(values)))
-    ends = np.arange(1, values.size + 1)
-    starts = np.maximum(0, ends - window)
-    sums = prefix[ends] - prefix[starts]
-    counts = ends - starts
-    return sums / counts
-
-
-def _reward_smoothing_window(stats: dict, n_episodes: int) -> int:
-    configured = stats.get("training_reward_smoothing_window")
-    if configured is not None:
-        return max(1, min(int(configured), int(n_episodes)))
-    return max(5, min(100, max(1, int(n_episodes) // 20)))
-
-
 def write_training_reward_plots(stats: dict, output_dir: str | Path) -> dict:
     import matplotlib.pyplot as plt
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    rewards = np.asarray(stats.get("rewards", []), dtype=np.float64)
-    if rewards.ndim != 2 or rewards.size == 0:
+    episodes, series = agent_training_reward_series(stats)
+    if not episodes or not series:
         return {}
-    episodes = np.arange(1, rewards.shape[1] + 1)
-    labels = stats.get("agent_labels") or [
-        f"Agent {idx + 1}" for idx in range(rewards.shape[0])
-    ]
-    smoothing_window = _reward_smoothing_window(stats, rewards.shape[1])
 
     plot_paths = {}
-    for idx, values in enumerate(rewards):
-        smoothed = _rolling_mean(values, smoothing_window)
-        fig, ax = plt.subplots(figsize=(10, 3.8))
-        ax.scatter(
-            episodes,
+    for idx, (label, values) in enumerate(series):
+        fig = plot_training_reward_curve(
+            episodes[: values.size],
             values,
-            s=10,
-            alpha=0.28,
-            linewidths=0,
-            label="episode reward",
+            title=f"{stats.get('scenario_key', 'scenario')} - {label}",
         )
-        ax.plot(
-            episodes,
-            smoothed,
-            linewidth=2.0,
-            alpha=0.95,
-            label=f"{smoothing_window}-episode rolling mean",
-        )
-        mean = float(values.mean())
-        std = float(values.std())
-        ax.axhline(mean, color="black", linestyle=":", linewidth=1.3)
-        ax.text(
-            0.99,
-            0.95,
-            f"mean={mean:.4f}\nstd={std:.4f}",
-            transform=ax.transAxes,
-            ha="right",
-            va="top",
-            bbox={"boxstyle": "round,pad=0.25", "facecolor": "white", "alpha": 0.82},
-        )
-        ax.set_title(f"{stats.get('scenario_key', 'scenario')} - {labels[idx]}")
-        ax.set_xlabel("Episode")
-        ax.set_ylabel("Training reward")
-        ax.grid(alpha=0.25)
-        ax.legend(loc="upper left")
-        fig.tight_layout()
         path = output_dir / f"agent_{idx + 1}_training_reward.png"
-        fig.savefig(path, dpi=150)
-        plt.close(fig)
-        plot_paths[f"agent_{idx + 1}"] = str(path)
+        if fig is not None:
+            fig.savefig(path, dpi=150)
+            plt.close(fig)
+            plot_paths[f"agent_{idx + 1}"] = str(path)
 
-    fig, ax = plt.subplots(figsize=(10, 3.8))
-    for idx, values in enumerate(rewards):
-        smoothed = _rolling_mean(values, smoothing_window)
-        ax.scatter(
-            episodes,
+        max_fig = plot_training_reward_max_curve(
+            episodes[: values.size],
             values,
-            s=8,
-            alpha=0.18,
-            linewidths=0,
+            title=(
+                f"{stats.get('scenario_key', 'scenario')} - "
+                f"{label} max reward per 100 episodes"
+            ),
         )
-        ax.plot(
-            episodes,
-            smoothed,
-            linewidth=1.9,
-            label=f"{labels[idx]} rolling mean",
+        max_path = output_dir / f"agent_{idx + 1}_training_reward_max_100.png"
+        if max_fig is not None:
+            max_fig.savefig(max_path, dpi=150)
+            plt.close(max_fig)
+            plot_paths[f"agent_{idx + 1}_max_100"] = str(max_path)
+
+    joint_episodes, joint_values = joint_training_reward_series(stats)
+    if joint_episodes and joint_values.size:
+        combined_fig = plot_training_reward_curve(
+            joint_episodes[: joint_values.size],
+            joint_values,
+            title=f"{stats.get('scenario_key', 'scenario')} - joint training reward",
         )
-    ax.set_title(f"{stats.get('scenario_key', 'scenario')} - agent reward comparison")
-    ax.set_xlabel("Episode")
-    ax.set_ylabel(f"Training reward ({smoothing_window}-episode rolling mean)")
-    ax.grid(alpha=0.25)
-    ax.legend()
-    fig.tight_layout()
-    combined_path = output_dir / "combined_agent_training_rewards.png"
-    fig.savefig(combined_path, dpi=150)
-    plt.close(fig)
-    plot_paths["combined"] = str(combined_path)
+        combined_path = output_dir / "combined_agent_training_rewards.png"
+        if combined_fig is not None:
+            combined_fig.savefig(combined_path, dpi=150)
+            plt.close(combined_fig)
+            plot_paths["combined"] = str(combined_path)
+
+        combined_max_fig = plot_training_reward_max_curve(
+            joint_episodes[: joint_values.size],
+            joint_values,
+            title=(
+                f"{stats.get('scenario_key', 'scenario')} - "
+                "joint max reward per 100 episodes"
+            ),
+        )
+        combined_max_path = output_dir / "combined_agent_training_rewards_max_100.png"
+        if combined_max_fig is not None:
+            combined_max_fig.savefig(combined_max_path, dpi=150)
+            plt.close(combined_max_fig)
+            plot_paths["combined_max_100"] = str(combined_max_path)
+    eval_fig = plot_periodic_eval_reward_curve(
+        stats,
+        title=f"{stats.get('scenario_key', 'scenario')} - periodic eval reward",
+    )
+    eval_path = output_dir / "periodic_eval_reward.png"
+    if eval_fig is not None:
+        eval_fig.savefig(eval_path, dpi=150)
+        plt.close(eval_fig)
+        plot_paths["periodic_eval"] = str(eval_path)
     return plot_paths
 
 
@@ -436,7 +392,7 @@ def train_deepsrq_nfgtransformer_for_epsilon(
     use_gpu: bool = True,
     eval_interval: int | None = 100,
     eval_episodes: int = 5,
-    num_envs: int = 1,
+    num_envs: int = 2,
     eval_num_envs: int | None = None,
     hyperparameter_overrides: dict | None = None,
     repo_root: str | Path | None = None,
@@ -448,30 +404,21 @@ def train_deepsrq_nfgtransformer_for_epsilon(
     results = {}
     for scenario_index, scenario in enumerate(scenarios):
         run_dir = deepsrq_training_dir(scenario.key, epsilon, repo_root=repo_root)
-        hp = dict(hyperparameter_overrides or {})
-        hp.update(
+        hp = _merge_hyperparameter_overrides(
+            hyperparameter_overrides,
             {
-                "nfg_checkpoint_path": str(checkpoint),
-                "nfg_accept_gap": nfg_accept_gap,
-                "nfg_fallback_enabled": False,
-                "sre_uniform_fallback_enabled": False,
-            }
+                "nfg_transformer": {
+                    "checkpoint_path": str(checkpoint),
+                    "accept_exploitability_tol": nfg_accept_gap,
+                    "fallback_enabled": False,
+                },
+                "agent": {
+                    "sre_uniform_fallback_enabled": False,
+                },
+            },
         )
         seed = int(base_seed + scenario_index)
-        trainer = (
-            train_lbf_deep_srq_vectorized_experiment
-            if int(num_envs) > 1
-            else train_lbf_deep_srq_experiment
-        )
-        trainer_kwargs = {}
-        if int(num_envs) > 1:
-            trainer_kwargs.update(
-                {
-                    "num_envs": int(num_envs),
-                    "eval_num_envs": int(eval_num_envs or num_envs),
-                }
-            )
-        stats = trainer(
+        stats = train_lbf_deep_srq_vectorized(
             n_episodes=n_episodes,
             solver_name="nfg_transformer_sre",
             epsilon_robust_initial=float(epsilon),
@@ -485,10 +432,11 @@ def train_deepsrq_nfgtransformer_for_epsilon(
             include_replay_buffer=True,
             eval_interval=eval_interval,
             eval_episodes=eval_episodes,
+            num_envs=int(num_envs),
+            eval_num_envs=int(eval_num_envs or num_envs),
             print_full_stats=False,
             scenario_key=scenario.key,
             scenario_name=scenario.name,
-            **trainer_kwargs,
         )
         stats.update(
             {
@@ -531,6 +479,9 @@ def train_deepsrq_path_mcp_pool_for_epsilon(
     eval_interval: int | None = 100,
     eval_episodes: int = 5,
     sre_solver_workers: int = DEFAULT_PATH_MCP_NPLAYER_POOL_WORKERS,
+    num_envs: int = 2,
+    eval_num_envs: int | None = None,
+    nplayer_solver_name: str = DEFAULT_PATH_POOL_NPLAYER_SOLVER,
     hyperparameter_overrides: dict | None = None,
     repo_root: str | Path | None = None,
 ) -> dict[str, dict]:
@@ -542,11 +493,20 @@ def train_deepsrq_path_mcp_pool_for_epsilon(
             epsilon,
             repo_root=repo_root,
         )
-        solver_name = deepsrq_path_pool_solver_for_scenario(scenario)
-        hp = dict(hyperparameter_overrides or {})
-        hp["sre_solver_workers"] = int(sre_solver_workers)
+        solver_name = deepsrq_path_pool_solver_for_scenario(
+            scenario,
+            nplayer_solver_name=nplayer_solver_name,
+        )
+        hp = _merge_hyperparameter_overrides(
+            hyperparameter_overrides,
+            {
+                "path_mcp_pool": {
+                    "max_workers": int(sre_solver_workers),
+                }
+            },
+        )
         seed = int(base_seed + scenario_index)
-        stats = train_lbf_deep_srq_experiment(
+        stats = train_lbf_deep_srq_vectorized(
             n_episodes=n_episodes,
             solver_name=solver_name,
             epsilon_robust_initial=float(epsilon),
@@ -560,6 +520,8 @@ def train_deepsrq_path_mcp_pool_for_epsilon(
             include_replay_buffer=True,
             eval_interval=eval_interval,
             eval_episodes=eval_episodes,
+            num_envs=int(num_envs),
+            eval_num_envs=int(eval_num_envs or num_envs),
             print_full_stats=False,
             scenario_key=scenario.key,
             scenario_name=scenario.name,
@@ -574,6 +536,8 @@ def train_deepsrq_path_mcp_pool_for_epsilon(
                 "epsilon_schedule": "constant",
                 "solver_name": solver_name,
                 "sre_solver_workers": int(sre_solver_workers),
+                "num_envs": int(num_envs),
+                "eval_num_envs": int(eval_num_envs or num_envs),
             }
         )
         stats["training_reward_plot_paths"] = write_training_reward_plots(stats, run_dir)
@@ -589,9 +553,11 @@ def train_deepsrq_path_mcp_pool_for_epsilon(
         "algorithm": DEEPSRQ_PATH_MCP_NPLAYER_POOL_FAMILY,
         "solver_selection": {
             "2_player": PATH_C_POOL_SOLVER,
-            "n_player": PATH_MCP_NPLAYER_POOL_SOLVER,
+            "n_player": str(nplayer_solver_name),
         },
         "sre_solver_workers": int(sre_solver_workers),
+        "num_envs": int(num_envs),
+        "eval_num_envs": int(eval_num_envs or num_envs),
         "epsilon": float(epsilon),
         "results": results,
     }
@@ -605,7 +571,7 @@ def train_deepsrq_path_mcp_pool_for_epsilon(
     return results
 
 
-def train_deepsrq_sred_gradient_for_epsilon(
+def train_srac_for_epsilon(
     epsilon: float,
     *,
     n_episodes: int,
@@ -614,37 +580,25 @@ def train_deepsrq_sred_gradient_for_epsilon(
     use_gpu: bool = True,
     eval_interval: int | None = 100,
     eval_episodes: int = 5,
-    num_envs: int = 1,
+    sre_solver_workers: int | None = None,
+    num_envs: int = 2,
     eval_num_envs: int | None = None,
     hyperparameter_overrides: dict | None = None,
     repo_root: str | Path | None = None,
 ) -> dict[str, dict]:
     scenarios = scenarios or robust_lbf_scenarios()
+    hp = hyperparameter_overrides
+    if sre_solver_workers is not None:
+        hp = _merge_hyperparameter_overrides(
+            hyperparameter_overrides,
+            {"agent": {"sre_solver_workers": int(sre_solver_workers)}},
+        )
     results = {}
     for scenario_index, scenario in enumerate(scenarios):
-        run_dir = deepsrq_sred_gradient_training_dir(
-            scenario.key,
-            epsilon,
-            repo_root=repo_root,
-        )
-        hp = dict(hyperparameter_overrides or {})
+        run_dir = srac_training_dir(scenario.key, epsilon, repo_root=repo_root)
         seed = int(base_seed + scenario_index)
-        trainer = (
-            train_lbf_deep_srq_vectorized_experiment
-            if int(num_envs) > 1
-            else train_lbf_deep_srq_experiment
-        )
-        trainer_kwargs = {}
-        if int(num_envs) > 1:
-            trainer_kwargs.update(
-                {
-                    "num_envs": int(num_envs),
-                    "eval_num_envs": int(eval_num_envs or num_envs),
-                }
-            )
-        stats = trainer(
+        stats = train_lbf_srac_vectorized(
             n_episodes=n_episodes,
-            solver_name=SRED_GRADIENT_SOLVER,
             epsilon_robust_initial=float(epsilon),
             epsilon_schedule="constant",
             seed=seed,
@@ -656,20 +610,23 @@ def train_deepsrq_sred_gradient_for_epsilon(
             include_replay_buffer=True,
             eval_interval=eval_interval,
             eval_episodes=eval_episodes,
+            num_envs=int(num_envs),
+            eval_num_envs=int(eval_num_envs or num_envs),
             print_full_stats=False,
             scenario_key=scenario.key,
             scenario_name=scenario.name,
-            **trainer_kwargs,
         )
         stats.update(
             {
-                "algorithm": DEEPSRQ_SRED_GRADIENT_FAMILY,
+                "algorithm": SRAC_FAMILY,
                 "scenario_key": scenario.key,
                 "scenario_name": scenario.name,
                 "gym_id": scenario.gym_id,
                 "time_limit": scenario.time_limit,
                 "epsilon_schedule": "constant",
-                "solver_name": SRED_GRADIENT_SOLVER,
+                "sre_solver_workers": None
+                if sre_solver_workers is None
+                else int(sre_solver_workers),
                 "num_envs": int(num_envs),
                 "eval_num_envs": int(eval_num_envs or num_envs),
             }
@@ -678,382 +635,23 @@ def train_deepsrq_sred_gradient_for_epsilon(
         stats["summary_path"] = str(write_training_summary(stats, run_dir))
         save_training_stats(run_dir / "training_stats.json", stats)
         _print_live_training_status(
-            f"DeepSRQ SRED gradient {scenario.key} eps={epsilon_slug(epsilon)}",
+            f"SRAC {scenario.key} eps={epsilon_slug(epsilon)}",
             n_episodes,
             stats,
         )
         results[scenario.key] = stats
     manifest = {
-        "algorithm": DEEPSRQ_SRED_GRADIENT_FAMILY,
-        "solver_name": SRED_GRADIENT_SOLVER,
+        "algorithm": SRAC_FAMILY,
+        "sre_solver_workers": None
+        if sre_solver_workers is None
+        else int(sre_solver_workers),
         "num_envs": int(num_envs),
         "eval_num_envs": int(eval_num_envs or num_envs),
         "epsilon": float(epsilon),
         "results": results,
     }
     save_training_stats(
-        lbf_grid_dir(repo_root)
-        / DEEPSRQ_SRED_GRADIENT_FAMILY
-        / "training"
-        / f"manifest_eps_{epsilon_slug(epsilon)}.json",
-        manifest,
-    )
-    return results
-
-
-def _evaluate_sr_adidas_agent(agent, *, lbf_env_config, seed, n_episodes, max_steps=None):
-    old_start = agent.action_eps_schedule.start
-    old_end = agent.action_eps_schedule.end
-    agent.action_eps_schedule.start = 0.0
-    agent.action_eps_schedule.end = 0.0
-    rewards = []
-    episode_metrics = []
-    episode_lengths = []
-    try:
-        for episode in range(int(n_episodes)):
-            env = make_pz_env(**lbf_env_config)
-            try:
-                obs_dict, reset_info = env.reset(seed=int(seed) + episode)
-                latest_metrics = extract_lbf_metrics(reset_info)
-                agent_order = list(env.possible_agents)
-                totals = np.zeros(len(agent_order), dtype=np.float64)
-                steps = 0
-                while env.agents and (max_steps is None or steps < int(max_steps)):
-                    state = _central_state(obs_dict, agent_order)
-                    action_list = agent.act_all(state)
-                    action_dict = {
-                        agent_name: int(action_list[agent_id])
-                        for agent_id, agent_name in enumerate(agent_order)
-                    }
-                    obs_dict, reward_dict, term_dict, trunc_dict, step_info = env.step(action_dict)
-                    latest_metrics = extract_lbf_metrics(step_info) or latest_metrics
-                    totals += np.asarray(
-                        [reward_dict.get(agent_name, 0.0) for agent_name in agent_order],
-                        dtype=np.float64,
-                    )
-                    steps += 1
-                    if all(
-                        bool(term_dict.get(agent_name, False))
-                        or bool(trunc_dict.get(agent_name, False))
-                        for agent_name in agent_order
-                    ):
-                        break
-                rewards.append(totals.tolist())
-                episode_lengths.append(int(steps))
-                episode_metrics.append(latest_metrics)
-            finally:
-                env.close()
-    finally:
-        agent.action_eps_schedule.start = old_start
-        agent.action_eps_schedule.end = old_end
-    rewards_arr = np.asarray(rewards, dtype=np.float64)
-    return {
-        "episode_rewards": rewards,
-        "joint_rewards": rewards_arr.sum(axis=1).tolist() if rewards_arr.size else [],
-        "episode_lengths": episode_lengths,
-        "episode_metrics": episode_metrics,
-        "metric_totals": aggregate_lbf_episode_metrics(
-            episode_metrics,
-            rewards_arr.shape[1] if rewards_arr.ndim == 2 else None,
-        ),
-        "mean_joint_reward": None if rewards_arr.size == 0 else float(rewards_arr.sum(axis=1).mean()),
-    }
-
-
-def train_lbf_sr_adidas_experiment(
-    *,
-    scenario: LbfNotebookScenario,
-    epsilon: float,
-    run_dir: str | Path,
-    n_episodes: int,
-    seed: int = BASE_SEED,
-    use_gpu: bool = True,
-    eval_interval: int | None = 100,
-    eval_episodes: int = 5,
-    num_envs: int = 1,
-    eval_num_envs: int | None = None,
-    hyperparameter_overrides: dict | None = None,
-) -> dict:
-    if torch is None:
-        raise ImportError("SR-ADIDAS LBF training requires torch.")
-    hp = dict(hyperparameter_overrides or {})
-    trainer = (
-        train_lbf_deep_srq_vectorized_experiment
-        if int(num_envs) > 1
-        else train_lbf_deep_srq_experiment
-    )
-    trainer_kwargs = {}
-    if int(num_envs) > 1:
-        trainer_kwargs.update(
-            {
-                "num_envs": int(num_envs),
-                "eval_num_envs": int(eval_num_envs or num_envs),
-            }
-        )
-    return trainer(
-        n_episodes=n_episodes,
-        solver_name="sr_adidas_sre",
-        epsilon_robust_initial=float(epsilon),
-        epsilon_schedule="constant",
-        seed=seed,
-        run_dir=run_dir,
-        lbf_config_overrides=scenario.config,
-        hyperparameter_overrides=hp,
-        use_gpu=use_gpu,
-        write_plots=False,
-        include_replay_buffer=True,
-        eval_interval=eval_interval,
-        eval_episodes=eval_episodes,
-        print_full_stats=False,
-        scenario_key=scenario.key,
-        scenario_name=scenario.name,
-        **trainer_kwargs,
-    )
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
-
-    run_dir = Path(run_dir)
-    run_dir.mkdir(parents=True, exist_ok=True)
-    hp = {
-        "lr_q": 3e-4,
-        "lr_pi": 1e-3,
-        "gamma": 0.99,
-        "buffer_size": 5000,
-        "batch_size": 16,
-        "learning_starts": 100,
-        "grad_clip": 10.0,
-        "target_update_steps": 250,
-        "train_every": 4,
-        "network_type": "shared_trunk_separate_heads",
-        "action_epsilon_start": 1.0,
-        "action_epsilon_end": 0.05,
-        "action_epsilon_decay_fraction": 0.6,
-    }
-    hp.update(hyperparameter_overrides or {})
-    obs_dim, num_agents, num_actions, agent_order = probe_lbf(
-        scenario.config, seed=seed
-    )
-    max_steps = int(scenario.config.get("max_episode_steps", scenario.time_limit))
-    total_steps = int(n_episodes) * max_steps
-    agent = SrAdidasAgent(
-        obs_dim=obs_dim,
-        num_agents=num_agents,
-        num_actions=num_actions,
-        epsilon_robust=float(epsilon),
-        epsilon_robust_end=float(epsilon),
-        epsilon_robust_decay_fraction=1.0,
-        total_steps=total_steps,
-        use_gpu=use_gpu,
-        **hp,
-    )
-
-    rewards_history = [[] for _ in range(num_agents)]
-    episode_lengths = []
-    eval_history = []
-    best_joint_reward = -float("inf")
-    best_eval_joint_reward = -float("inf")
-    best_loss = None
-    latest_loss = None
-    global_step = 0
-    training_start = time.perf_counter()
-    try:
-        for episode in range(int(n_episodes)):
-            env = make_pz_env(**scenario.config)
-            try:
-                obs_dict, _ = env.reset(seed=seed + episode)
-                order = list(env.possible_agents)
-                state = _central_state(obs_dict, order)
-                ep_rewards = np.zeros(num_agents, dtype=np.float64)
-                steps = 0
-                while env.agents and steps < max_steps:
-                    actions = agent.act_all(state)
-                    action_dict = {
-                        agent_name: int(actions[agent_id])
-                        for agent_id, agent_name in enumerate(order)
-                    }
-                    next_obs, reward_dict, term_dict, trunc_dict, _ = env.step(action_dict)
-                    next_state = _central_state(next_obs, order)
-                    reward_vec = np.asarray(
-                        [reward_dict.get(agent_name, 0.0) for agent_name in order],
-                        dtype=np.float32,
-                    )
-                    done = all(
-                        bool(term_dict.get(agent_name, False))
-                        or bool(trunc_dict.get(agent_name, False))
-                        for agent_name in order
-                    )
-                    agent.push(state, actions, reward_vec, next_state, done)
-                    update = agent.maybe_train()
-                    if update is not None:
-                        latest_loss = float(update.get("q_loss", 0.0) + update.get("pi_loss", 0.0))
-                        if best_loss is None or latest_loss < best_loss:
-                            best_loss = latest_loss
-                    ep_rewards += reward_vec
-                    state = next_state
-                    global_step += 1
-                    steps += 1
-                    if done:
-                        break
-                for agent_id, reward in enumerate(ep_rewards):
-                    rewards_history[agent_id].append(float(reward))
-                episode_lengths.append(int(steps))
-            finally:
-                env.close()
-
-            joint_reward = float(ep_rewards.sum())
-            if eval_interval and (episode + 1) % int(eval_interval) == 0:
-                eval_record = _evaluate_sr_adidas_agent(
-                    agent,
-                    lbf_env_config=scenario.config,
-                    seed=seed + 50_000 + episode,
-                    n_episodes=eval_episodes,
-                    max_steps=max_steps,
-                )
-                eval_record.update(
-                    {
-                        "episode": int(episode + 1),
-                        "global_step": int(global_step),
-                        "gradient_step": int(len(agent.train_losses_q)),
-                    }
-                )
-                eval_history.append(eval_record)
-                mean_eval = eval_record.get("mean_joint_reward")
-                if mean_eval is not None and mean_eval > best_eval_joint_reward:
-                    best_eval_joint_reward = float(mean_eval)
-                    agent.save_checkpoint(
-                        run_dir / "shared_sr_adidas_best.pt",
-                        include_replay_buffer=True,
-                        metadata={"best_source": "periodic_eval_reward"},
-                    )
-                print(
-                    f"[ep {episode + 1:5d}] train_joint={joint_reward:8.4f} | "
-                    f"eval_joint={mean_eval if mean_eval is not None else float('nan'):8.4f} | "
-                    f"best_loss={best_loss if best_loss is not None else float('nan'):.6f} | "
-                    f"latest_loss={latest_loss if latest_loss is not None else float('nan'):.6f} | "
-                    f"tau={agent.tau:.5f} | adi={agent.adi_estimates[-1] if agent.adi_estimates else float('nan'):.6f}"
-                )
-            if not eval_history and joint_reward > best_joint_reward:
-                best_joint_reward = joint_reward
-                agent.save_checkpoint(
-                    run_dir / "shared_sr_adidas_best.pt",
-                    include_replay_buffer=True,
-                    metadata={"best_source": "training_reward"},
-                )
-
-        agent.save_checkpoint(
-            run_dir / "shared_sr_adidas_final.pt",
-            include_replay_buffer=True,
-            metadata={"best_source": "final"},
-        )
-    finally:
-        wall_clock_seconds = time.perf_counter() - training_start
-
-    stats = {
-        "environment": "lbf_grid",
-        "algorithm": "sr_adidas",
-        "scenario_key": scenario.key,
-        "scenario_name": scenario.name,
-        "gym_id": scenario.gym_id,
-        "time_limit": scenario.time_limit,
-        "lbf_config": dict(scenario.config),
-        "rewards": rewards_history,
-        "n_episodes": int(n_episodes),
-        "seed": int(seed),
-        "epsilon_robust_initial": float(epsilon),
-        "epsilon_schedule": "constant",
-        "hyperparameters": hp,
-        "num_agents": int(num_agents),
-        "num_actions": int(num_actions),
-        "obs_dim": int(obs_dim),
-        "agent_order": list(agent_order),
-        "total_environment_steps": int(global_step),
-        "gradient_steps": int(len(agent.train_losses_q)),
-        "episode_lengths": episode_lengths,
-        "train_losses_q": list(agent.train_losses_q),
-        "train_losses_pi": list(agent.train_losses_pi),
-        "adi_estimates": list(agent.adi_estimates),
-        "best_loss": best_loss,
-        "latest_loss": latest_loss,
-        "periodic_eval": eval_history,
-        "best_joint_reward": float(best_joint_reward),
-        "best_eval_joint_reward": None if best_eval_joint_reward == -float("inf") else float(best_eval_joint_reward),
-        "checkpoint_paths": {
-            "best": str(run_dir / "shared_sr_adidas_best.pt"),
-            "final": str(run_dir / "shared_sr_adidas_final.pt"),
-        },
-        "wall_clock_seconds": float(wall_clock_seconds),
-        "agent_labels": [f"Agent {idx + 1} (SR-ADIDAS)" for idx in range(num_agents)],
-        "artifact_dir": str(run_dir),
-        "stats_path": str(run_dir / "training_stats.json"),
-    }
-    stats["training_reward_plot_paths"] = write_training_reward_plots(stats, run_dir)
-    stats["summary_path"] = str(write_training_summary(stats, run_dir))
-    save_training_stats(run_dir / "training_stats.json", stats)
-    return stats
-
-
-def train_sr_adidas_for_epsilon(
-    epsilon: float,
-    *,
-    n_episodes: int,
-    scenarios: tuple[LbfNotebookScenario, ...] | None = None,
-    base_seed: int = BASE_SEED,
-    use_gpu: bool = True,
-    eval_interval: int | None = 100,
-    eval_episodes: int = 5,
-    num_envs: int = 1,
-    eval_num_envs: int | None = None,
-    hyperparameter_overrides: dict | None = None,
-    repo_root: str | Path | None = None,
-) -> dict[str, dict]:
-    scenarios = scenarios or robust_lbf_scenarios()
-    results = {}
-    for scenario_index, scenario in enumerate(scenarios):
-        run_dir = sr_adidas_training_dir(scenario.key, epsilon, repo_root=repo_root)
-        stats = train_lbf_sr_adidas_experiment(
-            scenario=scenario,
-            epsilon=epsilon,
-            run_dir=run_dir,
-            n_episodes=n_episodes,
-            seed=int(base_seed + scenario_index),
-            use_gpu=use_gpu,
-            eval_interval=eval_interval,
-            eval_episodes=eval_episodes,
-            num_envs=num_envs,
-            eval_num_envs=eval_num_envs,
-            hyperparameter_overrides=hyperparameter_overrides,
-        )
-        stats.update(
-            {
-                "algorithm": "sr_adidas",
-                "solver_name": "sr_adidas_sre",
-                "scenario_key": scenario.key,
-                "scenario_name": scenario.name,
-                "gym_id": scenario.gym_id,
-                "time_limit": scenario.time_limit,
-                "epsilon_schedule": "constant",
-                "num_envs": int(num_envs),
-                "eval_num_envs": int(eval_num_envs or num_envs),
-            }
-        )
-        stats["training_reward_plot_paths"] = write_training_reward_plots(stats, run_dir)
-        stats["summary_path"] = str(write_training_summary(stats, run_dir))
-        save_training_stats(run_dir / "training_stats.json", stats)
-        _print_live_training_status(f"SR-ADIDAS {scenario.key} eps={epsilon_slug(epsilon)}", n_episodes, stats)
-        results[scenario.key] = stats
-    manifest = {
-        "algorithm": "sr_adidas",
-        "solver_name": "sr_adidas_sre",
-        "num_envs": int(num_envs),
-        "eval_num_envs": int(eval_num_envs or num_envs),
-        "epsilon": float(epsilon),
-        "results": results,
-    }
-    save_training_stats(
-        lbf_grid_dir(repo_root) / "sr_adidas" / "training" / f"manifest_eps_{epsilon_slug(epsilon)}.json",
+        lbf_grid_dir(repo_root) / SRAC_FAMILY / "training" / f"manifest_eps_{epsilon_slug(epsilon)}.json",
         manifest,
     )
     return results
@@ -1101,23 +699,34 @@ class DeepSrqPolicyAdapter:
         self.agent.close()
 
 
-class SrAdidasPolicyAdapter:
-    label = "sr_adidas"
+class SracPolicyAdapter:
+    label = "srac"
 
-    def __init__(self, agent: SrAdidasAgent):
+    def __init__(self, agent: SracAgent):
         self.agent = agent
-        self._old_eps = (agent.action_eps_schedule.start, agent.action_eps_schedule.end)
-        self.agent.action_eps_schedule.start = 0.0
-        self.agent.action_eps_schedule.end = 0.0
 
-    def act_all(self, *, state, **_kwargs):
-        return self.agent.act_all(state)
+    def act_all(self, *, state, obs_dict, agent_order, action_masks=None, **_kwargs):
+        return self.agent.act_joint(
+            state,
+            _local_obs_matrix(obs_dict, agent_order),
+            action_masks=action_masks,
+        )
 
     def act_all_batch(self, contexts):
-        return [self.act_all(state=context["state"]) for context in contexts]
+        states = [context["state"] for context in contexts]
+        local_obs_batch = [
+            _local_obs_matrix(context["obs_dict"], context["agent_order"])
+            for context in contexts
+        ]
+        action_masks_batch = [context.get("action_masks") for context in contexts]
+        return self.agent.act_joint_batch(
+            states,
+            local_obs_batch,
+            action_masks_batch=action_masks_batch,
+        )
 
     def close(self):
-        self.agent.action_eps_schedule.start, self.agent.action_eps_schedule.end = self._old_eps
+        self.agent.close()
 
 
 class _EpymarlRnnAgent(nn.Module):
@@ -1148,8 +757,6 @@ class EpymarlPolicyAdapter:
     """Lightweight in-process adapter for EPyMARL RNN checkpoints."""
 
     def __init__(self, checkpoint_dir: str | Path, *, algorithm: str, device=None):
-        if torch is None:
-            raise ImportError("EPyMARL policy evaluation requires torch.")
         self.label = str(algorithm).lower()
         self.checkpoint_dir = Path(checkpoint_dir)
         state = torch.load(self.checkpoint_dir / "agent.th", map_location="cpu")
@@ -1276,47 +883,37 @@ def load_deepsrq_policy(
         checkpoint = run_dir / "shared_deepsrq_final.pt"
     hp = dict(stats.get("hyperparameters", {}))
     solver_name = stats.get("solver_name", "nfg_transformer_sre")
-    if solver_name in {"sr_adidas_sre", "sr_adidas"}:
-        solver = make_sre_solver(
-            solver_name,
-            random_seed=int(stats.get("seed", BASE_SEED)),
-            max_iters=hp.get("sr_adidas_max_iters", 200),
-            lr=hp.get("sr_adidas_lr", 0.2),
-            tau_init=hp.get("sr_adidas_tau_init", 10.0),
-            tau_min=hp.get("sr_adidas_tau_min", 1e-3),
-            tau_threshold=hp.get("sr_adidas_tau_threshold", 1e-4),
-            device=hp.get("sr_adidas_device"),
+    if solver_name not in NFG_TRANSFORMER_SOLVER_NAMES:
+        raise ValueError(
+            f"Unsupported LBF Deep SRQ checkpoint solver after cleanup: {solver_name}"
         )
-    elif solver_name in {"sred_gradient_sre", "sred_gd_sre", "sred_gd"}:
-        solver = make_sre_solver(
-            solver_name,
-            random_seed=int(stats.get("seed", BASE_SEED)),
-            max_iters=hp.get("sred_max_iters", 250),
-            lr=hp.get("sred_lr", 0.05),
-            optimizer=hp.get("sred_optimizer", "adam"),
-            br_temperature=hp.get("sred_br_temperature", 0.05),
-            gap_temperature=hp.get("sred_gap_temperature", 0.01),
-            gradient_clip_norm=hp.get("sred_gradient_clip_norm", 10.0),
-            eval_every=hp.get("sred_eval_every", 10),
-            device=hp.get("sred_device"),
-        )
-    else:
-        solver = make_sre_solver(
-            solver_name,
-            random_seed=int(stats.get("seed", BASE_SEED)),
-            checkpoint_path=hp.get("nfg_checkpoint_path"),
-            device=hp.get("nfg_device"),
-            fallback_enabled=False
-            if solver_name in NFG_TRANSFORMER_SOLVER_NAMES
-            else hp.get(
-                "nfg_fallback_enabled",
-                DEEP_SRQ_LBF_HYPERPARAMS["nfg_fallback_enabled"],
-            ),
-            compute_exploitability_diagnostics=False
-            if solver_name in NFG_TRANSFORMER_SOLVER_NAMES
-            else hp.get("nfg_compute_exploitability_diagnostics", True),
-            accept_exploitability_tol=hp.get("nfg_accept_gap"),
-        )
+    solver = make_sre_solver(
+        solver_name,
+        random_seed=int(stats.get("seed", BASE_SEED)),
+        checkpoint_path=_hp_value(
+            hp,
+            "nfg_transformer",
+            "checkpoint_path",
+            _DEFAULT_DEEP_SRQ_LBF_HP.nfg_transformer.checkpoint_path,
+            "nfg_checkpoint_path",
+        ),
+        device=_hp_value(
+            hp,
+            "nfg_transformer",
+            "device",
+            _DEFAULT_DEEP_SRQ_LBF_HP.nfg_transformer.device,
+            "nfg_device",
+        ),
+        fallback_enabled=False,
+        compute_exploitability_diagnostics=False,
+        accept_exploitability_tol=_hp_value(
+            hp,
+            "nfg_transformer",
+            "accept_exploitability_tol",
+            _DEFAULT_DEEP_SRQ_LBF_HP.nfg_transformer.accept_exploitability_tol,
+            "nfg_accept_gap",
+        ),
+    )
     agent = DuelingDoubleDqnSreAgent(
         DuelingDoubleDqnSreAgentConfig(
             agent_id=0,
@@ -1325,23 +922,23 @@ def load_deepsrq_policy(
             num_actions=int(stats["num_actions"]),
             epsilon_robust=float(epsilon),
             epsilon_explore=0.0,
-            lr=hp.get("learning_rate", DEEP_SRQ_LBF_HYPERPARAMS["learning_rate"]),
-            gamma=hp.get("gamma", DEEP_SRQ_LBF_HYPERPARAMS["gamma"]),
-            buffer_size=hp.get("replay_buffer_capacity", DEEP_SRQ_LBF_HYPERPARAMS["replay_buffer_capacity"]),
-            learning_starts=hp.get("learning_starts", DEEP_SRQ_LBF_HYPERPARAMS["learning_starts"]),
-            grad_clip_norm=hp.get("grad_clip_max_norm", DEEP_SRQ_LBF_HYPERPARAMS["grad_clip_max_norm"]),
-            sre_num_repeats=hp.get("sre_num_repeats", DEEP_SRQ_LBF_HYPERPARAMS["sre_num_repeats"]),
+            lr=_agent_hp(hp, "lr", "learning_rate"),
+            gamma=_agent_hp(hp, "gamma"),
+            buffer_size=_agent_hp(hp, "buffer_size", "replay_buffer_capacity"),
+            learning_starts=_agent_hp(hp, "learning_starts"),
+            grad_clip_norm=_agent_hp(hp, "grad_clip_norm", "grad_clip_max_norm"),
+            sre_num_repeats=_agent_hp(hp, "sre_num_repeats"),
             sre_include_pure_starts=hp.get(
                 "sre_include_pure_starts",
-                DEEP_SRQ_LBF_HYPERPARAMS["sre_include_pure_starts"],
+                _agent_hp(hp, "sre_include_pure_starts"),
             ),
-            train_every=hp.get("train_every", DEEP_SRQ_LBF_HYPERPARAMS["train_every"]),
-            network_type=hp.get("network_type", DEEP_SRQ_LBF_HYPERPARAMS["network_type"]),
+            train_every=_agent_hp(hp, "train_every"),
+            network_type=_agent_hp(hp, "network_type"),
             use_gpu=use_gpu,
             sre_solver=solver,
             target_equilibrium_update_steps=hp.get(
                 "target_equilibrium_update_steps",
-                DEEP_SRQ_LBF_HYPERPARAMS["target_equilibrium_update_steps"],
+                _agent_hp(hp, "target_equilibrium_update_steps"),
             ),
             sre_candidate_selection=hp.get(
                 "sre_candidate_selection", "robust_exploitability"
@@ -1351,7 +948,7 @@ def load_deepsrq_policy(
             ),
             sre_uniform_fallback_enabled=hp.get(
                 "sre_uniform_fallback_enabled",
-                DEEP_SRQ_LBF_HYPERPARAMS["sre_uniform_fallback_enabled"],
+                _agent_hp(hp, "sre_uniform_fallback_enabled"),
             )
             if solver_name not in NFG_TRANSFORMER_SOLVER_NAMES
             else False,
@@ -1362,6 +959,62 @@ def load_deepsrq_policy(
     agent.config.epsilon_explore = 0.0
     agent.config.epsilon_robust = float(epsilon)
     return DeepSrqPolicyAdapter(agent)
+
+
+def load_srac_policy(
+    scenario: LbfNotebookScenario,
+    epsilon: float,
+    *,
+    repo_root: str | Path | None = None,
+    use_gpu: bool = True,
+    run_dir_override: str | Path | None = None,
+    sre_solver_workers: int | None = None,
+) -> SracPolicyAdapter:
+    run_dir = (
+        Path(run_dir_override)
+        if run_dir_override is not None
+        else srac_training_dir(scenario.key, epsilon, repo_root=repo_root)
+    )
+    checkpoint = run_dir / "shared_srac_best.pt"
+    if not checkpoint.exists():
+        checkpoint = run_dir / "shared_srac_final.pt"
+    if not checkpoint.exists():
+        raise FileNotFoundError(f"SRAC checkpoint not found under {run_dir}.")
+
+    try:
+        payload = torch.load(
+            checkpoint,
+            map_location=None if use_gpu and torch.cuda.is_available() else "cpu",
+            weights_only=False,
+        )
+    except TypeError:
+        payload = torch.load(
+            checkpoint,
+            map_location=None if use_gpu and torch.cuda.is_available() else "cpu",
+        )
+    config_payload = dict(payload.get("config", {}))
+    config_fields = set(SracConfig.__dataclass_fields__)
+    config_payload = {
+        key: value for key, value in config_payload.items() if key in config_fields
+    }
+
+    class _EvalOnlySreSolver:
+        name = "srac_eval_only"
+
+        def close(self):
+            return None
+
+    config_payload["use_gpu"] = bool(use_gpu)
+    config_payload["epsilon_explore"] = 0.0
+    config_payload["epsilon_robust"] = float(epsilon)
+    if sre_solver_workers is not None:
+        config_payload["sre_solver_workers"] = int(sre_solver_workers)
+    config_payload["sre_solver"] = _EvalOnlySreSolver()
+    agent = SracAgent(SracConfig(**config_payload))
+    agent.load_checkpoint(checkpoint, map_location=None if use_gpu else "cpu")
+    agent.config.epsilon_explore = 0.0
+    agent.config.epsilon_robust = float(epsilon)
+    return SracPolicyAdapter(agent)
 
 
 def load_deepsrq_path_mcp_pool_policy(
@@ -1386,9 +1039,17 @@ def load_deepsrq_path_mcp_pool_policy(
     workers = int(
         sre_solver_workers
         if sre_solver_workers is not None
-        else hp.get("sre_solver_workers", DEFAULT_PATH_MCP_NPLAYER_POOL_WORKERS)
+        else _hp_value(
+            hp,
+            "path_mcp_pool",
+            "max_workers",
+            DEFAULT_PATH_MCP_NPLAYER_POOL_WORKERS,
+            "sre_solver_workers",
+        )
     )
-    solver_name = deepsrq_path_pool_solver_for_scenario(scenario)
+    solver_name = str(
+        stats.get("solver_name") or deepsrq_path_pool_solver_for_scenario(scenario)
+    )
     solver = make_sre_solver(
         solver_name,
         random_seed=int(stats.get("seed", BASE_SEED)),
@@ -1402,28 +1063,28 @@ def load_deepsrq_path_mcp_pool_policy(
             num_actions=int(stats["num_actions"]),
             epsilon_robust=float(epsilon),
             epsilon_explore=0.0,
-            lr=hp.get("learning_rate", DEEP_SRQ_LBF_HYPERPARAMS["learning_rate"]),
-            gamma=hp.get("gamma", DEEP_SRQ_LBF_HYPERPARAMS["gamma"]),
-            buffer_size=hp.get("replay_buffer_capacity", DEEP_SRQ_LBF_HYPERPARAMS["replay_buffer_capacity"]),
-            learning_starts=hp.get("learning_starts", DEEP_SRQ_LBF_HYPERPARAMS["learning_starts"]),
-            grad_clip_norm=hp.get("grad_clip_max_norm", DEEP_SRQ_LBF_HYPERPARAMS["grad_clip_max_norm"]),
-            sre_num_repeats=hp.get("sre_num_repeats", DEEP_SRQ_LBF_HYPERPARAMS["sre_num_repeats"]),
+            lr=_agent_hp(hp, "lr", "learning_rate"),
+            gamma=_agent_hp(hp, "gamma"),
+            buffer_size=_agent_hp(hp, "buffer_size", "replay_buffer_capacity"),
+            learning_starts=_agent_hp(hp, "learning_starts"),
+            grad_clip_norm=_agent_hp(hp, "grad_clip_norm", "grad_clip_max_norm"),
+            sre_num_repeats=_agent_hp(hp, "sre_num_repeats"),
             sre_include_pure_starts=hp.get(
                 "sre_include_pure_starts",
-                DEEP_SRQ_LBF_HYPERPARAMS["sre_include_pure_starts"],
+                _agent_hp(hp, "sre_include_pure_starts"),
             ),
-            train_every=hp.get("train_every", DEEP_SRQ_LBF_HYPERPARAMS["train_every"]),
-            network_type=hp.get("network_type", DEEP_SRQ_LBF_HYPERPARAMS["network_type"]),
+            train_every=_agent_hp(hp, "train_every"),
+            network_type=_agent_hp(hp, "network_type"),
             use_gpu=use_gpu,
             sre_solver=solver,
             sre_solver_name=solver_name,
             target_equilibrium_update_steps=hp.get(
                 "target_equilibrium_update_steps",
-                DEEP_SRQ_LBF_HYPERPARAMS["target_equilibrium_update_steps"],
+                _agent_hp(hp, "target_equilibrium_update_steps"),
             ),
             sre_policy_cache_enabled=hp.get(
                 "sre_policy_cache_enabled",
-                DEEP_SRQ_LBF_HYPERPARAMS["sre_policy_cache_enabled"],
+                _agent_hp(hp, "sre_policy_cache_enabled"),
             ),
             sre_policy_cache_size=hp.get("sre_policy_cache_size", 4096),
             sre_policy_cache_round_digits=hp.get("sre_policy_cache_round_digits", 6),
@@ -1441,7 +1102,7 @@ def load_deepsrq_path_mcp_pool_policy(
             ),
             sre_uniform_fallback_enabled=hp.get(
                 "sre_uniform_fallback_enabled",
-                DEEP_SRQ_LBF_HYPERPARAMS["sre_uniform_fallback_enabled"],
+                _agent_hp(hp, "sre_uniform_fallback_enabled"),
             ),
         )
     )
@@ -1451,42 +1112,6 @@ def load_deepsrq_path_mcp_pool_policy(
     return DeepSrqPolicyAdapter(agent)
 
 
-def load_deepsrq_sred_gradient_policy(
-    scenario: LbfNotebookScenario,
-    epsilon: float,
-    *,
-    repo_root: str | Path | None = None,
-    use_gpu: bool = True,
-) -> DeepSrqPolicyAdapter:
-    return load_deepsrq_policy(
-        scenario,
-        epsilon,
-        repo_root=repo_root,
-        use_gpu=use_gpu,
-        run_dir_override=deepsrq_sred_gradient_training_dir(
-            scenario.key,
-            epsilon,
-            repo_root=repo_root,
-        ),
-    )
-
-
-def load_sr_adidas_policy(
-    scenario: LbfNotebookScenario,
-    epsilon: float,
-    *,
-    repo_root: str | Path | None = None,
-    use_gpu: bool = True,
-) -> SrAdidasPolicyAdapter:
-    return load_deepsrq_policy(
-        scenario,
-        epsilon,
-        repo_root=repo_root,
-        use_gpu=use_gpu,
-        run_dir_override=sr_adidas_training_dir(
-            scenario.key, epsilon, repo_root=repo_root
-        ),
-    )
 def load_baseline_policy(
     algorithm: str,
     scenario: LbfNotebookScenario,
@@ -1501,7 +1126,7 @@ def load_baseline_policy(
     return EpymarlPolicyAdapter(
         checkpoint,
         algorithm=algorithm,
-        device=("cuda" if use_gpu and torch is not None and torch.cuda.is_available() else "cpu"),
+        device=("cuda" if use_gpu and torch.cuda.is_available() else "cpu"),
     )
 
 
@@ -1585,7 +1210,7 @@ def evaluate_policy_matchup(
             return actions_batch
 
         rollout_kwargs = {
-            "make_env": lambda capture_frames=True: make_pz_env(
+            "make_env": lambda capture_frames=True: LBFParallelEnv(
                 **scenario.config,
                 render_mode="rgb_array" if capture_frames else None,
             ),
@@ -1729,30 +1354,6 @@ def evaluate_deepsrq_suite_for_epsilon(
                         opponent_label=baseline,
                         exc=exc,
                     )
-            out_dir = base_dir / "vs_sr_adidas"
-            try:
-                opponent = load_sr_adidas_policy(scenario, epsilon, repo_root=repo_root, use_gpu=use_gpu)
-                try:
-                    scenario_results["vs_sr_adidas"] = evaluate_policy_matchup(
-                        scenario=scenario,
-                        primary_policy=primary,
-                        opponent_policy=opponent,
-                        output_dir=out_dir,
-                        primary_label="deepsrq_nfgtransformer",
-                        opponent_label="sr_adidas",
-                        n_episodes=n_episodes,
-                        num_envs=num_envs,
-                    )
-                finally:
-                    opponent.close()
-            except Exception as exc:
-                scenario_results["vs_sr_adidas"] = _skip_record(
-                    out_dir,
-                    scenario=scenario,
-                    primary_label="deepsrq_nfgtransformer",
-                    opponent_label="sr_adidas",
-                    exc=exc,
-                )
             results[scenario.key] = scenario_results
         finally:
             primary.close()
@@ -1830,30 +1431,6 @@ def evaluate_deepsrq_path_mcp_pool_suite_for_epsilon(
                         opponent_label=baseline,
                         exc=exc,
                     )
-            out_dir = base_dir / "vs_sr_adidas"
-            try:
-                opponent = load_sr_adidas_policy(scenario, epsilon, repo_root=repo_root, use_gpu=use_gpu)
-                try:
-                    scenario_results["vs_sr_adidas"] = evaluate_policy_matchup(
-                        scenario=scenario,
-                        primary_policy=primary,
-                        opponent_policy=opponent,
-                        output_dir=out_dir,
-                        primary_label=primary_label,
-                        opponent_label="sr_adidas",
-                        n_episodes=n_episodes,
-                        num_envs=num_envs,
-                    )
-                finally:
-                    opponent.close()
-            except Exception as exc:
-                scenario_results["vs_sr_adidas"] = _skip_record(
-                    out_dir,
-                    scenario=scenario,
-                    primary_label=primary_label,
-                    opponent_label="sr_adidas",
-                    exc=exc,
-                )
             results[scenario.key] = scenario_results
         finally:
             primary.close()
@@ -1877,29 +1454,27 @@ def evaluate_deepsrq_path_mcp_pool_suite_for_epsilon(
     return results
 
 
-def evaluate_deepsrq_sred_gradient_suite_for_epsilon(
+def evaluate_srac_suite_for_epsilon(
     epsilon: float,
     *,
     scenarios: tuple[LbfNotebookScenario, ...] | None = None,
     n_episodes: int = DEFAULT_EVAL_EPISODES,
     repo_root: str | Path | None = None,
     use_gpu: bool = True,
+    sre_solver_workers: int | None = None,
     num_envs: int = 1,
 ) -> dict[str, dict]:
     scenarios = scenarios or robust_lbf_scenarios()
     results = {}
-    primary_label = DEEPSRQ_SRED_GRADIENT_FAMILY
+    primary_label = SRAC_FAMILY
     for scenario in scenarios:
-        base_dir = deepsrq_sred_gradient_evaluation_dir(
-            scenario.key,
-            epsilon,
-            repo_root=repo_root,
-        )
-        primary = load_deepsrq_sred_gradient_policy(
+        base_dir = srac_evaluation_dir(scenario.key, epsilon, repo_root=repo_root)
+        primary = load_srac_policy(
             scenario,
             epsilon,
             repo_root=repo_root,
             use_gpu=use_gpu,
+            sre_solver_workers=sre_solver_workers,
         )
         try:
             scenario_results = {
@@ -1937,136 +1512,19 @@ def evaluate_deepsrq_sred_gradient_suite_for_epsilon(
                         opponent_label=baseline,
                         exc=exc,
                     )
-            out_dir = base_dir / "vs_sr_adidas"
-            try:
-                opponent = load_sr_adidas_policy(
-                    scenario,
-                    epsilon,
-                    repo_root=repo_root,
-                    use_gpu=use_gpu,
-                )
-                try:
-                    scenario_results["vs_sr_adidas"] = evaluate_policy_matchup(
-                        scenario=scenario,
-                        primary_policy=primary,
-                        opponent_policy=opponent,
-                        output_dir=out_dir,
-                        primary_label=primary_label,
-                        opponent_label="sr_adidas",
-                        n_episodes=n_episodes,
-                        num_envs=num_envs,
-                    )
-                finally:
-                    opponent.close()
-            except Exception as exc:
-                scenario_results["vs_sr_adidas"] = _skip_record(
-                    out_dir,
-                    scenario=scenario,
-                    primary_label=primary_label,
-                    opponent_label="sr_adidas",
-                    exc=exc,
-                )
             results[scenario.key] = scenario_results
         finally:
             primary.close()
     save_training_stats(
         lbf_grid_dir(repo_root)
-        / DEEPSRQ_SRED_GRADIENT_FAMILY
+        / SRAC_FAMILY
         / "evaluation"
         / f"manifest_eps_{epsilon_slug(epsilon)}.json",
         {
-            "algorithm": DEEPSRQ_SRED_GRADIENT_FAMILY,
-            "solver_name": SRED_GRADIENT_SOLVER,
-            "num_envs": int(num_envs),
-            "epsilon": float(epsilon),
-            "results": results,
-        },
-    )
-    return results
-
-
-def evaluate_sr_adidas_suite_for_epsilon(
-    epsilon: float,
-    *,
-    scenarios: tuple[LbfNotebookScenario, ...] | None = None,
-    n_episodes: int = DEFAULT_EVAL_EPISODES,
-    repo_root: str | Path | None = None,
-    use_gpu: bool = True,
-    num_envs: int = 1,
-) -> dict[str, dict]:
-    scenarios = scenarios or robust_lbf_scenarios()
-    results = {}
-    for scenario in scenarios:
-        base_dir = sr_adidas_evaluation_dir(scenario.key, epsilon, repo_root=repo_root)
-        primary = load_sr_adidas_policy(scenario, epsilon, repo_root=repo_root, use_gpu=use_gpu)
-        try:
-            scenario_results = {
-                "self_play": evaluate_policy_matchup(
-                    scenario=scenario,
-                    primary_policy=primary,
-                    output_dir=base_dir / "self_play",
-                    primary_label="sr_adidas",
-                    n_episodes=n_episodes,
-                    num_envs=num_envs,
-                )
-            }
-            for baseline in BASELINE_ALGORITHMS:
-                out_dir = base_dir / f"vs_{baseline}"
-                try:
-                    opponent = load_baseline_policy(baseline, scenario, use_gpu=use_gpu)
-                    try:
-                        scenario_results[f"vs_{baseline}"] = evaluate_policy_matchup(
-                            scenario=scenario,
-                            primary_policy=primary,
-                            opponent_policy=opponent,
-                            output_dir=out_dir,
-                            primary_label="sr_adidas",
-                            opponent_label=baseline,
-                            n_episodes=n_episodes,
-                            num_envs=num_envs,
-                        )
-                    finally:
-                        opponent.close()
-                except Exception as exc:
-                    scenario_results[f"vs_{baseline}"] = _skip_record(
-                        out_dir,
-                        scenario=scenario,
-                        primary_label="sr_adidas",
-                        opponent_label=baseline,
-                        exc=exc,
-                    )
-            out_dir = base_dir / "vs_deepsrq_nfgtransformer"
-            try:
-                opponent = load_deepsrq_policy(scenario, epsilon, repo_root=repo_root, use_gpu=use_gpu)
-                try:
-                    scenario_results["vs_deepsrq_nfgtransformer"] = evaluate_policy_matchup(
-                        scenario=scenario,
-                        primary_policy=primary,
-                        opponent_policy=opponent,
-                        output_dir=out_dir,
-                        primary_label="sr_adidas",
-                        opponent_label="deepsrq_nfgtransformer",
-                        n_episodes=n_episodes,
-                        num_envs=num_envs,
-                    )
-                finally:
-                    opponent.close()
-            except Exception as exc:
-                scenario_results["vs_deepsrq_nfgtransformer"] = _skip_record(
-                    out_dir,
-                    scenario=scenario,
-                    primary_label="sr_adidas",
-                    opponent_label="deepsrq_nfgtransformer",
-                    exc=exc,
-                )
-            results[scenario.key] = scenario_results
-        finally:
-            primary.close()
-    save_training_stats(
-        lbf_grid_dir(repo_root) / "sr_adidas" / "evaluation" / f"manifest_eps_{epsilon_slug(epsilon)}.json",
-        {
-            "algorithm": "sr_adidas",
-            "solver_name": "sr_adidas_sre",
+            "algorithm": SRAC_FAMILY,
+            "sre_solver_workers": None
+            if sre_solver_workers is None
+            else int(sre_solver_workers),
             "num_envs": int(num_envs),
             "epsilon": float(epsilon),
             "results": results,

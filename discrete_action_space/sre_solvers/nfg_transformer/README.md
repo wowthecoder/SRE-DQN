@@ -87,14 +87,16 @@ python -m discrete_action_space.sre_solvers.nfg_transformer.generate_dataset \
 Then use the checkpoint in LBF:
 
 ```python
-from discrete_action_space.lbf_grid.deep_srq_lbf import train_lbf_deep_srq_experiment
+from discrete_action_space.lbf_grid.deep_srq_lbf import train_lbf_deep_srq_vectorized
 
-stats = train_lbf_deep_srq_experiment(
+stats = train_lbf_deep_srq_vectorized(
     solver_name="nfg_transformer_sre",
     hyperparameter_overrides={
-        "nfg_checkpoint_path": "discrete_action_space/sre_solvers/nfg_transformer/nfg_sre_checkpoints/nfg_sre_lbf3.pt",
-        "nfg_accept_gap": 1e-3,
-        "nfg_fallback_enabled": False,
+        "nfg_transformer": {
+            "checkpoint_path": "discrete_action_space/sre_solvers/nfg_transformer/nfg_sre_checkpoints/nfg_sre_lbf3.pt",
+            "accept_exploitability_tol": 1e-3,
+            "fallback_enabled": False,
+        },
     },
 )
 ```
@@ -108,10 +110,11 @@ stats = train_lbf_deep_srq_experiment(
   different robustness radii for the same payoff tensor.
 - The default notebook run is a smoke-quality run. If `mean_gap` is around
   `1e-1`, then `accept_rate` at `1e-3` can be zero; enable fallback explicitly,
-  train longer, or raise `nfg_accept_gap` intentionally.
+  train longer, or raise `nfg_transformer.accept_exploitability_tol` intentionally.
 - `--label-mode path` calls PATH MCP for labels and is intended for comparison
   or diagnostics, not default training.
-- If `nfg_fallback_enabled=True`, neural policies above `nfg_accept_gap` fall
+- If `nfg_transformer.fallback_enabled=True`, neural policies above
+  `nfg_transformer.accept_exploitability_tol` fall
   back to PATH MCP. By default the Deep SRQ integration uses the neural policy
   directly.
 - Running without a checkpoint is allowed for smoke tests only; real experiments

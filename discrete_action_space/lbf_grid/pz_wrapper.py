@@ -6,12 +6,8 @@ from typing import Dict, Optional, Sequence, Tuple
 
 from pettingzoo import ParallelEnv
 
-try:
-    from .instrumented_env import InstrumentedForagingEnv
-    from .state_action_encoding import canonical_lbf_state, lbf_action_masks
-except ImportError:  # Script/notebook import from the lbf_grid directory
-    from instrumented_env import InstrumentedForagingEnv
-    from state_action_encoding import canonical_lbf_state, lbf_action_masks
+from .instrumented_env import InstrumentedForagingEnv
+from .state_action_encoding import lbf_action_masks
 
 
 def _as_level_list(name: str, values: Sequence[int], expected_len: int) -> list[int]:
@@ -111,20 +107,10 @@ class LBFParallelEnv(ParallelEnv):
     def action_space(self, agent):
         return self._act_space
 
-    def global_state(self, agent_order: Optional[Sequence[str]] = None):
-        if agent_order is None:
-            agent_order = self.possible_agents
-        return canonical_lbf_state(self, agent_order)
-
     def action_masks(self, agent_order: Optional[Sequence[str]] = None):
         if agent_order is None:
             agent_order = self.possible_agents
         return lbf_action_masks(self, agent_order)
-
-    def global_state_and_action_masks(self, agent_order: Optional[Sequence[str]] = None):
-        if agent_order is None:
-            agent_order = self.possible_agents
-        return self.global_state(agent_order), self.action_masks(agent_order)
 
     def reset(self, seed=None, options=None):
         obs_list, info = self._inner.reset(seed=seed, options=options)
@@ -170,48 +156,3 @@ class LBFParallelEnv(ParallelEnv):
 
     def close(self):
         self._inner.close()
-
-
-def make_pz_env(
-    players: int = 3,
-    field_size: Tuple[int, int] = (10, 10),
-    sight: Optional[int] = None,
-    max_food: int = 3,
-    max_episode_steps: int = 75,
-    force_coop: bool = False,
-    player_levels: Optional[Sequence[int]] = None,
-    min_player_level: int | Sequence[int] = 1,
-    max_player_level: int | Sequence[int] = 1,
-    food_levels: Optional[Sequence[int]] = None,
-    min_food_level: int | Sequence[int] = 1,
-    max_food_level: Optional[int | Sequence[int]] = 3,
-    normalize_reward: bool = True,
-    grid_observation: bool = False,
-    observe_agent_levels: bool = True,
-    penalty: float = 0.0,
-    empty_load_penalty: float = 0.0,
-    simple_food_rewards: bool = False,
-    render_mode: Optional[str] = None,
-) -> LBFParallelEnv:
-    """Create the default basic Level-Based Foraging PettingZoo env."""
-    return LBFParallelEnv(
-        players=players,
-        field_size=field_size,
-        sight=sight,
-        max_food=max_food,
-        max_episode_steps=max_episode_steps,
-        force_coop=force_coop,
-        player_levels=player_levels,
-        min_player_level=min_player_level,
-        max_player_level=max_player_level,
-        food_levels=food_levels,
-        min_food_level=min_food_level,
-        max_food_level=max_food_level,
-        normalize_reward=normalize_reward,
-        grid_observation=grid_observation,
-        observe_agent_levels=observe_agent_levels,
-        penalty=penalty,
-        empty_load_penalty=empty_load_penalty,
-        simple_food_rewards=simple_food_rewards,
-        render_mode=render_mode,
-    )

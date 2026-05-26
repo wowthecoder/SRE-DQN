@@ -2,22 +2,15 @@ from __future__ import annotations
 
 import itertools
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
-
-try:
-    import torch
-    from ..nfg_transformer.torch_utils import (
-        robust_action_values_torch,
-        robust_exploitability_torch,
-        robust_policy_values_torch,
-    )
-except ImportError:  # pragma: no cover - torch-native handoff is optional
-    torch = None
-    robust_action_values_torch = None
-    robust_exploitability_torch = None
-    robust_policy_values_torch = None
+import torch
+from ..nfg_transformer.torch_utils import (
+    robust_action_values_torch,
+    robust_exploitability_torch,
+    robust_policy_values_torch,
+)
 
 from ..base import SreSolveResult, SreStageGameSolver, _empty_duration_summary
 from ..nplayer_common import (
@@ -46,6 +39,30 @@ class _Candidate:
     converged: bool
 
 
+@dataclass(frozen=True)
+class SrAdidasSreSolverConfig:
+    max_iters: int = 200
+    lr: float = 0.2
+    tau_init: float = 10.0
+    tau_min: float = 1e-3
+    tau_decay: float = 0.5
+    tau_threshold: float = 1e-4
+    pure_start_logit: float = 8.0
+    random_seed: int | None = None
+    device: object = None
+
+    def __post_init__(self):
+        object.__setattr__(self, "max_iters", max(1, int(self.max_iters)))
+        object.__setattr__(self, "lr", float(np.clip(self.lr, 1e-6, 1.0)))
+        object.__setattr__(self, "tau_init", float(self.tau_init))
+        object.__setattr__(self, "tau_min", float(self.tau_min))
+        object.__setattr__(self, "tau_decay", float(self.tau_decay))
+        object.__setattr__(self, "tau_threshold", float(self.tau_threshold))
+        object.__setattr__(self, "pure_start_logit", float(self.pure_start_logit))
+        device = None if self.device is None else torch.device(self.device)
+        object.__setattr__(self, "device", device)
+
+
 class SrAdidasSreSolver(SreStageGameSolver):
     """Approximate SRE stage-game solver via SR-ADIDAS-style homotopy.
 
@@ -58,28 +75,13 @@ class SrAdidasSreSolver(SreStageGameSolver):
     name = "sr_adidas_sre"
     bypass_deep_srq_policy_cache = True
 
-    def __init__(
-        self,
-        *,
-        max_iters=200,
-        lr=0.2,
-        tau_init=10.0,
-        tau_min=1e-3,
-        tau_decay=0.5,
-        tau_threshold=1e-4,
-        pure_start_logit=8.0,
-        random_seed=None,
-        device=None,
-    ):
-        self.max_iters = max(1, int(max_iters))
-        self.lr = float(np.clip(lr, 1e-6, 1.0))
-        self.tau_init = float(tau_init)
-        self.tau_min = float(tau_min)
-        self.tau_decay = float(tau_decay)
-        self.tau_threshold = float(tau_threshold)
-        self.pure_start_logit = float(pure_start_logit)
-        self.device = None if device is None or torch is None else torch.device(device)
-        self.rng = np.random.default_rng(random_seed)
+    def __init__(self, config: SrAdidasSreSolverConfig | None = None, **overrides):
+        if config is None:
+            config = SrAdidasSreSolverConfig(**overrides)
+        elif overrides:
+            config = replace(config, **overrides)
+        self.config = config
+        self.rng = np.random.default_rng(self.config.random_seed)
 
         self.solve_time_sum = 0.0
         self.solve_time_sumsq = 0.0
@@ -130,7 +132,7 @@ class SrAdidasSreSolver(SreStageGameSolver):
 
     def _pure_start_policy(self, action_size, action_id):
         logits = np.zeros(int(action_size), dtype=np.float64)
-        logits[int(action_id)] = self.pure_start_logit
+        logits[int(action_id)] = self.config.pure_start_logit
         return self._softmax(logits, 1.0)
 
     def _random_policies(self, action_sizes):
@@ -265,13 +267,13 @@ class SrAdidasSreSolver(SreStageGameSolver):
         exploitability_tol,
         early_exit,
     ):
-        tau = max(self.tau_min, self.tau_init)
+        tau = max(self.config.tau_min, self.config.tau_init)
         logits = self._policies_to_logits(policies)
         best = self._evaluate_candidate(
             q_tensor, policies, epsilon, tau, 0, start_type, exploitability_tol
         )
 
-        for iteration in range(1, self.max_iters + 1):
+        for iteration in range(1, self.config.max_iters + 1):
             policies = self._logits_to_policies(logits)
             adi, gap, player_gaps, robust_values, deviations, _ = self._adi_and_gaps(
                 q_tensor, policies, epsilon, tau
@@ -294,12 +296,12 @@ class SrAdidasSreSolver(SreStageGameSolver):
             if early_exit and candidate.converged:
                 return candidate
 
-            if adi <= self.tau_threshold and tau > self.tau_min:
-                tau = max(self.tau_min, tau * self.tau_decay)
+            if adi <= self.config.tau_threshold and tau > self.config.tau_min:
+                tau = max(self.config.tau_min, tau * self.config.tau_decay)
 
             new_policies = []
             for policy, deviation in zip(policies, deviations):
-                mixed = (1.0 - self.lr) * policy + self.lr * deviation
+                mixed = (1.0 - self.config.lr) * policy + self.config.lr * deviation
                 mixed = np.clip(mixed, 1e-12, None)
                 mixed /= float(np.sum(mixed))
                 new_policies.append(mixed)
@@ -337,11 +339,11 @@ class SrAdidasSreSolver(SreStageGameSolver):
             "nominal_values": [float(value) for value in candidate.nominal_values],
             "joint_nominal_welfare": float(np.sum(candidate.nominal_values)),
             "adi": float(candidate.adi),
-            "tau_init": float(self.tau_init),
+            "tau_init": float(self.config.tau_init),
             "tau_final": float(candidate.tau),
             "iterations": int(candidate.iterations),
-            "max_iters": int(self.max_iters),
-            "lr": float(self.lr),
+            "max_iters": int(self.config.max_iters),
+            "lr": float(self.config.lr),
             "num_repeats": int(num_repeats),
             "include_pure_starts": bool(include_pure_starts),
             "num_starts_attempted": int(num_starts_attempted),
@@ -376,8 +378,6 @@ class SrAdidasSreSolver(SreStageGameSolver):
         return [float(value) for value in eps]
 
     def _epsilon_tensor_batch(self, epsilon, batch_size, *, dtype, device):
-        if torch is None:  # pragma: no cover - guarded by solve_batch_torch.
-            raise ImportError("SrAdidasSreSolver.solve_batch_torch requires torch.")
         if isinstance(epsilon, torch.Tensor):
             eps = epsilon.detach().to(device=device, dtype=dtype).reshape(-1)
         elif np.isscalar(epsilon):
@@ -558,12 +558,10 @@ class SrAdidasSreSolver(SreStageGameSolver):
         early_exit,
         start,
     ):
-        if torch is None or robust_policy_values_torch is None:
-            raise ImportError("SrAdidasSreSolver.solve_batch_torch requires torch.")
         if not isinstance(q_tensors, torch.Tensor):
             q_tensors = torch.as_tensor(q_tensors, dtype=torch.float32)
         q_batch = q_tensors.detach()
-        device = self.device or q_batch.device
+        device = self.config.device or q_batch.device
         q_batch = q_batch.to(device=device, dtype=torch.float32)
         if q_batch.ndim < 4:
             raise ValueError(
@@ -603,7 +601,7 @@ class SrAdidasSreSolver(SreStageGameSolver):
                 (batch_size,), float("inf"), dtype=q_batch.dtype, device=q_batch.device
             )
             best_adi = torch.full_like(best_gap, float("inf"))
-            best_tau = torch.full_like(best_gap, max(self.tau_min, self.tau_init))
+            best_tau = torch.full_like(best_gap, max(self.config.tau_min, self.config.tau_init))
             best_player_gaps = torch.zeros(
                 batch_size, num_agents, dtype=q_batch.dtype, device=q_batch.device
             )
@@ -670,7 +668,7 @@ class SrAdidasSreSolver(SreStageGameSolver):
                 policies = [policy.clone() for policy in start_policies]
                 tau = torch.full(
                     (batch_size,),
-                    max(self.tau_min, self.tau_init),
+                    max(self.config.tau_min, self.config.tau_init),
                     dtype=q_batch.dtype,
                     device=q_batch.device,
                 )
@@ -698,7 +696,7 @@ class SrAdidasSreSolver(SreStageGameSolver):
                         continue
 
                 logits = self._batched_policies_to_logits(policies)
-                for iteration in range(1, self.max_iters + 1):
+                for iteration in range(1, self.config.max_iters + 1):
                     policies = self._batched_policies_from_logits(logits)
                     adi, gap, player_gaps, robust_values, deviations = (
                         self._adi_and_gaps_batch_torch(
@@ -723,15 +721,15 @@ class SrAdidasSreSolver(SreStageGameSolver):
                         if not bool(active.any().detach().cpu()):
                             break
 
-                    decay_mask = (adi <= self.tau_threshold) & (tau > self.tau_min)
+                    decay_mask = (adi <= self.config.tau_threshold) & (tau > self.config.tau_min)
                     tau = torch.where(
                         decay_mask,
-                        (tau * self.tau_decay).clamp_min(self.tau_min),
+                        (tau * self.config.tau_decay).clamp_min(self.config.tau_min),
                         tau,
                     )
                     new_policies = []
                     for policy, deviation in zip(policies, deviations):
-                        mixed = (1.0 - self.lr) * policy + self.lr * deviation
+                        mixed = (1.0 - self.config.lr) * policy + self.config.lr * deviation
                         mixed = mixed.clamp_min(1e-12)
                         mixed = mixed / mixed.sum(dim=-1, keepdim=True).clamp_min(1e-12)
                         new_policies.append(mixed)
@@ -868,7 +866,7 @@ class SrAdidasSreSolver(SreStageGameSolver):
                     q_tensor,
                     _uniform_nplayer_policies(q_tensor),
                     epsilon_value,
-                    self.tau_init,
+                    self.config.tau_init,
                     0,
                     "uniform",
                     float(exploitability_tol),

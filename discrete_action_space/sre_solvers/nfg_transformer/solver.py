@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, replace
 from pathlib import Path
 import time
 
@@ -19,6 +20,35 @@ from .model import NfgTransformerConfig, NfgTransformerSreNet
 from .torch_utils import robust_exploitability_torch
 
 
+@dataclass(frozen=True)
+class NfgTransformerSreSolverConfig:
+    checkpoint_path: object = None
+    device: object = None
+    num_players: int | None = None
+    num_actions: int | None = None
+    fallback_enabled: bool = False
+    fallback_solver: object = None
+    pathwrap_path: object = None
+    accept_exploitability_tol: float | None = None
+    compute_exploitability_diagnostics: bool = True
+
+    def __post_init__(self):
+        device = torch.device(
+            self.device or ("cuda" if torch.cuda.is_available() else "cpu")
+        )
+        object.__setattr__(self, "device", device)
+        checkpoint_path = (
+            None if self.checkpoint_path is None else Path(self.checkpoint_path)
+        )
+        object.__setattr__(self, "checkpoint_path", checkpoint_path)
+        object.__setattr__(self, "fallback_enabled", bool(self.fallback_enabled))
+        object.__setattr__(
+            self,
+            "compute_exploitability_diagnostics",
+            bool(self.compute_exploitability_diagnostics),
+        )
+
+
 class NfgTransformerSreSolver(SreStageGameSolver):
     """Checkpoint-backed NfgTransformer approximate SRE solver.
 
@@ -31,34 +61,13 @@ class NfgTransformerSreSolver(SreStageGameSolver):
     bypass_deep_srq_policy_cache = True
     trust_approximate_policies = True
 
-    def __init__(
-        self,
-        checkpoint_path=None,
-        *,
-        device=None,
-        num_players=None,
-        num_actions=None,
-        fallback_enabled=False,
-        fallback_solver=None,
-        pathwrap_path=None,
-        accept_exploitability_tol=None,
-        compute_exploitability_diagnostics=True,
-    ):
-        if torch is None:  # pragma: no cover - torch is a hard dependency here.
-            raise ImportError("NfgTransformerSreSolver requires torch.")
-
-        self.device = torch.device(
-            device or ("cuda" if torch.cuda.is_available() else "cpu")
-        )
-        self.checkpoint_path = None if checkpoint_path is None else Path(checkpoint_path)
-        self.requested_fallback_enabled = bool(fallback_enabled)
+    def __init__(self, config: NfgTransformerSreSolverConfig | None = None, **overrides):
+        if config is None:
+            config = NfgTransformerSreSolverConfig(**overrides)
+        elif overrides:
+            config = replace(config, **overrides)
+        self.config = config
         self.fallback_enabled = False
-        self.accept_exploitability_tol = accept_exploitability_tol
-        self.compute_exploitability_diagnostics = bool(
-            compute_exploitability_diagnostics
-        )
-        self._fallback_solver = fallback_solver
-        self._pathwrap_path = pathwrap_path
         self.solve_time_count = 0
         self.solve_time_sum = 0.0
         self.solve_time_sumsq = 0.0
@@ -72,37 +81,41 @@ class NfgTransformerSreSolver(SreStageGameSolver):
         self.neural_gap_max = None
         self.neural_gap_count = 0
 
-        if self.checkpoint_path is None:
-            config = NfgTransformerConfig(
-                num_players=None if num_players is None else int(num_players),
-                num_actions=None if num_actions is None else int(num_actions),
+        if self.config.checkpoint_path is None:
+            model_config = NfgTransformerConfig(
+                num_players=None if self.config.num_players is None else int(self.config.num_players),
+                num_actions=None if self.config.num_actions is None else int(self.config.num_actions),
             )
             state_dict = None
         else:
             payload = torch.load(
-                self.checkpoint_path,
-                map_location=self.device,
+                self.config.checkpoint_path,
+                map_location=self.config.device,
                 weights_only=False,
             )
             raw_config = payload.get("config") or payload.get("model_config")
             if raw_config is None:
                 raise ValueError("Checkpoint is missing a 'config' entry.")
-            config = NfgTransformerConfig(**raw_config)
+            model_config = NfgTransformerConfig(**raw_config)
             state_dict = payload.get("model_state_dict") or payload.get("state_dict")
             if state_dict is None:
                 raise ValueError("Checkpoint is missing model weights.")
 
-        self.config = config
-        self.model = NfgTransformerSreNet(config).to(self.device)
+        self.model_config = model_config
+        self.model = NfgTransformerSreNet(model_config).to(self.config.device)
         if state_dict is not None:
             self.model.load_state_dict(state_dict)
         self.model.eval()
 
+    @property
+    def requested_fallback_enabled(self):
+        return bool(self.config.fallback_enabled)
+
     def _ensure_model(self, q_tensor):
         if self.model is not None:
             return
-        self.config = NfgTransformerConfig()
-        self.model = NfgTransformerSreNet(self.config).to(self.device)
+        self.model_config = NfgTransformerConfig()
+        self.model = NfgTransformerSreNet(self.model_config).to(self.config.device)
         self.model.eval()
 
     def _fallback(self):
@@ -228,8 +241,8 @@ class NfgTransformerSreSolver(SreStageGameSolver):
     @torch.no_grad()
     def _predict_batch_torch(self, q_batch, epsilon_batch):
         self._ensure_model(q_batch[0])
-        q_batch = q_batch.to(device=self.device, dtype=torch.float32)
-        epsilon_batch = epsilon_batch.to(device=self.device, dtype=torch.float32)
+        q_batch = q_batch.to(device=self.config.device, dtype=torch.float32)
+        epsilon_batch = epsilon_batch.to(device=self.config.device, dtype=torch.float32)
         return self.model(q_batch, epsilon_batch)
 
     @torch.no_grad()
@@ -240,11 +253,11 @@ class NfgTransformerSreSolver(SreStageGameSolver):
         torch and leaves diagnostics/result formatting to explicit solver calls.
         """
         if isinstance(q_tensors, torch.Tensor):
-            q_batch = q_tensors.detach().to(device=self.device, dtype=torch.float32)
+            q_batch = q_tensors.detach().to(device=self.config.device, dtype=torch.float32)
         else:
             q_batch = torch.stack(
                 [
-                    torch.as_tensor(q_tensor, dtype=torch.float32, device=self.device)
+                    torch.as_tensor(q_tensor, dtype=torch.float32, device=self.config.device)
                     for q_tensor in q_tensors
                 ],
                 dim=0,
@@ -258,7 +271,7 @@ class NfgTransformerSreSolver(SreStageGameSolver):
         epsilon_batch = torch.as_tensor(
             self._epsilon_batch(epsilon, batch_size),
             dtype=torch.float32,
-            device=self.device,
+            device=self.config.device,
         )
         return self._predict_batch_torch(q_batch, epsilon_batch)
 
@@ -278,10 +291,10 @@ class NfgTransformerSreSolver(SreStageGameSolver):
     @torch.no_grad()
     def _predict_batch(self, q_tensors, epsilons):
         q_batch = torch.as_tensor(
-            np.stack(q_tensors, axis=0), dtype=torch.float32, device=self.device
+            np.stack(q_tensors, axis=0), dtype=torch.float32, device=self.config.device
         )
         epsilon_batch = torch.as_tensor(
-            epsilons, dtype=torch.float32, device=self.device
+            epsilons, dtype=torch.float32, device=self.config.device
         )
         return self._policies_torch_to_numpy_batch(
             self._predict_batch_torch(q_batch, epsilon_batch)
@@ -338,17 +351,17 @@ class NfgTransformerSreSolver(SreStageGameSolver):
     ):
         accept_tol = (
             float(exploitability_tol)
-            if self.accept_exploitability_tol is None
-            else float(self.accept_exploitability_tol)
+            if self.config.accept_exploitability_tol is None
+            else float(self.config.accept_exploitability_tol)
         )
         epsilon_batch = torch.as_tensor(
-            epsilons, dtype=torch.float32, device=self.device
+            epsilons, dtype=torch.float32, device=self.config.device
         )
         neural_policies_torch = self._predict_batch_torch(q_batch, epsilon_batch)
         neural_policies_batch = self._policies_torch_to_numpy_batch(
             neural_policies_torch
         )
-        if self.compute_exploitability_diagnostics:
+        if self.config.compute_exploitability_diagnostics:
             neural_gaps_torch, player_gaps_torch, robust_values_torch = (
                 robust_exploitability_torch(
                     q_batch, neural_policies_torch, epsilon_batch
@@ -370,7 +383,7 @@ class NfgTransformerSreSolver(SreStageGameSolver):
         ):
             neural_policies = self._normalize_policies(neural_policies, q_tensor)
             self.neural_accept_count += 1
-            if not self.compute_exploitability_diagnostics:
+            if not self.config.compute_exploitability_diagnostics:
                 results.append(
                     self._trusted_result_from_policies(
                         q_tensor,
@@ -382,14 +395,14 @@ class NfgTransformerSreSolver(SreStageGameSolver):
                             "used_fallback": False,
                             "path_fallback_disabled": True,
                             "requested_fallback_enabled": bool(
-                                self.requested_fallback_enabled
+                                self.config.fallback_enabled
                             ),
                             "trusted_neural_policy": True,
                             "neural_robust_exploitability": None,
                             "checkpoint_path": (
                                 None
-                                if self.checkpoint_path is None
-                                else str(self.checkpoint_path)
+                                if self.config.checkpoint_path is None
+                                else str(self.config.checkpoint_path)
                             ),
                         },
                     )
@@ -410,7 +423,7 @@ class NfgTransformerSreSolver(SreStageGameSolver):
                         "used_fallback": False,
                         "path_fallback_disabled": True,
                         "requested_fallback_enabled": bool(
-                            self.requested_fallback_enabled
+                            self.config.fallback_enabled
                         ),
                         "trusted_neural_policy": True,
                         "neural_policy_exceeded_accept_tol": bool(
@@ -418,7 +431,7 @@ class NfgTransformerSreSolver(SreStageGameSolver):
                         ),
                         "neural_robust_exploitability": float(neural_gap),
                         "checkpoint_path": (
-                            None if self.checkpoint_path is None else str(self.checkpoint_path)
+                            None if self.config.checkpoint_path is None else str(self.config.checkpoint_path)
                         ),
                     },
                     robust_gap=neural_gap,
@@ -456,7 +469,7 @@ class NfgTransformerSreSolver(SreStageGameSolver):
             raise ValueError("NfgTransformerSreSolver batches must share one game shape.")
         epsilons = self._epsilon_batch(epsilon, len(q_tensors))
         q_batch = torch.as_tensor(
-            np.stack(q_tensors, axis=0), dtype=torch.float32, device=self.device
+            np.stack(q_tensors, axis=0), dtype=torch.float32, device=self.config.device
         )
         results = self._solve_batch_core(
             q_tensors=q_tensors,
@@ -487,16 +500,16 @@ class NfgTransformerSreSolver(SreStageGameSolver):
     ):
         """Torch-native batch entrypoint for DeepSRQ GPU handoff.
 
-        The neural proposal and robust-gap validation stay on ``self.device``.
+        The neural proposal and robust-gap validation stay on ``self.config.device``.
         Results and PATH fallback still use NumPy because the shared solver
         interface and PATH backend are CPU/NumPy based.
         """
         if isinstance(q_tensors, torch.Tensor):
-            q_batch = q_tensors.detach().to(device=self.device, dtype=torch.float32)
+            q_batch = q_tensors.detach().to(device=self.config.device, dtype=torch.float32)
         else:
             q_batch = torch.stack(
                 [
-                    torch.as_tensor(q_tensor, dtype=torch.float32, device=self.device)
+                    torch.as_tensor(q_tensor, dtype=torch.float32, device=self.config.device)
                     for q_tensor in q_tensors
                 ],
                 dim=0,
@@ -558,6 +571,22 @@ class NfgTransformerSreSolver(SreStageGameSolver):
         neural = int(self.neural_accept_count)
         fallback = int(self.fallback_count)
         total = neural + fallback
+        config = getattr(self, "config", None)
+        checkpoint_path = getattr(
+            config,
+            "checkpoint_path",
+            getattr(self, "checkpoint_path", None),
+        )
+        requested_fallback_enabled = getattr(
+            config,
+            "fallback_enabled",
+            getattr(self, "fallback_enabled", False),
+        )
+        compute_diagnostics = getattr(
+            config,
+            "compute_exploitability_diagnostics",
+            True,
+        )
         gap_count = int(getattr(self, "neural_gap_count", total))
         if gap_count == 0:
             gap_summary = {
@@ -579,19 +608,15 @@ class NfgTransformerSreSolver(SreStageGameSolver):
             }
         return {
             "solver": self.name,
-            "checkpoint_path": None if self.checkpoint_path is None else str(self.checkpoint_path),
+            "checkpoint_path": None if checkpoint_path is None else str(checkpoint_path),
             "fallback_enabled": bool(self.fallback_enabled),
-            "requested_fallback_enabled": bool(
-                getattr(self, "requested_fallback_enabled", self.fallback_enabled)
-            ),
+            "requested_fallback_enabled": bool(requested_fallback_enabled),
             "neural_accept_count": neural,
             "fallback_count": fallback,
             "total_decisions": int(total),
             "neural_accept_rate": None if total == 0 else float(neural / total),
             "fallback_rate": None if total == 0 else float(fallback / total),
-            "compute_exploitability_diagnostics": bool(
-                getattr(self, "compute_exploitability_diagnostics", True)
-            ),
+            "compute_exploitability_diagnostics": bool(compute_diagnostics),
             "neural_robust_exploitability": gap_summary,
         }
 

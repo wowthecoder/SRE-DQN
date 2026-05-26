@@ -5,6 +5,7 @@ from pathlib import Path
 
 import matplotlib
 import numpy as np
+import pytest
 
 matplotlib.use("Agg")
 
@@ -21,6 +22,7 @@ def _obs(position):
         "position": position,
         "ammo": 1,
         "blast_strength": 2,
+        "alive": [10, 11, 12, 13],
     }
 
 
@@ -76,6 +78,42 @@ def test_full_parallel_env_exposes_four_agents(monkeypatch):
     assert env.agents == []
 
 
+def test_pommerman_action_masks_remove_only_illegal_noops(monkeypatch):
+    from discrete_action_space.pommerman_ffa import env as env_module
+    from discrete_action_space.pommerman_ffa.pz_wrapper import make_full_pz_env
+
+    obs = _obs((1, 1))
+    obs["board"][0, 1] = 1
+    obs["board"][1, 0] = 2
+    obs["board"][1, 2] = 4
+    obs["bomb_life"][1, 1] = 3
+
+    fake = _FakePommermanEnv()
+    fake.reset = lambda: [obs, _obs((2, 2)), _obs((3, 3)), _obs((4, 4))]
+
+    def fake_make_ffa_env(learner_slot=0, *, full_control=False):
+        assert full_control is True
+        return fake, learner_slot
+
+    monkeypatch.setattr(env_module, "make_ffa_env", fake_make_ffa_env)
+    env = make_full_pz_env()
+    env.reset(seed=123)
+
+    masks = env.action_masks(env.possible_agents)
+    assert masks[0].tolist() == [True, False, True, False, True, False]
+
+    raw = env.last_raw_observations
+    raw[2]["alive"] = [10, 11, 13]
+    assert env.action_masks(env.possible_agents)[2].tolist() == [
+        True,
+        False,
+        False,
+        False,
+        False,
+        False,
+    ]
+
+
 def test_pommerman_plot_helpers_accept_fake_rewards(tmp_path):
     from discrete_action_space.pommerman_ffa.notebook_utils import (
         plot_evaluation_rewards,
@@ -98,6 +136,65 @@ def test_pommerman_plot_helpers_accept_fake_rewards(tmp_path):
     assert (tmp_path / "eval.png").exists()
 
 
+def test_pommerman_iql_training_accepts_vectorized_envs(monkeypatch, tmp_path):
+    from discrete_action_space.pommerman_ffa import notebook_utils as nb
+
+    if nb.torch is None:
+        pytest.skip("PyTorch is required for the IQL baseline.")
+
+    class _ActionSpace:
+        n = 2
+
+    class _TinyParallelEnv:
+        possible_agents = [f"agent_{idx}" for idx in range(4)]
+
+        def __init__(self):
+            self.agents = list(self.possible_agents)
+
+        def reset(self, seed=None):
+            self.agents = list(self.possible_agents)
+            obs = {
+                agent: np.asarray([idx, seed or 0], dtype=np.float32)
+                for idx, agent in enumerate(self.possible_agents)
+            }
+            return obs, {agent: {} for agent in self.possible_agents}
+
+        def action_space(self, agent):
+            return _ActionSpace()
+
+        def step(self, actions):
+            assert sorted(actions) == self.possible_agents
+            obs = {
+                agent: np.asarray([idx, 1.0], dtype=np.float32)
+                for idx, agent in enumerate(self.possible_agents)
+            }
+            rewards = {agent: float(idx) for idx, agent in enumerate(self.possible_agents)}
+            terms = {agent: True for agent in self.possible_agents}
+            truncs = {agent: False for agent in self.possible_agents}
+            self.agents = []
+            return obs, rewards, terms, truncs, {agent: {} for agent in self.possible_agents}
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(nb, "make_env", _TinyParallelEnv)
+    stats = nb.train_iql_dqn(
+        n_episodes=3,
+        max_steps=1,
+        seed=7,
+        output_root=tmp_path,
+        use_gpu=False,
+        batch_size=2,
+        n_envs=2,
+        verbose=False,
+    )
+
+    assert stats["n_episodes"] == 3
+    assert stats["n_envs"] == 2
+    assert stats["vectorized_training"] is True
+    assert (tmp_path / "iql_dqn" / "iql_dqn_final.pt").exists()
+
+
 def test_pommerman_notebooks_are_valid_json():
     notebook_dir = ROOT / "discrete_action_space" / "pommerman_ffa"
     for name in (
@@ -105,6 +202,8 @@ def test_pommerman_notebooks_are_valid_json():
         "pommerman_sr_algorithms.ipynb",
         "pommerman_deepsrq_nfgtransformer_training.ipynb",
         "pommerman_deepsrq_nfgtransformer_evaluation.ipynb",
+        "pommerman_deepsrq_path_tvc_pool_training.ipynb",
+        "pommerman_deepsrq_path_tvc_pool_evaluation.ipynb",
         "pommerman_sr_adidas_training.ipynb",
         "pommerman_sr_adidas_evaluation.ipynb",
     ):
@@ -120,6 +219,8 @@ def test_pommerman_split_notebook_artifact_paths(tmp_path):
     from discrete_action_space.pommerman_ffa.notebook_utils import (
         deepsrq_nfgtransformer_evaluation_dir,
         deepsrq_nfgtransformer_training_dir,
+        deepsrq_path_tvc_pool_evaluation_dir,
+        deepsrq_path_tvc_pool_training_dir,
         sr_adidas_evaluation_dir,
         sr_adidas_training_dir,
     )
@@ -130,9 +231,58 @@ def test_pommerman_split_notebook_artifact_paths(tmp_path):
     assert deepsrq_nfgtransformer_evaluation_dir(1.0, repo_root=tmp_path) == (
         tmp_path / "discrete_action_space/pommerman_ffa/deepsrq_nfgtransformer/evaluation/1.0"
     )
+    assert deepsrq_path_tvc_pool_training_dir(0.01, repo_root=tmp_path) == (
+        tmp_path
+        / "discrete_action_space/pommerman_ffa/deepsrq_path_tvc_mcp_nplayer_pool/training/0.01"
+    )
+    assert deepsrq_path_tvc_pool_evaluation_dir(1.0, repo_root=tmp_path) == (
+        tmp_path
+        / "discrete_action_space/pommerman_ffa/deepsrq_path_tvc_mcp_nplayer_pool/evaluation/1.0"
+    )
     assert sr_adidas_training_dir(0.5, repo_root=tmp_path) == (
         tmp_path / "discrete_action_space/pommerman_ffa/sr_adidas/training/0.5"
     )
     assert sr_adidas_evaluation_dir(0.1, repo_root=tmp_path) == (
         tmp_path / "discrete_action_space/pommerman_ffa/sr_adidas/evaluation/0.1"
     )
+
+
+def test_deep_srq_policy_forwards_action_masks():
+    from discrete_action_space.pommerman_ffa.notebook_utils import policy_from_deep_srq
+
+    class _Config:
+        epsilon_explore = 0.7
+
+    class _Agent:
+        config = _Config()
+
+        def __init__(self):
+            self.seen_masks = None
+
+        def act_joint(self, state, *, action_masks=None):
+            assert state.shape == (4 * 367,)
+            self.seen_masks = action_masks
+            return [0, 1, 2, 3]
+
+    class _Env:
+        def action_masks(self, order):
+            return np.asarray(
+                [
+                    [True, False, False, False, False, False],
+                    [True, True, False, False, False, False],
+                    [True, False, True, False, False, False],
+                    [True, False, False, True, False, False],
+                ],
+                dtype=bool,
+            )
+
+    order = [f"agent_{idx}" for idx in range(4)]
+    obs = {name: np.zeros(367, dtype=np.float32) for name in order}
+    agent = _Agent()
+    policy = policy_from_deep_srq(agent, use_action_masks=True)
+
+    actions = policy(obs, order, 0, 0, env=_Env())
+
+    assert actions == {"agent_0": 0, "agent_1": 1, "agent_2": 2, "agent_3": 3}
+    assert agent.seen_masks.shape == (4, 6)
+    assert agent.config.epsilon_explore == 0.7

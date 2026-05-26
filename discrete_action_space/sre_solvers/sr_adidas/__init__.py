@@ -1,3 +1,3 @@
-from .solver import SrAdidasSreSolver
+from .solver import SrAdidasSreSolver, SrAdidasSreSolverConfig
 
-__all__ = ["SrAdidasSreSolver"]
+__all__ = ["SrAdidasSreSolver", "SrAdidasSreSolverConfig"]

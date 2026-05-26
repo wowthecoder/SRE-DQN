@@ -6,13 +6,8 @@ from copy import deepcopy
 from typing import Any, Iterable, Sequence
 
 import numpy as np
-
-try:
-    from lbforaging.foraging import ForagingEnv
-    from lbforaging.foraging.environment import Action
-except ImportError:  # pragma: no cover - dependency-gated by callers/tests
-    ForagingEnv = object
-    Action = None
+from lbforaging.foraging import ForagingEnv
+from lbforaging.foraging.environment import Action
 
 
 def _agent_key(agent_id: int) -> str:

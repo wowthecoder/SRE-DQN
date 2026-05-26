@@ -1,13 +1,10 @@
 import importlib
+from dataclasses import dataclass, replace
 import multiprocessing as mp
 import time
 
 import numpy as np
-
-try:
-    from path_solver import build_robust_bimatrix_lcp
-except ImportError:  # Package import from repository root.
-    from ..path_solver import build_robust_bimatrix_lcp
+from path_solver import build_robust_bimatrix_lcp
 
 from .base import (
     SreSolveResult,
@@ -19,10 +16,31 @@ from .base import (
 from .path_c import _select_best_solution, _solution_from_lcp_vector
 
 
+@dataclass(frozen=True)
+class LemkeLcpBimatrixSreSolverConfig:
+    pass
+
+
+@dataclass(frozen=True)
+class ProcessPoolLemkeLcpBimatrixSreSolverConfig:
+    max_workers: int = 4
+    start_method: str | None = None
+
+    def __post_init__(self):
+        object.__setattr__(self, "max_workers", int(self.max_workers))
+        if self.max_workers <= 0:
+            raise ValueError("max_workers must be positive for process-pool SRE.")
+
+
 class LemkeLcpBimatrixSreSolver(SreStageGameSolver):
     name = "lemkelcp"
 
-    def __init__(self):
+    def __init__(self, config: LemkeLcpBimatrixSreSolverConfig | None = None, **overrides):
+        if config is None:
+            config = LemkeLcpBimatrixSreSolverConfig(**overrides)
+        elif overrides:
+            config = replace(config, **overrides)
+        self.config = config
         self._lemke = self._load_solver()
         self.solve_time_count = 0
         self.solve_time_sum = 0.0
@@ -50,20 +68,9 @@ class LemkeLcpBimatrixSreSolver(SreStageGameSolver):
 
     @staticmethod
     def _load_solver():
-        try:
-            module = importlib.import_module("lemkelcp")
-        except ImportError as exc:
-            raise ImportError(
-                "lemkelcp is required for LemkeLcpBimatrixSreSolver. "
-                "Install it with `pip install lemkelcp==0.1`."
-            ) from exc
-
-        try:
-            submodule = importlib.import_module("lemkelcp.lemkelcp")
-        except ImportError:
-            submodule = None
-        if submodule is not None:
-            LemkeLcpBimatrixSreSolver._patch_python3_tableau(submodule)
+        module = importlib.import_module("lemkelcp")
+        submodule = importlib.import_module("lemkelcp.lemkelcp")
+        LemkeLcpBimatrixSreSolver._patch_python3_tableau(submodule)
 
         candidate = getattr(module, "lemkelcp", None)
         if callable(candidate):
@@ -71,10 +78,9 @@ class LemkeLcpBimatrixSreSolver(SreStageGameSolver):
         if candidate is not None and callable(getattr(candidate, "lemkelcp", None)):
             return candidate.lemkelcp
 
-        if submodule is not None:
-            candidate = getattr(submodule, "lemkelcp", None)
-            if callable(candidate):
-                return candidate
+        candidate = getattr(submodule, "lemkelcp", None)
+        if callable(candidate):
+            return candidate
 
         raise ImportError(
             "Installed lemkelcp package does not expose a callable lemkelcp solver."
@@ -271,19 +277,24 @@ def _lemke_pool_solve_task(payload):
 class ProcessPoolLemkeLcpBimatrixSreSolver(SreStageGameSolver):
     name = "lemkelcp_pool"
 
-    def __init__(self, max_workers=4, start_method=None):
-        self.max_workers = int(max_workers)
-        self.start_method = start_method
+    def __init__(
+        self,
+        config: ProcessPoolLemkeLcpBimatrixSreSolverConfig | None = None,
+        **overrides,
+    ):
+        if config is None:
+            config = ProcessPoolLemkeLcpBimatrixSreSolverConfig(**overrides)
+        elif overrides:
+            config = replace(config, **overrides)
+        self.config = config
         self.solve_time_count = 0
         self.solve_time_sum = 0.0
         self.solve_time_sumsq = 0.0
         self.solve_time_min = None
         self.solve_time_max = None
-        if self.max_workers <= 0:
-            raise ValueError("max_workers must be positive for process-pool SRE.")
-        ctx = mp.get_context(start_method) if start_method else mp.get_context()
+        ctx = mp.get_context(self.config.start_method) if self.config.start_method else mp.get_context()
         self._pool = ctx.Pool(
-            processes=self.max_workers,
+            processes=self.config.max_workers,
             initializer=_lemke_pool_initializer,
         )
 
@@ -341,7 +352,7 @@ class ProcessPoolLemkeLcpBimatrixSreSolver(SreStageGameSolver):
             duration = float(result.metadata.get("worker_sre_wall_seconds", 0.0))
             self._record_solve_time(duration)
             result.metadata["solver"] = self.name
-            result.metadata["max_workers"] = self.max_workers
+            result.metadata["max_workers"] = self.config.max_workers
         return results
 
     def get_solve_time_summary(self):

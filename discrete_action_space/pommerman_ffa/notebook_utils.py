@@ -49,6 +49,7 @@ DEFAULT_NUM_AGENTS = 4
 DEFAULT_NUM_ACTIONS = 6
 ROBUST_EPSILONS = (0.01, 0.1, 0.5, 1.0)
 DEEPSRQ_NFGTRANSFORMER_FAMILY = "deepsrq_nfgtransformer"
+DEEPSRQ_PATH_TVC_POOL_FAMILY = "deepsrq_path_tvc_mcp_nplayer_pool"
 SR_ADIDAS_FAMILY = "sr_adidas"
 DEFAULT_NFG_TRANSFORMER_CHECKPOINT = (
     _DISCRETE_DIR
@@ -110,6 +111,24 @@ def deepsrq_nfgtransformer_evaluation_dir(epsilon, *, repo_root=None):
     )
 
 
+def deepsrq_path_tvc_pool_training_dir(epsilon, *, repo_root=None):
+    return pommerman_artifact_dir(
+        DEEPSRQ_PATH_TVC_POOL_FAMILY,
+        "training",
+        epsilon,
+        repo_root=repo_root,
+    )
+
+
+def deepsrq_path_tvc_pool_evaluation_dir(epsilon, *, repo_root=None):
+    return pommerman_artifact_dir(
+        DEEPSRQ_PATH_TVC_POOL_FAMILY,
+        "evaluation",
+        epsilon,
+        repo_root=repo_root,
+    )
+
+
 def sr_adidas_training_dir(epsilon, *, repo_root=None):
     return pommerman_artifact_dir(SR_ADIDAS_FAMILY, "training", epsilon, repo_root=repo_root)
 
@@ -134,6 +153,12 @@ def _agent_order(env):
 def _central_state(obs_dict, agent_order):
     parts = [np.asarray(obs_dict[a], dtype=np.float32).reshape(-1) for a in agent_order]
     return np.concatenate(parts).astype(np.float32, copy=False)
+
+
+def _action_masks(env, agent_order):
+    if hasattr(env, "action_masks"):
+        return env.action_masks(agent_order)
+    return None
 
 
 def _rewards_to_history(episode_rewards):
@@ -267,6 +292,25 @@ class SharedIqlDqnAgent:
         with torch.no_grad():
             return int(torch.argmax(self.q_net(obs_t), dim=-1).item())
 
+    def act_many(self, obs_batch, deterministic=False):
+        obs_arr = np.asarray(obs_batch, dtype=np.float32)
+        if obs_arr.ndim == 1:
+            return [self.act(obs_arr, deterministic=deterministic)]
+
+        actions = np.empty(obs_arr.shape[0], dtype=np.int64)
+        explore = np.zeros(obs_arr.shape[0], dtype=bool)
+        if not deterministic:
+            explore = np.random.rand(obs_arr.shape[0]) < self.epsilon
+            if np.any(explore):
+                actions[explore] = np.random.randint(self.num_actions, size=int(np.sum(explore)))
+
+        greedy_idx = np.flatnonzero(~explore)
+        if greedy_idx.size:
+            obs_t = torch.as_tensor(obs_arr[greedy_idx], dtype=torch.float32, device=self.device)
+            with torch.no_grad():
+                actions[greedy_idx] = torch.argmax(self.q_net(obs_t), dim=-1).detach().cpu().numpy()
+        return [int(action) for action in actions]
+
     def push(self, obs, action, reward, next_obs, done):
         self.replay.append((
             np.asarray(obs, dtype=np.float32),
@@ -382,6 +426,24 @@ class SharedIppoAgent:
             logp = dist.log_prob(action)
         return int(action.item()), float(logp.item()), float(value.item())
 
+    def act_many(self, obs_batch, deterministic=False):
+        obs_arr = np.asarray(obs_batch, dtype=np.float32)
+        if obs_arr.ndim == 1:
+            action, logp, value = self.act(obs_arr, deterministic=deterministic)
+            return [action], [logp], [value]
+
+        obs_t = torch.as_tensor(obs_arr, dtype=torch.float32, device=self.device)
+        with torch.no_grad():
+            logits, values = self.net(obs_t)
+            dist = torch.distributions.Categorical(logits=logits)
+            actions = torch.argmax(logits, dim=-1) if deterministic else dist.sample()
+            logp = dist.log_prob(actions)
+        return (
+            [int(action) for action in actions.detach().cpu().numpy()],
+            [float(value) for value in logp.detach().cpu().numpy()],
+            [float(value) for value in values.detach().cpu().numpy()],
+        )
+
     def update(self, trajectories):
         obs = torch.as_tensor(
             np.stack([t["obs"] for t in trajectories]),
@@ -465,6 +527,7 @@ def train_iql_dqn(
     output_root=DEFAULT_OUTPUT_ROOT,
     use_gpu=True,
     batch_size=64,
+    n_envs=1,
     verbose=True,
 ):
     set_global_seed(seed)
@@ -486,30 +549,74 @@ def train_iql_dqn(
     episode_lengths = []
     output_dir = Path(output_root) / "iql_dqn"
     best_joint_reward = -float("inf")
+    n_envs = max(1, int(n_envs))
+    next_episode = 0
+    active = []
 
-    for episode in tqdm(range(n_episodes), desc="pommerman:iql_dqn", disable=not verbose):
+    def _start_episode(episode):
         env = make_env()
         obs, _ = env.reset(seed=seed + episode)
-        order = _agent_order(env)
-        rewards = np.zeros(len(order), dtype=np.float64)
-        steps = 0
-        while env.agents and steps < max_steps:
-            actions = {a: agent.act(obs[a]) for a in order}
-            next_obs, reward_dict, term_dict, trunc_dict, _ = env.step(actions)
-            for idx, name in enumerate(order):
-                done = bool(term_dict.get(name, False) or trunc_dict.get(name, False))
-                agent.push(obs[name], actions[name], reward_dict.get(name, 0.0), next_obs[name], done)
-                rewards[idx] += float(reward_dict.get(name, 0.0))
-            agent.train_step()
-            obs = next_obs
-            steps += 1
-        env.close()
-        episode_rewards.append(rewards.tolist())
-        episode_lengths.append(steps)
-        joint_reward = float(np.sum(rewards))
-        if joint_reward > best_joint_reward:
-            best_joint_reward = joint_reward
-            agent.save_checkpoint(output_dir / "iql_dqn_best.pt")
+        episode_order = _agent_order(env)
+        return {
+            "episode": int(episode),
+            "env": env,
+            "obs": obs,
+            "order": episode_order,
+            "rewards": np.zeros(len(episode_order), dtype=np.float64),
+            "steps": 0,
+        }
+
+    with tqdm(total=n_episodes, desc="pommerman:iql_dqn", disable=not verbose) as progress:
+        try:
+            while next_episode < n_episodes or active:
+                while next_episode < n_episodes and len(active) < n_envs:
+                    active.append(_start_episode(next_episode))
+                    next_episode += 1
+                if not active:
+                    break
+
+                obs_batch = []
+                refs = []
+                for env_idx, item in enumerate(active):
+                    for name in item["order"]:
+                        obs_batch.append(item["obs"][name])
+                        refs.append((env_idx, name))
+                action_values = agent.act_many(obs_batch)
+                actions_by_env = [{} for _ in active]
+                for action, (env_idx, name) in zip(action_values, refs):
+                    actions_by_env[env_idx][name] = int(action)
+
+                finished = []
+                for env_idx, item in enumerate(active):
+                    next_obs, reward_dict, term_dict, trunc_dict, _ = item["env"].step(actions_by_env[env_idx])
+                    for agent_idx, name in enumerate(item["order"]):
+                        done = bool(term_dict.get(name, False) or trunc_dict.get(name, False))
+                        agent.push(
+                            item["obs"][name],
+                            actions_by_env[env_idx][name],
+                            reward_dict.get(name, 0.0),
+                            next_obs[name],
+                            done,
+                        )
+                        item["rewards"][agent_idx] += float(reward_dict.get(name, 0.0))
+                    agent.train_step()
+                    item["obs"] = next_obs
+                    item["steps"] += 1
+                    if not item["env"].agents or item["steps"] >= max_steps:
+                        item["env"].close()
+                        episode_rewards.append(item["rewards"].tolist())
+                        episode_lengths.append(item["steps"])
+                        joint_reward = float(np.sum(item["rewards"]))
+                        if joint_reward > best_joint_reward:
+                            best_joint_reward = joint_reward
+                            agent.save_checkpoint(output_dir / "iql_dqn_best.pt")
+                        finished.append(env_idx)
+                        progress.update(1)
+                for env_idx in reversed(finished):
+                    active.pop(env_idx)
+        finally:
+            for item in active:
+                item["env"].close()
 
     agent.save_checkpoint(output_dir / "iql_dqn_final.pt")
     stats = _stats_payload(
@@ -518,7 +625,12 @@ def train_iql_dqn(
         episode_lengths=episode_lengths,
         seed=seed,
         output_dir=output_dir,
-        extra={"losses": agent.losses, "batch_size": int(batch_size)},
+        extra={
+            "losses": agent.losses,
+            "batch_size": int(batch_size),
+            "n_envs": int(n_envs),
+            "vectorized_training": bool(n_envs > 1),
+        },
     )
     stats = _write_stats(stats, output_dir)
     stats["agent"] = agent
@@ -533,6 +645,7 @@ def train_ippo(
     output_root=DEFAULT_OUTPUT_ROOT,
     use_gpu=True,
     batch_size=64,
+    n_envs=1,
     verbose=True,
 ):
     set_global_seed(seed)
@@ -548,49 +661,89 @@ def train_ippo(
     episode_rewards = []
     episode_lengths = []
     best_joint_reward = -float("inf")
+    n_envs = max(1, int(n_envs))
+    next_episode = 0
+    active = []
 
-    for episode in tqdm(range(n_episodes), desc="pommerman:ippo", disable=not verbose):
+    def _start_episode(episode):
         env = make_env()
         obs, _ = env.reset(seed=seed + episode)
-        order = _agent_order(env)
-        per_agent_trajectories = [[] for _ in order]
-        rewards = np.zeros(len(order), dtype=np.float64)
-        steps = 0
-        while env.agents and steps < max_steps:
-            actions = {}
-            action_meta = {}
-            for idx, name in enumerate(order):
-                action, logp, value = agent.act(obs[name])
-                actions[name] = action
-                action_meta[name] = (logp, value)
-            next_obs, reward_dict, term_dict, trunc_dict, _ = env.step(actions)
-            for idx, name in enumerate(order):
-                done = bool(term_dict.get(name, False) or trunc_dict.get(name, False))
-                logp, value = action_meta[name]
-                reward = float(reward_dict.get(name, 0.0))
-                per_agent_trajectories[idx].append(
-                    {
-                        "obs": np.asarray(obs[name], dtype=np.float32),
-                        "action": int(actions[name]),
-                        "reward": reward,
-                        "done": done,
-                        "logp": logp,
-                        "value": value,
-                    }
-                )
-                rewards[idx] += reward
-            obs = next_obs
-            steps += 1
-        env.close()
-        rows = _compute_gae(per_agent_trajectories, agent.gamma, agent.gae_lambda)
-        if rows:
-            agent.update(rows)
-        episode_rewards.append(rewards.tolist())
-        episode_lengths.append(steps)
-        joint_reward = float(np.sum(rewards))
-        if joint_reward > best_joint_reward:
-            best_joint_reward = joint_reward
-            agent.save_checkpoint(output_dir / "ippo_best.pt")
+        episode_order = _agent_order(env)
+        return {
+            "episode": int(episode),
+            "env": env,
+            "obs": obs,
+            "order": episode_order,
+            "trajectories": [[] for _ in episode_order],
+            "rewards": np.zeros(len(episode_order), dtype=np.float64),
+            "steps": 0,
+        }
+
+    with tqdm(total=n_episodes, desc="pommerman:ippo", disable=not verbose) as progress:
+        try:
+            while next_episode < n_episodes or active:
+                while next_episode < n_episodes and len(active) < n_envs:
+                    active.append(_start_episode(next_episode))
+                    next_episode += 1
+                if not active:
+                    break
+
+                obs_batch = []
+                refs = []
+                for env_idx, item in enumerate(active):
+                    for agent_idx, name in enumerate(item["order"]):
+                        obs_batch.append(item["obs"][name])
+                        refs.append((env_idx, agent_idx, name))
+                action_values, logp_values, value_values = agent.act_many(obs_batch)
+                actions_by_env = [{} for _ in active]
+                meta_by_env = [{} for _ in active]
+                for action, logp, value, (env_idx, agent_idx, name) in zip(
+                    action_values,
+                    logp_values,
+                    value_values,
+                    refs,
+                ):
+                    actions_by_env[env_idx][name] = int(action)
+                    meta_by_env[env_idx][name] = (agent_idx, float(logp), float(value))
+
+                finished = []
+                for env_idx, item in enumerate(active):
+                    next_obs, reward_dict, term_dict, trunc_dict, _ = item["env"].step(actions_by_env[env_idx])
+                    for name in item["order"]:
+                        agent_idx, logp, value = meta_by_env[env_idx][name]
+                        done = bool(term_dict.get(name, False) or trunc_dict.get(name, False))
+                        reward = float(reward_dict.get(name, 0.0))
+                        item["trajectories"][agent_idx].append(
+                            {
+                                "obs": np.asarray(item["obs"][name], dtype=np.float32),
+                                "action": int(actions_by_env[env_idx][name]),
+                                "reward": reward,
+                                "done": done,
+                                "logp": logp,
+                                "value": value,
+                            }
+                        )
+                        item["rewards"][agent_idx] += reward
+                    item["obs"] = next_obs
+                    item["steps"] += 1
+                    if not item["env"].agents or item["steps"] >= max_steps:
+                        item["env"].close()
+                        rows = _compute_gae(item["trajectories"], agent.gamma, agent.gae_lambda)
+                        if rows:
+                            agent.update(rows)
+                        episode_rewards.append(item["rewards"].tolist())
+                        episode_lengths.append(item["steps"])
+                        joint_reward = float(np.sum(item["rewards"]))
+                        if joint_reward > best_joint_reward:
+                            best_joint_reward = joint_reward
+                            agent.save_checkpoint(output_dir / "ippo_best.pt")
+                        finished.append(env_idx)
+                        progress.update(1)
+                for env_idx in reversed(finished):
+                    active.pop(env_idx)
+        finally:
+            for item in active:
+                item["env"].close()
 
     agent.save_checkpoint(output_dir / "ippo_final.pt")
     stats = _stats_payload(
@@ -599,7 +752,12 @@ def train_ippo(
         episode_lengths=episode_lengths,
         seed=seed,
         output_dir=output_dir,
-        extra={"losses": agent.losses, "batch_size": int(batch_size)},
+        extra={
+            "losses": agent.losses,
+            "batch_size": int(batch_size),
+            "n_envs": int(n_envs),
+            "vectorized_training": bool(n_envs > 1),
+        },
     )
     stats = _write_stats(stats, output_dir)
     stats["agent"] = agent
@@ -807,6 +965,14 @@ def train_pommerman_deep_srq(
     logit_qre_damping=0.5,
     logit_qre_min_prob=1e-12,
     logit_qre_device=None,
+    sre_solver_workers=8,
+    sre_solver_start_method=None,
+    sre_num_repeats=4,
+    sre_include_pure_starts=False,
+    target_equilibrium_update_steps=4,
+    use_action_masks=None,
+    remove_fixed_players=True,
+    interaction_pruning="off",
     batch_size=32,
     include_replay_buffer=True,
     verbose=True,
@@ -861,6 +1027,27 @@ def train_pommerman_deep_srq(
             device=logit_qre_device,
         )
         solver_record_name = solver_name
+    elif solver_name in {
+        "path_tvc_mcp_nplayer",
+        "path_tvc_nplayer",
+        "path_tvc_mcp",
+        "path_tvc_mcp_nplayer_pool",
+        "path_tvc_nplayer_pool",
+        "path_tvc_mcp_pool",
+        "path_mcp_nplayer",
+        "path_nplayer",
+        "path_mcp",
+        "path_mcp_nplayer_pool",
+        "path_nplayer_pool",
+        "path_mcp_pool",
+    }:
+        solver = make_sre_solver(
+            solver_name,
+            random_seed=seed,
+            max_workers=sre_solver_workers,
+            start_method=sre_solver_start_method,
+        )
+        solver_record_name = solver_name
     elif nfg_checkpoint_path:
         solver = make_sre_solver(
             "nfg_transformer_sre",
@@ -878,6 +1065,18 @@ def train_pommerman_deep_srq(
             accept_exploitability_tol=nfg_accept_gap,
         )
         solver_record_name = "nfg_transformer_sre"
+
+    if use_action_masks is None:
+        use_action_masks_resolved = str(solver_record_name).startswith("path")
+    else:
+        use_action_masks_resolved = bool(use_action_masks)
+    interaction_pruning = str(interaction_pruning).lower()
+    if interaction_pruning != "off":
+        raise NotImplementedError(
+            "Pommerman interaction_pruning is currently only supported as 'off'. "
+            "Component pruning is an approximate research mode and should be "
+            "implemented separately from the exact PATH-pool reductions."
+        )
 
     agent = DuelingDoubleDqnSreAgent(
         DuelingDoubleDqnSreAgentConfig(
@@ -899,11 +1098,14 @@ def train_pommerman_deep_srq(
             grad_clip_norm=10.0,
             train_every=4,
             target_update_steps=250,
-            target_equilibrium_update_steps=4,
+            target_equilibrium_update_steps=target_equilibrium_update_steps,
             network_type="shared_trunk_separate_heads",
             use_gpu=use_gpu,
             sre_solver=solver,
             sre_solver_name=solver_record_name,
+            sre_num_repeats=sre_num_repeats,
+            sre_include_pure_starts=sre_include_pure_starts,
+            sre_remove_fixed_players=remove_fixed_players,
             sre_solver_exploitability_tol=(
                 sr_adidas_exploitability_tol
                 if solver_name in {"sr_adidas_sre", "sr_adidas"}
@@ -938,7 +1140,12 @@ def train_pommerman_deep_srq(
             rewards_total = np.zeros(len(order), dtype=np.float64)
             steps = 0
             while env.agents and steps < max_steps:
-                actions_list = agent.act_joint(state)
+                action_masks = (
+                    _action_masks(env, order)
+                    if use_action_masks_resolved
+                    else None
+                )
+                actions_list = agent.act_joint(state, action_masks=action_masks)
                 actions = {name: int(actions_list[i]) for i, name in enumerate(order)}
                 next_obs, rewards, terms, truncs, _ = env.step(actions)
                 next_state = _central_state(next_obs, order)
@@ -947,7 +1154,23 @@ def train_pommerman_deep_srq(
                     [bool(terms.get(a, False) or truncs.get(a, False)) for a in order],
                     dtype=np.float32,
                 )
-                loss = agent.update(state, actions_list, reward_vec, next_state, done_mask, batch_size=batch_size)
+                next_action_masks = None
+                if (
+                    use_action_masks_resolved
+                    and env.agents
+                    and not np.all(done_mask > 0.0)
+                ):
+                    next_action_masks = _action_masks(env, order)
+                loss = agent.update(
+                    state,
+                    actions_list,
+                    reward_vec,
+                    next_state,
+                    done_mask,
+                    batch_size=batch_size,
+                    action_masks=action_masks,
+                    next_action_masks=next_action_masks,
+                )
                 if loss is not None:
                     gradient_steps += 1
                     latest_loss = float(loss)
@@ -1000,6 +1223,13 @@ def train_pommerman_deep_srq(
             "epsilon_schedule": epsilon_schedule,
             "gradient_steps": int(gradient_steps),
             "batch_size": int(batch_size),
+            "use_action_masks": bool(use_action_masks_resolved),
+            "remove_fixed_players": bool(remove_fixed_players),
+            "interaction_pruning": interaction_pruning,
+            "sre_solver_workers": int(sre_solver_workers),
+            "sre_num_repeats": int(sre_num_repeats),
+            "sre_include_pure_starts": bool(sre_include_pure_starts),
+            "target_equilibrium_update_steps": int(target_equilibrium_update_steps),
             "obs_dim": int(obs_dim),
             "loss_history": loss_history,
             "best_loss": best_loss,
@@ -1077,6 +1307,87 @@ def train_pommerman_deepsrq_nfgtransformer_for_epsilon(
     return stats
 
 
+def train_pommerman_deepsrq_path_tvc_pool_for_epsilon(
+    epsilon,
+    *,
+    n_episodes=100,
+    max_steps=200,
+    seed=BASE_SEED,
+    repo_root=None,
+    use_gpu=True,
+    batch_size=32,
+    sre_solver_workers=16,
+    sre_solver_start_method=None,
+    sre_num_repeats=4,
+    sre_include_pure_starts=False,
+    target_equilibrium_update_steps=4,
+    verbose=True,
+):
+    run_dir = deepsrq_path_tvc_pool_training_dir(epsilon, repo_root=repo_root)
+    stats = train_pommerman_deep_srq(
+        n_episodes=n_episodes,
+        max_steps=max_steps,
+        seed=seed,
+        output_dir=run_dir,
+        use_gpu=use_gpu,
+        epsilon_robust_initial=float(epsilon),
+        epsilon_schedule="constant",
+        solver_name="path_tvc_mcp_nplayer_pool",
+        sre_solver_workers=sre_solver_workers,
+        sre_solver_start_method=sre_solver_start_method,
+        sre_num_repeats=sre_num_repeats,
+        sre_include_pure_starts=sre_include_pure_starts,
+        target_equilibrium_update_steps=target_equilibrium_update_steps,
+        use_action_masks=True,
+        remove_fixed_players=True,
+        batch_size=batch_size,
+        include_replay_buffer=True,
+        verbose=verbose,
+    )
+    stats.update(
+        {
+            "algorithm_family": DEEPSRQ_PATH_TVC_POOL_FAMILY,
+            "artifact_dir": str(run_dir),
+        }
+    )
+    saved_stats = dict(stats)
+    saved_stats.pop("agent", None)
+    save_training_stats(run_dir / "training_stats.txt", saved_stats)
+    manifest_path = (
+        pommerman_dir(repo_root)
+        / DEEPSRQ_PATH_TVC_POOL_FAMILY
+        / "training"
+        / f"manifest_eps_{epsilon_slug(epsilon)}.json"
+    )
+    save_training_stats(
+        manifest_path,
+        {
+            "algorithm": DEEPSRQ_PATH_TVC_POOL_FAMILY,
+            "solver_name": "path_tvc_mcp_nplayer_pool",
+            "epsilon": float(epsilon),
+            "sre_solver_workers": int(sre_solver_workers),
+            "sre_num_repeats": int(sre_num_repeats),
+            "sre_include_pure_starts": bool(sre_include_pure_starts),
+            "target_equilibrium_update_steps": int(target_equilibrium_update_steps),
+            "use_action_masks": True,
+            "remove_fixed_players": True,
+            "training_stats_path": str(run_dir / "training_stats.txt"),
+            "artifact_dir": str(run_dir),
+        },
+    )
+    return stats
+
+
+def _call_policy(policy_fn, obs, order, episode, step, env):
+    try:
+        return policy_fn(obs, order, episode, step, env=env)
+    except TypeError as exc:
+        message = str(exc)
+        if "unexpected keyword argument 'env'" not in message:
+            raise
+        return policy_fn(obs, order, episode, step)
+
+
 def evaluate_policy(
     policy_fn: Callable,
     *,
@@ -1085,13 +1396,19 @@ def evaluate_policy(
     seed=BASE_SEED + 10_000,
     output_dir=None,
     label="policy",
+    verbose=True,
 ):
     episode_rewards = []
     episode_lengths = []
     first_cumulative = None
     first_frames = []
     render_error = None
-    for episode in range(n_episodes):
+    episode_iter = tqdm(
+        range(n_episodes),
+        desc=f"pommerman:evaluate:{label}",
+        disable=not verbose,
+    )
+    for episode in episode_iter:
         env = make_env()
         obs, _ = env.reset(seed=seed + episode)
         order = _agent_order(env)
@@ -1105,7 +1422,7 @@ def evaluate_policy(
                 first_frames.append(frame)
 
         while env.agents and steps < max_steps:
-            actions = policy_fn(obs, order, episode, steps)
+            actions = _call_policy(policy_fn, obs, order, episode, steps, env)
             obs, rewards, terms, truncs, _ = env.step(actions)
             reward_vec = np.asarray([rewards.get(a, 0.0) for a in order], dtype=np.float64)
             rewards_total += reward_vec
@@ -1165,13 +1482,19 @@ def evaluate_simple_agent_reference(
     max_steps=200,
     seed=BASE_SEED + 20_000,
     output_dir=None,
+    verbose=True,
 ):
     set_global_seed(seed)
     episode_rewards = []
     episode_lengths = []
     first_frames = []
     render_error = None
-    for episode in range(n_episodes):
+    episode_iter = tqdm(
+        range(n_episodes),
+        desc="pommerman:evaluate:simple_agent",
+        disable=not verbose,
+    )
+    for episode in episode_iter:
         env = make_simple_agent_ffa_env()
         obs = env.reset()
         rewards_total = np.zeros(DEFAULT_NUM_AGENTS, dtype=np.float64)
@@ -1262,13 +1585,14 @@ def policy_from_sr_adidas(agent):
     return _policy
 
 
-def policy_from_deep_srq(agent):
-    def _policy(obs, order, episode, step):
+def policy_from_deep_srq(agent, *, use_action_masks=False):
+    def _policy(obs, order, episode, step, env=None):
         state = _central_state(obs, order)
         old_eps = agent.config.epsilon_explore
         agent.config.epsilon_explore = 0.0
+        action_masks = _action_masks(env, order) if use_action_masks and env is not None else None
         try:
-            actions = agent.act_joint(state)
+            actions = agent.act_joint(state, action_masks=action_masks)
         finally:
             agent.config.epsilon_explore = old_eps
         return {name: int(actions[idx]) for idx, name in enumerate(order)}
@@ -1348,6 +1672,76 @@ def load_pommerman_deepsrq_nfgtransformer_agent(
             use_gpu=use_gpu,
             sre_solver=solver,
             sre_solver_name="nfg_transformer_sre",
+        )
+    )
+    agent.load_checkpoint(checkpoint, map_location=None if use_gpu else "cpu")
+    agent.config.epsilon_explore = 0.0
+    agent.config.epsilon_robust = float(epsilon)
+    return agent
+
+
+def load_pommerman_deepsrq_path_tvc_pool_agent(
+    epsilon,
+    *,
+    repo_root=None,
+    use_gpu=True,
+    checkpoint_name="best",
+    sre_solver_workers=16,
+    sre_solver_start_method=None,
+):
+    if torch is None:
+        raise ImportError("Deep SRQ checkpoint loading requires torch.")
+    from dueling_double_dqn_sre import DuelingDoubleDqnSreAgent, DuelingDoubleDqnSreAgentConfig
+    from sre_solvers import make_sre_solver
+
+    run_dir = deepsrq_path_tvc_pool_training_dir(epsilon, repo_root=repo_root)
+    stats = _load_stats(run_dir / "training_stats.txt")
+    checkpoint_paths = stats.get("checkpoint_paths", {})
+    checkpoint_value = checkpoint_paths.get(checkpoint_name)
+    checkpoint = Path(checkpoint_value) if checkpoint_value else run_dir / "shared_deepsrq_best.pt"
+    if not checkpoint.is_file():
+        checkpoint = run_dir / "shared_deepsrq_best.pt"
+    if not checkpoint.is_file():
+        checkpoint = run_dir / "shared_deepsrq_final.pt"
+    if not checkpoint.is_file():
+        raise FileNotFoundError(f"No DeepSRQ PATH TVC checkpoint found in {run_dir}.")
+
+    solver_name = stats.get("solver_name", "path_tvc_mcp_nplayer_pool")
+    solver = make_sre_solver(
+        solver_name,
+        random_seed=int(stats.get("seed", BASE_SEED)),
+        max_workers=int(stats.get("sre_solver_workers", sre_solver_workers)),
+        start_method=sre_solver_start_method,
+    )
+    agent = DuelingDoubleDqnSreAgent(
+        DuelingDoubleDqnSreAgentConfig(
+            obs_dim=int(stats["obs_dim"]),
+            num_agents=int(stats.get("num_agents", DEFAULT_NUM_AGENTS)),
+            num_actions=int(stats.get("num_actions", DEFAULT_NUM_ACTIONS)),
+            epsilon_robust=float(epsilon),
+            epsilon_robust_initial=float(epsilon),
+            epsilon_schedule="constant",
+            epsilon_explore=0.0,
+            action_epsilon_start=0.0,
+            action_epsilon_end=0.0,
+            lr=3e-4,
+            gamma=0.99,
+            buffer_size=20_000,
+            batch_size=int(stats.get("batch_size", 32)),
+            learning_starts=500,
+            grad_clip_norm=10.0,
+            train_every=4,
+            target_update_steps=250,
+            target_equilibrium_update_steps=int(
+                stats.get("target_equilibrium_update_steps", 4)
+            ),
+            network_type="shared_trunk_separate_heads",
+            use_gpu=use_gpu,
+            sre_solver=solver,
+            sre_solver_name=solver_name,
+            sre_num_repeats=int(stats.get("sre_num_repeats", 4)),
+            sre_include_pure_starts=bool(stats.get("sre_include_pure_starts", False)),
+            sre_remove_fixed_players=bool(stats.get("remove_fixed_players", True)),
         )
     )
     agent.load_checkpoint(checkpoint, map_location=None if use_gpu else "cpu")
@@ -1443,6 +1837,57 @@ def evaluate_pommerman_deepsrq_nfgtransformer_for_epsilon(
             "epsilon": float(epsilon),
             "n_episodes": int(n_episodes),
             "max_steps": int(max_steps),
+            "artifact_dir": str(output_dir),
+        },
+    )
+    return stats
+
+
+def evaluate_pommerman_deepsrq_path_tvc_pool_for_epsilon(
+    epsilon,
+    *,
+    n_episodes=20,
+    max_steps=200,
+    seed=BASE_SEED + 10_000,
+    repo_root=None,
+    use_gpu=True,
+    checkpoint_name="best",
+    sre_solver_workers=16,
+    sre_solver_start_method=None,
+):
+    output_dir = deepsrq_path_tvc_pool_evaluation_dir(epsilon, repo_root=repo_root)
+    agent = load_pommerman_deepsrq_path_tvc_pool_agent(
+        epsilon,
+        repo_root=repo_root,
+        use_gpu=use_gpu,
+        checkpoint_name=checkpoint_name,
+        sre_solver_workers=sre_solver_workers,
+        sre_solver_start_method=sre_solver_start_method,
+    )
+    try:
+        stats = evaluate_policy(
+            policy_from_deep_srq(agent, use_action_masks=True),
+            n_episodes=n_episodes,
+            max_steps=max_steps,
+            seed=seed,
+            output_dir=output_dir,
+            label=f"deep_srq_path_tvc_pool_eps_{epsilon_slug(epsilon)}",
+        )
+    finally:
+        agent.close()
+    stats["epsilon_robust"] = float(epsilon)
+    stats["artifact_dir"] = str(output_dir)
+    save_training_stats(
+        output_dir / "evaluation_manifest.json",
+        {
+            "algorithm": DEEPSRQ_PATH_TVC_POOL_FAMILY,
+            "solver_name": "path_tvc_mcp_nplayer_pool",
+            "epsilon": float(epsilon),
+            "n_episodes": int(n_episodes),
+            "max_steps": int(max_steps),
+            "checkpoint_name": str(checkpoint_name),
+            "sre_solver_workers": int(sre_solver_workers),
+            "use_action_masks": True,
             "artifact_dir": str(output_dir),
         },
     )

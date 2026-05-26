@@ -2,22 +2,15 @@ from __future__ import annotations
 
 import itertools
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
-
-try:
-    import torch
-    from ..nfg_transformer.torch_utils import (
-        robust_action_values_torch,
-        robust_exploitability_torch,
-        robust_policy_values_torch,
-    )
-except ImportError:  # pragma: no cover - torch-native handoff is optional.
-    torch = None
-    robust_action_values_torch = None
-    robust_exploitability_torch = None
-    robust_policy_values_torch = None
+import torch
+from ..nfg_transformer.torch_utils import (
+    robust_action_values_torch,
+    robust_exploitability_torch,
+    robust_policy_values_torch,
+)
 
 from ..base import SreSolveResult, SreStageGameSolver, _empty_duration_summary
 from ..nplayer_common import (
@@ -47,6 +40,36 @@ class _Candidate:
     converged: bool
 
 
+@dataclass(frozen=True)
+class LogitQreHomotopySreSolverConfig:
+    precision_max: float = 100.0
+    precision_growth: float = 1.5
+    max_homotopy_steps: int = 64
+    corrector_max_iters: int = 100
+    qre_tol: float = 1e-6
+    exploitability_tol: float = 1e-4
+    damping: float = 0.5
+    min_prob: float = 1e-12
+    random_seed: int | None = None
+    device: object = None
+    pure_start_logit: float = 20.0
+
+    def __post_init__(self):
+        object.__setattr__(self, "precision_max", float(max(self.precision_max, 0.0)))
+        object.__setattr__(self, "precision_growth", float(max(self.precision_growth, 1.0 + 1e-12)))
+        object.__setattr__(self, "max_homotopy_steps", max(1, int(self.max_homotopy_steps)))
+        object.__setattr__(self, "corrector_max_iters", max(1, int(self.corrector_max_iters)))
+        object.__setattr__(self, "qre_tol", float(max(self.qre_tol, 0.0)))
+        object.__setattr__(self, "exploitability_tol", float(max(self.exploitability_tol, 0.0)))
+        object.__setattr__(self, "damping", float(np.clip(self.damping, 1e-6, 1.0)))
+        object.__setattr__(self, "min_prob", float(np.clip(self.min_prob, 0.0, 1e-3)))
+        object.__setattr__(self, "pure_start_logit", float(self.pure_start_logit))
+        device = torch.device(
+            self.device or ("cuda" if torch.cuda.is_available() else "cpu")
+        )
+        object.__setattr__(self, "device", device)
+
+
 class LogitQreHomotopySreSolver(SreStageGameSolver):
     """Approximate finite-action SRE solver via robust Logit-QRE homotopy.
 
@@ -58,36 +81,13 @@ class LogitQreHomotopySreSolver(SreStageGameSolver):
     name = "logit_qre_sre"
     bypass_deep_srq_policy_cache = True
 
-    def __init__(
-        self,
-        *,
-        precision_max=100.0,
-        precision_growth=1.5,
-        max_homotopy_steps=64,
-        corrector_max_iters=100,
-        qre_tol=1e-6,
-        exploitability_tol=1e-4,
-        damping=0.5,
-        min_prob=1e-12,
-        random_seed=None,
-        device=None,
-        pure_start_logit=20.0,
-    ):
-        self.precision_max = float(max(precision_max, 0.0))
-        self.precision_growth = float(max(precision_growth, 1.0 + 1e-12))
-        self.max_homotopy_steps = max(1, int(max_homotopy_steps))
-        self.corrector_max_iters = max(1, int(corrector_max_iters))
-        self.qre_tol = float(max(qre_tol, 0.0))
-        self.exploitability_tol = float(max(exploitability_tol, 0.0))
-        self.damping = float(np.clip(damping, 1e-6, 1.0))
-        self.min_prob = float(np.clip(min_prob, 0.0, 1e-3))
-        self.pure_start_logit = float(pure_start_logit)
-        self.device = None
-        if torch is not None:
-            self.device = torch.device(
-                device or ("cuda" if torch.cuda.is_available() else "cpu")
-            )
-        self.rng = np.random.default_rng(random_seed)
+    def __init__(self, config: LogitQreHomotopySreSolverConfig | None = None, **overrides):
+        if config is None:
+            config = LogitQreHomotopySreSolverConfig(**overrides)
+        elif overrides:
+            config = replace(config, **overrides)
+        self.config = config
+        self.rng = np.random.default_rng(self.config.random_seed)
 
         self.solve_time_sum = 0.0
         self.solve_time_sumsq = 0.0
@@ -131,8 +131,8 @@ class LogitQreHomotopySreSolver(SreStageGameSolver):
 
     def _project_policy(self, policy):
         policy = np.asarray(policy, dtype=np.float64)
-        if self.min_prob > 0.0:
-            policy = np.clip(policy, self.min_prob, None)
+        if self.config.min_prob > 0.0:
+            policy = np.clip(policy, self.config.min_prob, None)
         else:
             policy = np.clip(policy, 0.0, None)
         total = float(np.sum(policy))
@@ -142,7 +142,7 @@ class LogitQreHomotopySreSolver(SreStageGameSolver):
 
     def _pure_start_policy(self, action_size, action_id):
         logits = np.zeros(int(action_size), dtype=np.float64)
-        logits[int(action_id)] = self.pure_start_logit
+        logits[int(action_id)] = self.config.pure_start_logit
         return self._project_policy(self._stable_softmax(logits, 1.0))
 
     def _random_policies(self, action_sizes):
@@ -197,17 +197,17 @@ class LogitQreHomotopySreSolver(SreStageGameSolver):
         return starts
 
     def _precision_targets(self):
-        if self.precision_max <= 0.0:
+        if self.config.precision_max <= 0.0:
             return [0.0]
         targets = []
-        precision = min(1.0, self.precision_max)
-        for _ in range(self.max_homotopy_steps):
+        precision = min(1.0, self.config.precision_max)
+        for _ in range(self.config.max_homotopy_steps):
             targets.append(float(precision))
-            if precision >= self.precision_max:
+            if precision >= self.config.precision_max:
                 break
-            precision = min(self.precision_max, precision * self.precision_growth)
-        if targets[-1] < self.precision_max:
-            targets.append(float(self.precision_max))
+            precision = min(self.config.precision_max, precision * self.config.precision_growth)
+        if targets[-1] < self.config.precision_max:
+            targets.append(float(self.config.precision_max))
         return targets
 
     def _qre_targets_np(self, q_tensor, policies, epsilon, precision):
@@ -241,15 +241,15 @@ class LogitQreHomotopySreSolver(SreStageGameSolver):
         residual = float("inf")
         converged = False
         iterations = 0
-        for iterations in range(1, self.corrector_max_iters + 1):
+        for iterations in range(1, self.config.corrector_max_iters + 1):
             targets = self._qre_targets_np(q_tensor, policies, epsilon, precision)
             residual = self._policy_residual(policies, targets)
-            if residual <= self.qre_tol:
+            if residual <= self.config.qre_tol:
                 converged = True
                 break
             policies = [
                 self._project_policy(
-                    (1.0 - self.damping) * policy + self.damping * target
+                    (1.0 - self.config.damping) * policy + self.config.damping * target
                 )
                 for policy, target in zip(policies, targets)
             ]
@@ -270,7 +270,7 @@ class LogitQreHomotopySreSolver(SreStageGameSolver):
         targets = self._precision_targets()
         target_idx = 0
         retries = 0
-        while target_idx < len(targets) and homotopy_steps < self.max_homotopy_steps:
+        while target_idx < len(targets) and homotopy_steps < self.config.max_homotopy_steps:
             precision = float(targets[target_idx])
             next_policies, residual, iterations, converged = self._correct_precision_np(
                 q_tensor, policies, epsilon, precision
@@ -278,7 +278,7 @@ class LogitQreHomotopySreSolver(SreStageGameSolver):
             homotopy_steps += 1
             total_iterations += iterations
 
-            if converged or residual <= max(10.0 * self.qre_tol, 1e-8):
+            if converged or residual <= max(10.0 * self.config.qre_tol, 1e-8):
                 policies = next_policies
                 previous_precision = precision
                 final_precision = precision
@@ -389,15 +389,15 @@ class LogitQreHomotopySreSolver(SreStageGameSolver):
             "qre_residual": float(candidate.qre_residual),
             "final_precision": float(candidate.final_precision),
             "best_precision": float(candidate.best_precision),
-            "precision_max": float(self.precision_max),
-            "precision_growth": float(self.precision_growth),
+            "precision_max": float(self.config.precision_max),
+            "precision_growth": float(self.config.precision_growth),
             "homotopy_steps": int(candidate.homotopy_steps),
-            "max_homotopy_steps": int(self.max_homotopy_steps),
+            "max_homotopy_steps": int(self.config.max_homotopy_steps),
             "iterations": int(candidate.iterations),
-            "corrector_max_iters": int(self.corrector_max_iters),
-            "qre_tol": float(self.qre_tol),
-            "damping": float(self.damping),
-            "min_prob": float(self.min_prob),
+            "corrector_max_iters": int(self.config.corrector_max_iters),
+            "qre_tol": float(self.config.qre_tol),
+            "damping": float(self.config.damping),
+            "min_prob": float(self.config.min_prob),
             "num_repeats": int(num_repeats),
             "include_pure_starts": bool(include_pure_starts),
             "num_starts_attempted": int(num_starts_attempted),
@@ -428,7 +428,7 @@ class LogitQreHomotopySreSolver(SreStageGameSolver):
     def _epsilon_batch(epsilon, batch_size):
         if np.isscalar(epsilon):
             return [float(epsilon)] * batch_size
-        if torch is not None and isinstance(epsilon, torch.Tensor):
+        if isinstance(epsilon, torch.Tensor):
             eps = epsilon.detach().cpu().numpy().astype(np.float64, copy=False).reshape(-1)
         else:
             eps = np.asarray(epsilon, dtype=np.float64).reshape(-1)
@@ -572,7 +572,7 @@ class LogitQreHomotopySreSolver(SreStageGameSolver):
         if len(initial_policies_batch) != len(q_tensors):
             raise ValueError("initial_policies_batch must match q_tensors length.")
         epsilons = self._epsilon_batch(epsilon, len(q_tensors))
-        tol = self.exploitability_tol if exploitability_tol is None else exploitability_tol
+        tol = self.config.exploitability_tol if exploitability_tol is None else exploitability_tol
         results = [
             self._solve_one(
                 q_tensor,
@@ -594,8 +594,6 @@ class LogitQreHomotopySreSolver(SreStageGameSolver):
         return results
 
     def _validate_q_batch_torch(self, q_tensors):
-        if torch is None or robust_action_values_torch is None:
-            raise ImportError("LogitQreHomotopySreSolver.solve_batch_torch requires torch.")
         if not isinstance(q_tensors, torch.Tensor):
             if len(q_tensors) == 0:
                 return None
@@ -643,8 +641,8 @@ class LogitQreHomotopySreSolver(SreStageGameSolver):
         return eps
 
     def _normalize_policy_tensor(self, policy):
-        if self.min_prob > 0.0:
-            policy = policy.clamp_min(self.min_prob)
+        if self.config.min_prob > 0.0:
+            policy = policy.clamp_min(self.config.min_prob)
         else:
             policy = policy.clamp_min(0.0)
         total = policy.sum(dim=-1, keepdim=True).clamp_min(1e-12)
@@ -678,22 +676,22 @@ class LogitQreHomotopySreSolver(SreStageGameSolver):
         )
         converged = torch.zeros(q_batch.shape[0], dtype=torch.bool, device=q_batch.device)
         iterations = 0
-        for iterations in range(1, self.corrector_max_iters + 1):
+        for iterations in range(1, self.config.corrector_max_iters + 1):
             targets = self._qre_targets_torch(q_batch, policies, epsilon_batch, precision)
             residual = self._residual_torch(policies, targets)
-            converged = residual <= self.qre_tol
+            converged = residual <= self.config.qre_tol
             if bool(converged.all().detach().cpu()):
                 break
             policies = [
                 self._normalize_policy_tensor(
-                    (1.0 - self.damping) * policy + self.damping * target
+                    (1.0 - self.config.damping) * policy + self.config.damping * target
                 )
                 for policy, target in zip(policies, targets)
             ]
         if not bool(converged.all().detach().cpu()):
             targets = self._qre_targets_torch(q_batch, policies, epsilon_batch, precision)
             residual = self._residual_torch(policies, targets)
-            converged = residual <= self.qre_tol
+            converged = residual <= self.config.qre_tol
         return policies, residual, int(iterations), converged
 
     def _trace_homotopy_torch(self, q_batch, start_policies, epsilon_batch):
@@ -714,7 +712,7 @@ class LogitQreHomotopySreSolver(SreStageGameSolver):
         targets = self._precision_targets()
         target_idx = 0
         retries = 0
-        while target_idx < len(targets) and homotopy_steps < self.max_homotopy_steps:
+        while target_idx < len(targets) and homotopy_steps < self.config.max_homotopy_steps:
             precision = float(targets[target_idx])
             next_policies, residual, iterations, converged = self._correct_precision_torch(
                 q_batch, policies, epsilon_batch, precision
@@ -723,7 +721,7 @@ class LogitQreHomotopySreSolver(SreStageGameSolver):
             total_iterations += int(iterations)
             residual_ok = bool(
                 (
-                    residual <= max(10.0 * self.qre_tol, 1e-8)
+                    residual <= max(10.0 * self.config.qre_tol, 1e-8)
                 ).all().detach().cpu()
             )
             if bool(converged.all().detach().cpu()) or residual_ok:
@@ -864,13 +862,11 @@ class LogitQreHomotopySreSolver(SreStageGameSolver):
         early_exit=True,
         candidate_selection="robust_exploitability",
     ):
-        if torch is None or robust_exploitability_torch is None:
-            raise ImportError("LogitQreHomotopySreSolver.solve_batch_torch requires torch.")
         start = time.perf_counter()
         q_batch = self._validate_q_batch_torch(q_tensors)
         if q_batch is None:
             return []
-        q_batch = q_batch.detach().to(device=self.device, dtype=torch.float32)
+        q_batch = q_batch.detach().to(device=self.config.device, dtype=torch.float32)
         batch_size = int(q_batch.shape[0])
         action_sizes = tuple(int(size) for size in q_batch.shape[1:-1])
         if initial_policies_batch is None:
@@ -880,7 +876,7 @@ class LogitQreHomotopySreSolver(SreStageGameSolver):
         epsilon_batch = self._epsilon_tensor_batch(
             epsilon, batch_size, q_batch.dtype, q_batch.device
         )
-        tol = self.exploitability_tol if exploitability_tol is None else exploitability_tol
+        tol = self.config.exploitability_tol if exploitability_tol is None else exploitability_tol
         starts = self._batched_start_specs(
             action_sizes,
             batch_size=batch_size,

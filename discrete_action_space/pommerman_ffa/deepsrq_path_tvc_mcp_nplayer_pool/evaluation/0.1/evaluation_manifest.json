@@ -1,0 +1,11 @@
+{
+  "algorithm": "deepsrq_path_tvc_mcp_nplayer_pool",
+  "solver_name": "path_tvc_mcp_nplayer_pool",
+  "epsilon": 0.1,
+  "n_episodes": 20,
+  "max_steps": 200,
+  "checkpoint_name": "best",
+  "sre_solver_workers": 16,
+  "use_action_masks": true,
+  "artifact_dir": "/home/wowthecoder/SRE-DQN/discrete_action_space/pommerman_ffa/deepsrq_path_tvc_mcp_nplayer_pool/evaluation/0.1"
+}

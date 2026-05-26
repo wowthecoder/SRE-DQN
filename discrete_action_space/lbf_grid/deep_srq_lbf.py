@@ -3,15 +3,13 @@ from __future__ import annotations
 import random
 import sys
 import time
+from dataclasses import asdict, dataclass, field, fields, is_dataclass, replace
+from copy import deepcopy
 from pathlib import Path
 
 import numpy as np
+import torch
 from tqdm import tqdm
-
-try:
-    import torch
-except ImportError:  # pragma: no cover - optional in lightweight environments
-    torch = None
 
 _THIS_DIR = Path(__file__).resolve().parent
 _DISCRETE_DIR = _THIS_DIR.parent
@@ -24,7 +22,27 @@ from dueling_double_dqn_sre import (
     DuelingDoubleDqnSreAgent,
     DuelingDoubleDqnSreAgentConfig,
 )
-from sre_solvers import make_sre_solver
+from sre_solvers import (
+    LemkeLcpBimatrixSreSolver,
+    LemkeLcpBimatrixSreSolverConfig,
+    LogitQreHomotopySreSolverConfig,
+    LogitQreHomotopySreSolver,
+    NfgTransformerSreSolverConfig,
+    NfgTransformerSreSolver,
+    PathCBimatrixSreSolver,
+    PathCBimatrixSreSolverConfig,
+    PathMcpNPlayerSreSolverConfig,
+    PathMcpNPlayerSreSolver,
+    PathTvcMcpNPlayerSreSolver,
+    ProcessPoolLemkeLcpBimatrixSreSolver,
+    ProcessPoolLemkeLcpBimatrixSreSolverConfig,
+    ProcessPoolPathCBimatrixSreSolver,
+    ProcessPoolPathCBimatrixSreSolverConfig,
+    ProcessPoolPathMcpNPlayerSreSolverConfig,
+    ProcessPoolPathMcpNPlayerSreSolver,
+    ProcessPoolPathTvcMcpNPlayerSreSolver,
+    ProcessPoolPathTvcMcpNPlayerSreSolverConfig,
+)
 from stats_utils import (
     collect_timing_stats,
     plot_training_stats,
@@ -34,76 +52,80 @@ from stats_utils import (
     summarize_rewards,
 )
 
-try:  # Package import when used as discrete_action_space.lbf_grid.deep_srq_lbf
-    from .instrumented_env import aggregate_lbf_episode_metrics, extract_lbf_metrics
-    from .pz_wrapper import make_pz_env
-    from .scenarios import basic_lbf_config
-    from .state_action_encoding import canonical_lbf_state, lbf_action_masks
-except ImportError:  # Script/notebook import from the lbf_grid directory
-    from instrumented_env import aggregate_lbf_episode_metrics, extract_lbf_metrics
-    from pz_wrapper import make_pz_env
-    from scenarios import basic_lbf_config
-    from state_action_encoding import canonical_lbf_state, lbf_action_masks
+from .instrumented_env import aggregate_lbf_episode_metrics, extract_lbf_metrics
+from .pz_wrapper import LBFParallelEnv
+from .state_action_encoding import canonical_lbf_state, lbf_action_masks
 
 
 BASE_SEED = 2025
 DEFAULT_LBF_SOLVER = "path_mcp_nplayer"
 DEFAULT_OUTPUT_ROOT = Path("lbf_deep_srq_runs")
 
-DEEP_SRQ_LBF_HYPERPARAMS = {
-    "learning_rate": 3e-4,
-    "batch_size": 32,
-    "replay_buffer_capacity": 20_000,
-    "learning_starts": 500,
-    "gamma": 0.99,
-    "action_epsilon_start": 1.0,
-    "action_epsilon_end": 0.05,
-    "action_epsilon_decay_fraction": 0.6,
-    "grad_clip_max_norm": 10.0,
-    "sre_num_repeats": 10,
-    "sre_include_pure_starts": False,
-    "train_every": 4,
-    "target_update_steps": 250,
-    "target_equilibrium_update_steps": 4,
-    "target_tau": None,
-    "solver_max_iter": 150,
-    "solver_tol": 1e-4,
-    "solver_damping": 0.35,
-    "solver_temperature": 0.02,
-    "sre_solver_workers": 8,
-    "sre_policy_cache_enabled": True,
-    "sre_policy_cache_size": 4096,
-    "sre_policy_cache_round_digits": 6,
-    "sre_state_cache_round_digits": 4,
-    "sre_approx_cache_enabled": True,
-    "sre_cache_exploitability_tol": 1e-3,
-    "sre_solver_exploitability_tol": 1e-4,
-    "sre_approx_accept_tol": 1e-2,
-    "sre_solver_early_exit": True,
-    "sre_candidate_selection": "robust_exploitability",
-    "sre_exploitability_filter_enabled": False,
-    "sre_uniform_fallback_enabled": False,
-    "nfg_checkpoint_path": None,
-    "nfg_device": None,
-    "nfg_fallback_enabled": False,
-    "nfg_accept_gap": None,
-    "sre_target_value_mode": "robust",
-    "sr_adidas_max_iters": 200,
-    "sr_adidas_lr": 0.2,
-    "sr_adidas_tau_init": 10.0,
-    "sr_adidas_tau_min": 1e-3,
-    "sr_adidas_tau_threshold": 1e-4,
-    "sr_adidas_exploitability_tol": None,
-    "sr_adidas_device": None,
-    "logit_qre_precision_max": 100.0,
-    "logit_qre_precision_growth": 1.5,
-    "logit_qre_max_homotopy_steps": 64,
-    "logit_qre_corrector_max_iters": 100,
-    "logit_qre_qre_tol": 1e-6,
-    "logit_qre_damping": 0.5,
-    "logit_qre_min_prob": 1e-12,
-    "logit_qre_device": None,
+BASIC_LBF_CONFIG = {
+    "players": 3,
+    "field_size": (10, 10),
+    "sight": None,
+    "max_food": 3,
+    "max_episode_steps": 75,
+    "player_levels": [1, 1, 1],
+    "min_food_level": 1,
+    "max_food_level": 3,
+    "normalize_reward": True,
+    "empty_load_penalty": 0.0,
 }
+
+
+def basic_lbf_config(overrides=None):
+    config = deepcopy(BASIC_LBF_CONFIG)
+    if overrides:
+        config.update(overrides)
+    return config
+
+
+def make_basic_lbf_pz_env(**overrides):
+    return LBFParallelEnv(**basic_lbf_config(overrides))
+
+
+@dataclass(frozen=True)
+class DeepSrqLbfHyperparams:
+    agent: DuelingDoubleDqnSreAgentConfig = field(
+        default_factory=lambda: DuelingDoubleDqnSreAgentConfig(
+            lr=3e-4,
+            gamma=0.99,
+            buffer_size=20_000,
+            batch_size=32,
+            learning_starts=500,
+            grad_clip_norm=10.0,
+            sre_num_repeats=10,
+            sre_include_pure_starts=False,
+            train_every=4,
+            target_update_steps=250,
+            target_equilibrium_update_steps=4,
+            target_tau=None,
+            action_epsilon_start=1.0,
+            action_epsilon_end=0.05,
+            action_epsilon_decay_fraction=0.6,
+            sre_policy_cache_enabled=True,
+            sre_uniform_fallback_enabled=False,
+        )
+    )
+    path_mcp: PathMcpNPlayerSreSolverConfig = field(
+        default_factory=PathMcpNPlayerSreSolverConfig
+    )
+    path_mcp_pool: ProcessPoolPathMcpNPlayerSreSolverConfig = field(
+        default_factory=lambda: ProcessPoolPathMcpNPlayerSreSolverConfig(
+            max_workers=8,
+        )
+    )
+    nfg_transformer: NfgTransformerSreSolverConfig = field(
+        default_factory=lambda: NfgTransformerSreSolverConfig(
+            fallback_enabled=False,
+            compute_exploitability_diagnostics=False,
+        )
+    )
+    logit_qre: LogitQreHomotopySreSolverConfig = field(
+        default_factory=LogitQreHomotopySreSolverConfig
+    )
 
 DEFAULT_LBF_CONFIG = basic_lbf_config()
 NFG_TRANSFORMER_SOLVER_NAMES = {"nfg_transformer_sre", "nfg_sre"}
@@ -112,37 +134,56 @@ NFG_TRANSFORMER_SOLVER_NAMES = {"nfg_transformer_sre", "nfg_sre"}
 def set_global_seed(seed=BASE_SEED):
     random.seed(seed)
     np.random.seed(seed)
-    if torch is not None:
-        torch.manual_seed(seed)
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed_all(seed)
-
-
-def linear_schedule(start, end, step, total_steps):
-    if total_steps <= 1:
-        return float(end)
-    fraction = min(max(step, 0) / float(total_steps - 1), 1.0)
-    return float(start + fraction * (end - start))
-
-
-def robust_epsilon_value(epsilon_initial, schedule, episode_idx, n_episodes):
-    if schedule == "constant":
-        return float(epsilon_initial)
-    if schedule == "linear":
-        return linear_schedule(epsilon_initial, 0.0, episode_idx, n_episodes)
-    raise ValueError(f"Unsupported SRE epsilon schedule: {schedule}")
-
-
-def action_epsilon_value(episode_idx, n_episodes, *, start, end, decay_fraction):
-    decay_episodes = max(1, int(n_episodes * decay_fraction))
-    return linear_schedule(start, end, min(episode_idx, decay_episodes - 1), decay_episodes)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
 
 def deep_srq_lbf_hyperparams(overrides=None):
-    hp = DEEP_SRQ_LBF_HYPERPARAMS.copy()
-    if overrides:
-        hp.update(overrides)
-    return hp
+    if isinstance(overrides, DeepSrqLbfHyperparams):
+        return overrides
+    hp = DeepSrqLbfHyperparams()
+    if not overrides:
+        return hp
+
+    updates = {}
+    valid_sections = set(DeepSrqLbfHyperparams.__dataclass_fields__)
+    for section, section_overrides in dict(overrides).items():
+        if section not in valid_sections:
+            raise KeyError(f"Unknown Deep SRQ LBF hyperparameter section: {section}")
+        current = getattr(hp, section)
+        if isinstance(section_overrides, dict):
+            if is_dataclass(current):
+                valid_fields = {config_field.name for config_field in fields(current)}
+                unknown_fields = set(section_overrides) - valid_fields
+                if unknown_fields:
+                    unknown = ", ".join(sorted(unknown_fields))
+                    raise KeyError(
+                        f"Unknown Deep SRQ LBF hyperparameter field(s) "
+                        f"for section '{section}': {unknown}"
+                    )
+            updates[section] = replace(current, **section_overrides)
+        else:
+            updates[section] = section_overrides
+
+    return replace(hp, **updates)
+
+
+def _hyperparams_payload(hp):
+    def json_safe(value):
+        if isinstance(value, dict):
+            return {str(key): json_safe(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [json_safe(item) for item in value]
+        if isinstance(value, Path):
+            return str(value)
+        if isinstance(value, torch.device):
+            return str(value)
+        return value
+
+    payload = json_safe(asdict(hp))
+    payload["agent"].pop("sre_solver", None)
+    return payload
 
 
 def lbf_config(overrides=None):
@@ -154,26 +195,6 @@ def lbf_config(overrides=None):
 
 def _slugify(label):
     return str(label).strip().lower().replace(" ", "_")
-
-
-def _central_state(obs_dict, agent_order):
-    parts = []
-    for agent in agent_order:
-        obs = obs_dict.get(agent)
-        if obs is None:
-            parts.append(np.zeros(0, dtype=np.float32))
-        else:
-            parts.append(np.asarray(obs, dtype=np.float32).reshape(-1))
-    return np.concatenate(parts).astype(np.float32, copy=False)
-
-
-def _global_state(env, obs_dict, agent_order):
-    if hasattr(env, "global_state"):
-        return env.global_state(agent_order)
-    inner = getattr(env, "_inner", env)
-    if getattr(inner, "field", None) is not None and getattr(inner, "players", None) is not None:
-        return canonical_lbf_state(env, agent_order)
-    return _central_state(obs_dict, agent_order)
 
 
 def _action_masks(env, agent_order):
@@ -348,7 +369,7 @@ def _evaluate_agent_rewards(
             slots = []
             next_episode_seed = 0
             for _ in range(env_count):
-                env = make_pz_env(**lbf_env_config)
+                env = LBFParallelEnv(**lbf_env_config)
                 obs_dict, reset_info = env.reset(seed=int(seed) + next_episode_seed)
                 agent_order = list(env.possible_agents)
                 slots.append(
@@ -377,11 +398,7 @@ def _evaluate_agent_rewards(
                     if not active_indices:
                         break
                     states = [
-                        _global_state(
-                            slots[idx]["env"],
-                            slots[idx]["obs_dict"],
-                            slots[idx]["agent_order"],
-                        )
+                        canonical_lbf_state(slots[idx]["env"], slots[idx]["agent_order"])
                         for idx in active_indices
                     ]
                     action_masks_batch = [
@@ -441,7 +458,7 @@ def _evaluate_agent_rewards(
                     slot["env"].close()
         else:
             for episode in range(int(n_episodes)):
-                env = make_pz_env(**lbf_env_config)
+                env = LBFParallelEnv(**lbf_env_config)
                 try:
                     obs_dict, reset_info = env.reset(seed=int(seed) + episode)
                     latest_metrics = extract_lbf_metrics(reset_info)
@@ -449,7 +466,7 @@ def _evaluate_agent_rewards(
                     totals = np.zeros(len(agent_order), dtype=np.float64)
                     steps = 0
                     while env.agents and (max_steps is None or steps < int(max_steps)):
-                        state = _global_state(env, obs_dict, agent_order)
+                        state = canonical_lbf_state(env, agent_order)
                         action_list = agent.act_joint(
                             state,
                             action_masks=_action_masks(env, agent_order),
@@ -492,58 +509,53 @@ def _evaluate_agent_rewards(
 
 
 def _make_solver(solver_name, hp, seed):
+    if not isinstance(hp, DeepSrqLbfHyperparams):
+        hp = deep_srq_lbf_hyperparams(hp)
     if solver_name in NFG_TRANSFORMER_SOLVER_NAMES:
-        return make_sre_solver(
-            solver_name,
-            random_seed=seed,
-            checkpoint_path=hp.get("nfg_checkpoint_path"),
-            device=hp.get("nfg_device"),
-            fallback_enabled=False,
-            compute_exploitability_diagnostics=False,
-            accept_exploitability_tol=hp.get("nfg_accept_gap"),
-        )
-    if solver_name in {"sr_adidas_sre", "sr_adidas"}:
-        return make_sre_solver(
-            solver_name,
-            random_seed=seed,
-            max_iters=hp.get("sr_adidas_max_iters", 200),
-            lr=hp.get("sr_adidas_lr", 0.2),
-            tau_init=hp.get("sr_adidas_tau_init", 10.0),
-            tau_min=hp.get("sr_adidas_tau_min", 1e-3),
-            tau_threshold=hp.get("sr_adidas_tau_threshold", 1e-4),
-            device=hp.get("sr_adidas_device"),
-        )
-    if solver_name in {"sred_gradient_sre", "sred_gd_sre", "sred_gd"}:
-        return make_sre_solver(
-            solver_name,
-            random_seed=seed,
-            max_iters=hp.get("sred_max_iters", 250),
-            lr=hp.get("sred_lr", 0.05),
-            optimizer=hp.get("sred_optimizer", "adam"),
-            br_temperature=hp.get("sred_br_temperature", 0.05),
-            gap_temperature=hp.get("sred_gap_temperature", 0.01),
-            gradient_clip_norm=hp.get("sred_gradient_clip_norm", 10.0),
-            eval_every=hp.get("sred_eval_every", 10),
-            device=hp.get("sred_device"),
-        )
+        config = replace(hp.nfg_transformer, fallback_enabled=False)
+        return NfgTransformerSreSolver(config=config)
     if solver_name in {"logit_qre_sre", "qre_homotopy_sre", "logit_qre"}:
-        return make_sre_solver(
-            solver_name,
-            random_seed=seed,
-            precision_max=hp.get("logit_qre_precision_max", 100.0),
-            precision_growth=hp.get("logit_qre_precision_growth", 1.5),
-            max_homotopy_steps=hp.get("logit_qre_max_homotopy_steps", 64),
-            corrector_max_iters=hp.get("logit_qre_corrector_max_iters", 100),
-            qre_tol=hp.get("logit_qre_qre_tol", 1e-6),
-            damping=hp.get("logit_qre_damping", 0.5),
-            min_prob=hp.get("logit_qre_min_prob", 1e-12),
-            device=hp.get("logit_qre_device"),
+        return LogitQreHomotopySreSolver(config=replace(hp.logit_qre, random_seed=seed))
+    if solver_name in {"path_mcp_nplayer_pool", "path_nplayer_pool", "path_mcp_pool"}:
+        return ProcessPoolPathMcpNPlayerSreSolver(
+            config=replace(hp.path_mcp_pool, random_seed=seed)
         )
-    return make_sre_solver(
-        solver_name,
-        random_seed=seed,
-        max_workers=hp.get("sre_solver_workers", 8),
-    )
+    if solver_name in {
+        "path_tvc_mcp_nplayer_pool",
+        "path_tvc_nplayer_pool",
+        "path_tvc_mcp_pool",
+    }:
+        return ProcessPoolPathTvcMcpNPlayerSreSolver(
+            config=ProcessPoolPathTvcMcpNPlayerSreSolverConfig(
+                pathwrap_path=hp.path_mcp_pool.pathwrap_path,
+                max_workers=hp.path_mcp_pool.max_workers,
+                start_method=hp.path_mcp_pool.start_method,
+                random_seed=seed,
+            )
+        )
+    if solver_name in {"path_mcp_nplayer", "path_nplayer", "path_mcp"}:
+        return PathMcpNPlayerSreSolver(config=replace(hp.path_mcp, random_seed=seed))
+    if solver_name in {"path_tvc_mcp_nplayer", "path_tvc_nplayer", "path_tvc_mcp"}:
+        return PathTvcMcpNPlayerSreSolver(config=replace(hp.path_mcp, random_seed=seed))
+    if solver_name == "path_c_pool":
+        return ProcessPoolPathCBimatrixSreSolver(
+            config=ProcessPoolPathCBimatrixSreSolverConfig(
+                max_workers=hp.path_mcp_pool.max_workers,
+                start_method=hp.path_mcp_pool.start_method,
+            )
+        )
+    if solver_name == "path_c":
+        return PathCBimatrixSreSolver(config=PathCBimatrixSreSolverConfig())
+    if solver_name == "lemkelcp_pool":
+        return ProcessPoolLemkeLcpBimatrixSreSolver(
+            config=ProcessPoolLemkeLcpBimatrixSreSolverConfig(
+                max_workers=hp.path_mcp_pool.max_workers,
+                start_method=hp.path_mcp_pool.start_method,
+            )
+        )
+    if solver_name == "lemkelcp":
+        return LemkeLcpBimatrixSreSolver(config=LemkeLcpBimatrixSreSolverConfig())
+    raise ValueError(f"Unknown SRE solver: {solver_name}")
 
 
 def _make_deep_srq_agent(
@@ -555,63 +567,30 @@ def _make_deep_srq_agent(
     hp,
     seed,
     epsilon_robust_initial,
+    epsilon_schedule,
     use_gpu,
 ):
     is_nfg_transformer_solver = solver_name in NFG_TRANSFORMER_SOLVER_NAMES
+    solver_exploitability_tol = hp.agent.sre_solver_exploitability_tol
+    agent_config = replace(
+        hp.agent,
+        agent_id=0,
+        obs_dim=obs_dim,
+        num_agents=num_agents,
+        num_actions=num_actions,
+        epsilon_robust=epsilon_robust_initial,
+        epsilon_robust_initial=epsilon_robust_initial,
+        epsilon_schedule=epsilon_schedule,
+        epsilon_explore=hp.agent.action_epsilon_start,
+        use_gpu=use_gpu,
+        sre_solver=_make_solver(solver_name, hp, seed),
+        sre_solver_exploitability_tol=solver_exploitability_tol,
+        sre_uniform_fallback_enabled=(
+            False if is_nfg_transformer_solver else hp.agent.sre_uniform_fallback_enabled
+        ),
+    )
     return DuelingDoubleDqnSreAgent(
-        DuelingDoubleDqnSreAgentConfig(
-            agent_id=0,
-            obs_dim=obs_dim,
-            num_agents=num_agents,
-            num_actions=num_actions,
-            epsilon_robust=epsilon_robust_initial,
-            epsilon_explore=hp["action_epsilon_start"],
-            lr=hp["learning_rate"],
-            gamma=hp["gamma"],
-            buffer_size=hp["replay_buffer_capacity"],
-            learning_starts=hp["learning_starts"],
-            grad_clip_norm=hp["grad_clip_max_norm"],
-            sre_num_repeats=hp["sre_num_repeats"],
-            sre_include_pure_starts=hp["sre_include_pure_starts"],
-            train_every=hp["train_every"],
-            network_type=hp["network_type"],
-            use_gpu=use_gpu,
-            sre_solver=_make_solver(solver_name, hp, seed),
-            target_equilibrium_update_steps=hp.get(
-                "target_equilibrium_update_steps",
-                DEEP_SRQ_LBF_HYPERPARAMS["target_equilibrium_update_steps"],
-            ),
-            sre_policy_cache_enabled=hp.get(
-                "sre_policy_cache_enabled",
-                DEEP_SRQ_LBF_HYPERPARAMS["sre_policy_cache_enabled"],
-            ),
-            sre_policy_cache_size=hp.get("sre_policy_cache_size", 4096),
-            sre_policy_cache_round_digits=hp.get("sre_policy_cache_round_digits", 6),
-            sre_state_cache_round_digits=hp.get("sre_state_cache_round_digits", 4),
-            sre_approx_cache_enabled=hp.get("sre_approx_cache_enabled", True),
-            sre_cache_exploitability_tol=hp.get("sre_cache_exploitability_tol", 1e-3),
-            sre_solver_exploitability_tol=(
-                hp.get("sr_adidas_exploitability_tol")
-                if solver_name in {"sr_adidas_sre", "sr_adidas"}
-                and hp.get("sr_adidas_exploitability_tol") is not None
-                else hp.get("sre_solver_exploitability_tol", 1e-4)
-            ),
-            sre_approx_accept_tol=hp.get("sre_approx_accept_tol", 1e-2),
-            sre_solver_early_exit=hp.get("sre_solver_early_exit", True),
-            sre_candidate_selection=hp.get(
-                "sre_candidate_selection", "robust_exploitability"
-            ),
-            sre_exploitability_filter_enabled=hp.get(
-                "sre_exploitability_filter_enabled", False
-            ),
-            sre_uniform_fallback_enabled=hp.get(
-                "sre_uniform_fallback_enabled",
-                DEEP_SRQ_LBF_HYPERPARAMS["sre_uniform_fallback_enabled"],
-            )
-            if not is_nfg_transformer_solver
-            else False,
-            sre_target_value_mode=hp.get("sre_target_value_mode", "robust"),
-        )
+        agent_config
     )
 
 
@@ -660,292 +639,17 @@ def _apply_training_loss(agent, loss, hp, *, gradient_steps, best_loss):
     latest_loss = float(loss)
     if best_loss is None or latest_loss < best_loss:
         best_loss = latest_loss
-    if hp["target_tau"] is not None:
-        agent.soft_update_target_network(hp["target_tau"])
+    if hp.agent.target_tau is not None:
+        agent.soft_update_target_network(hp.agent.target_tau)
     elif (
-        hp["target_update_steps"]
-        and gradient_steps % int(hp["target_update_steps"]) == 0
+        hp.agent.target_update_steps
+        and gradient_steps % int(hp.agent.target_update_steps) == 0
     ):
         agent.update_target_network()
     return gradient_steps, best_loss, latest_loss
 
 
-def train_lbf_deep_srq_experiment(
-    *,
-    n_episodes=500,
-    solver_name=DEFAULT_LBF_SOLVER,
-    epsilon_robust_initial=0.5,
-    epsilon_schedule="linear",
-    seed=BASE_SEED,
-    output_root=DEFAULT_OUTPUT_ROOT,
-    run_dir=None,
-    lbf_config_overrides=None,
-    hyperparameter_overrides=None,
-    use_gpu=True,
-    write_plots=True,
-    include_replay_buffer=False,
-    eval_interval=None,
-    eval_episodes=5,
-    eval_seed_offset=50_000,
-    run_name_suffix=None,
-    print_full_stats=True,
-    scenario_key=None,
-    scenario_name=None,
-):
-    set_global_seed(seed)
-    hp = deep_srq_lbf_hyperparams(hyperparameter_overrides)
-    config = lbf_config(lbf_config_overrides)
-    env = make_pz_env(**config)
-    obs_dict, _ = env.reset(seed=seed)
-    agent_order = list(env.possible_agents)
-    num_agents = len(agent_order)
-    num_actions = int(env.action_space(agent_order[0]).n)
-    obs_dim = int(_global_state(env, obs_dict, agent_order).shape[0])
-    scenario_key = scenario_key or f"lbf_{num_agents}p"
-    scenario_name = scenario_name or f"LBF {num_agents}-player"
-
-    run_name = f"{_slugify(solver_name)}_eps{epsilon_robust_initial:g}_{epsilon_schedule}"
-    if run_name_suffix:
-        run_name = f"{run_name}__{run_name_suffix}"
-    run_dir = Path(run_dir) if run_dir is not None else Path(output_root) / run_name
-    run_dir.mkdir(parents=True, exist_ok=True)
-
-    agent = _make_deep_srq_agent(
-        obs_dim=obs_dim,
-        num_agents=num_agents,
-        num_actions=num_actions,
-        solver_name=solver_name,
-        hp=hp,
-        seed=seed,
-        epsilon_robust_initial=epsilon_robust_initial,
-        use_gpu=use_gpu,
-    )
-
-    rewards_history = [[] for _ in range(num_agents)]
-    episode_lengths = []
-    eval_history = []
-    global_step = 0
-    gradient_steps = 0
-    best_joint_reward = -float("inf")
-    best_eval_joint_reward = -float("inf")
-    best_loss = None
-    latest_loss = None
-    best_checkpoint_source = "training_reward"
-    training_start = time.perf_counter()
-
-    print(
-        f"LBF DeepSRQ | players={num_agents} | solver={solver_name} | "
-        f"eps0={epsilon_robust_initial:g} | schedule={epsilon_schedule} | "
-        f"seed={seed} | agent_device={agent.device} | "
-        f"solver_device={getattr(agent.sre_solver, 'device', 'n/a')}"
-    )
-
-    try:
-        for episode in tqdm(range(n_episodes), desc=f"lbf:{run_name}"):
-            agent.config.epsilon_robust = robust_epsilon_value(
-                epsilon_robust_initial, epsilon_schedule, episode, n_episodes
-            )
-            agent.config.epsilon_explore = action_epsilon_value(
-                episode,
-                n_episodes,
-                start=hp["action_epsilon_start"],
-                end=hp["action_epsilon_end"],
-                decay_fraction=hp["action_epsilon_decay_fraction"],
-            )
-
-            obs_dict, _ = env.reset(seed=seed + episode)
-            state = _global_state(env, obs_dict, agent_order)
-            action_masks = _action_masks(env, agent_order)
-            ep_rewards = np.zeros(num_agents, dtype=np.float64)
-            ep_steps = 0
-
-            while env.agents:
-                actions_list = agent.act_joint(state, action_masks=action_masks)
-                actions_dict = {
-                    agent_name: int(actions_list[agent_id])
-                    for agent_id, agent_name in enumerate(agent_order)
-                }
-                next_obs, rewards, terms, truncs, _ = env.step(actions_dict)
-                next_state = _global_state(env, next_obs, agent_order)
-                reward_vec = np.asarray(
-                    [rewards.get(agent_name, 0.0) for agent_name in agent_order],
-                    dtype=np.float32,
-                )
-                done_mask = np.asarray(
-                    [
-                        bool(terms.get(agent_name, False))
-                        or bool(truncs.get(agent_name, False))
-                        for agent_name in agent_order
-                    ],
-                    dtype=np.float32,
-                )
-                next_action_masks = None
-                if env.agents and not np.all(done_mask > 0.0):
-                    next_action_masks = _action_masks(env, agent_order)
-
-                loss = agent.update(
-                    state=state,
-                    joint_actions=actions_list,
-                    joint_rewards=reward_vec,
-                    next_state=next_state,
-                    done=done_mask,
-                    batch_size=hp["batch_size"],
-                    action_masks=action_masks,
-                    next_action_masks=next_action_masks,
-                )
-                if loss is not None:
-                    gradient_steps += 1
-                    latest_loss = float(loss)
-                    if best_loss is None or latest_loss < best_loss:
-                        best_loss = latest_loss
-                    if hp["target_tau"] is not None:
-                        agent.soft_update_target_network(hp["target_tau"])
-                    elif (
-                        hp["target_update_steps"]
-                        and gradient_steps % int(hp["target_update_steps"]) == 0
-                    ):
-                        agent.update_target_network()
-
-                ep_rewards += reward_vec
-                state = next_state
-                action_masks = next_action_masks
-                global_step += 1
-                ep_steps += 1
-
-            for agent_id, reward in enumerate(ep_rewards):
-                rewards_history[agent_id].append(float(reward))
-            episode_lengths.append(int(ep_steps))
-            joint_reward = float(np.sum(ep_rewards))
-            if eval_interval and (episode + 1) % int(eval_interval) == 0:
-                eval_record = _evaluate_agent_rewards(
-                    agent,
-                    lbf_env_config=config,
-                    seed=seed + int(eval_seed_offset) + episode,
-                    n_episodes=eval_episodes,
-                    max_steps=config.get("max_episode_steps"),
-                )
-                eval_record.update(
-                    {
-                        "episode": int(episode + 1),
-                        "global_step": int(global_step),
-                        "gradient_step": int(gradient_steps),
-                    }
-                )
-                eval_history.append(eval_record)
-                mean_eval = eval_record.get("mean_joint_reward")
-                if mean_eval is not None and mean_eval > best_eval_joint_reward:
-                    best_eval_joint_reward = float(mean_eval)
-                    best_checkpoint_source = "periodic_eval_reward"
-                    agent.save_checkpoint(
-                        run_dir / "shared_deepsrq_best.pt",
-                        include_replay_buffer=include_replay_buffer,
-                )
-                solver_usage = _solver_usage_summary(getattr(agent, "sre_solver", None))
-                fallback_rate = solver_usage.get("fallback_rate")
-                solve_time = solver_usage.get("solve_time") or {}
-                solve_ms = solve_time.get("mean_microseconds")
-                if solve_ms is not None:
-                    solver_status = f"solver_mean_ms={solve_ms / 1000.0:.3f}"
-                elif fallback_rate is not None:
-                    solver_status = f"fallback_rate={fallback_rate:.3f}"
-                else:
-                    solver_status = "solver_status=unavailable"
-                print(
-                    f"[ep {episode + 1:5d}] train_joint={joint_reward:8.4f} | "
-                    f"eval_joint={mean_eval if mean_eval is not None else float('nan'):8.4f} | "
-                    f"best_loss={best_loss if best_loss is not None else float('nan'):.6f} | "
-                    f"latest_loss={latest_loss if latest_loss is not None else float('nan'):.6f} | "
-                    f"{solver_status}"
-                )
-
-            if not eval_history and joint_reward > best_joint_reward:
-                best_joint_reward = joint_reward
-                agent.save_checkpoint(
-                    run_dir / "shared_deepsrq_best.pt",
-                    include_replay_buffer=include_replay_buffer,
-                )
-
-        agent.save_checkpoint(
-            run_dir / "shared_deepsrq_final.pt",
-            include_replay_buffer=include_replay_buffer,
-        )
-    finally:
-        wall_clock_seconds = time.perf_counter() - training_start
-        timing = collect_timing_stats(
-            [agent],
-            wall_clock_seconds=wall_clock_seconds,
-            episode_durations=episode_lengths,
-            include_episode_durations=False,
-        )
-        solver_usage = _solver_usage_summary(getattr(agent, "sre_solver", None))
-        agent.close()
-        env.close()
-
-    stats_path = run_dir / "training_stats.json"
-    plot_path = run_dir / "training_plot.png"
-    stats = {
-        "environment": "lbf_grid",
-        "scenario_key": str(scenario_key),
-        "scenario_name": str(scenario_name),
-        "pairing": ["DeepSRQ" for _ in range(num_agents)],
-        "pair_label": "DeepSRQ self-play",
-        "pair_slug": run_name,
-        "training_mode": "serial",
-        "num_envs": 1,
-        "eval_num_envs": 1,
-        "completed_episodes": int(n_episodes),
-        "vectorized_collection_steps": None,
-        "rewards": rewards_history,
-        "n_episodes": int(n_episodes),
-        "seed": int(seed),
-        "solver_name": solver_name,
-        "epsilon_robust_initial": float(epsilon_robust_initial),
-        "epsilon_schedule": epsilon_schedule,
-        "hyperparameters": hp.copy(),
-        "lbf_config": config,
-        "num_agents": int(num_agents),
-        "num_actions": int(num_actions),
-        "obs_dim": int(obs_dim),
-        "agent_device": str(agent.device),
-        "sre_solver_device": str(getattr(agent.sre_solver, "device", "n/a")),
-        "total_environment_steps": int(global_step),
-        "gradient_steps": int(gradient_steps),
-        "episode_lengths": episode_lengths,
-        "best_loss": best_loss,
-        "latest_loss": latest_loss,
-        "periodic_eval": eval_history,
-        "best_joint_reward": float(best_joint_reward),
-        "best_eval_joint_reward": (
-            None if best_eval_joint_reward == -float("inf") else float(best_eval_joint_reward)
-        ),
-        "best_checkpoint_source": best_checkpoint_source,
-        "checkpoint_paths": {
-            "best": str(run_dir / "shared_deepsrq_best.pt"),
-            "final": str(run_dir / "shared_deepsrq_final.pt"),
-        },
-        "include_replay_buffer": bool(include_replay_buffer),
-        "agent_labels": [
-            f"Agent {agent_id + 1} (DeepSRQ)" for agent_id in range(num_agents)
-        ],
-        "artifact_dir": str(run_dir),
-        "stats_path": str(stats_path),
-        "timing": timing,
-        "solver_usage": solver_usage,
-        "nfg_transformer_usage": solver_usage,
-    }
-    if write_plots:
-        plot_training_stats(stats, out_path=plot_path)
-        stats["plot_path"] = str(plot_path)
-    save_training_stats(stats_path, stats)
-    if print_full_stats:
-        print_stats_payload(stats, f"LBF DeepSRQ - {solver_name}")
-    print("\nReward Summary")
-    print_summary_table(summarize_rewards(stats))
-    _print_lbf_evaluation_metrics(stats)
-    return stats
-
-
-def train_lbf_deep_srq_vectorized_experiment(
+def train_lbf_deep_srq_vectorized(
     *,
     n_episodes=500,
     solver_name=DEFAULT_LBF_SOLVER,
@@ -963,45 +667,21 @@ def train_lbf_deep_srq_vectorized_experiment(
     eval_episodes=5,
     eval_seed_offset=50_000,
     eval_num_envs=1,
-    num_envs=1,
+    num_envs=2,
     run_name_suffix=None,
     print_full_stats=True,
     scenario_key=None,
     scenario_name=None,
 ):
-    num_envs = int(num_envs)
-    if num_envs <= 1:
-        return train_lbf_deep_srq_experiment(
-            n_episodes=n_episodes,
-            solver_name=solver_name,
-            epsilon_robust_initial=epsilon_robust_initial,
-            epsilon_schedule=epsilon_schedule,
-            seed=seed,
-            output_root=output_root,
-            run_dir=run_dir,
-            lbf_config_overrides=lbf_config_overrides,
-            hyperparameter_overrides=hyperparameter_overrides,
-            use_gpu=use_gpu,
-            write_plots=write_plots,
-            include_replay_buffer=include_replay_buffer,
-            eval_interval=eval_interval,
-            eval_episodes=eval_episodes,
-            eval_seed_offset=eval_seed_offset,
-            run_name_suffix=run_name_suffix,
-            print_full_stats=print_full_stats,
-            scenario_key=scenario_key,
-            scenario_name=scenario_name,
-        )
-
     set_global_seed(seed)
     hp = deep_srq_lbf_hyperparams(hyperparameter_overrides)
     config = lbf_config(lbf_config_overrides)
-    probe_env = make_pz_env(**config)
+    probe_env = LBFParallelEnv(**config)
     obs_dict, _ = probe_env.reset(seed=seed)
     agent_order = list(probe_env.possible_agents)
     num_agents = len(agent_order)
     num_actions = int(probe_env.action_space(agent_order[0]).n)
-    obs_dim = int(_global_state(probe_env, obs_dict, agent_order).shape[0])
+    obs_dim = int(canonical_lbf_state(probe_env, agent_order).shape[0])
     probe_env.close()
     scenario_key = scenario_key or f"lbf_{num_agents}p"
     scenario_name = scenario_name or f"LBF {num_agents}-player"
@@ -1020,6 +700,7 @@ def train_lbf_deep_srq_vectorized_experiment(
         hp=hp,
         seed=seed,
         epsilon_robust_initial=epsilon_robust_initial,
+        epsilon_schedule=epsilon_schedule,
         use_gpu=use_gpu,
     )
 
@@ -1050,13 +731,13 @@ def train_lbf_deep_srq_vectorized_experiment(
         nonlocal episodes_started
         if episodes_started >= int(n_episodes):
             return None
-        env = slot["env"] if slot is not None else make_pz_env(**config)
+        env = slot["env"] if slot is not None else LBFParallelEnv(**config)
         obs, _ = env.reset(seed=int(seed) + episodes_started)
         order = list(env.possible_agents)
         record = {
             "env": env,
             "agent_order": order,
-            "state": _global_state(env, obs, order),
+            "state": canonical_lbf_state(env, order),
             "action_masks": _action_masks(env, order),
             "ep_rewards": np.zeros(len(order), dtype=np.float64),
             "ep_steps": 0,
@@ -1076,19 +757,7 @@ def train_lbf_deep_srq_vectorized_experiment(
         progress = tqdm(total=int(n_episodes), desc=f"lbf:{run_name}:vec")
         try:
             while completed_episodes < int(n_episodes) and any(slot["active"] for slot in slots):
-                agent.config.epsilon_robust = robust_epsilon_value(
-                    epsilon_robust_initial,
-                    epsilon_schedule,
-                    completed_episodes,
-                    n_episodes,
-                )
-                agent.config.epsilon_explore = action_epsilon_value(
-                    completed_episodes,
-                    n_episodes,
-                    start=hp["action_epsilon_start"],
-                    end=hp["action_epsilon_end"],
-                    decay_fraction=hp["action_epsilon_decay_fraction"],
-                )
+                agent.decay_parameters(completed_episodes, n_episodes)
 
                 active_indices = [
                     idx
@@ -1115,7 +784,7 @@ def train_lbf_deep_srq_vectorized_experiment(
                     next_obs, rewards, terms, truncs, _ = env.step(
                         _action_dict_from_list(actions_list, order)
                     )
-                    next_state = _global_state(env, next_obs, order)
+                    next_state = canonical_lbf_state(env, order)
                     reward_vec = np.asarray(
                         [rewards.get(agent_name, 0.0) for agent_name in order],
                         dtype=np.float32,
@@ -1155,10 +824,10 @@ def train_lbf_deep_srq_vectorized_experiment(
                 update_count = _train_step_due_count(
                     previous_update_calls,
                     int(agent._update_calls),
-                    hp["train_every"],
+                    hp.agent.train_every,
                 )
                 for _ in range(update_count):
-                    loss = agent.train_step(batch_size=hp["batch_size"])
+                    loss = agent.train_step(batch_size=hp.agent.batch_size)
                     gradient_steps, best_loss, maybe_latest = _apply_training_loss(
                         agent,
                         loss,
@@ -1275,7 +944,7 @@ def train_lbf_deep_srq_vectorized_experiment(
         "solver_name": solver_name,
         "epsilon_robust_initial": float(epsilon_robust_initial),
         "epsilon_schedule": epsilon_schedule,
-        "hyperparameters": hp.copy(),
+        "hyperparameters": _hyperparams_payload(hp),
         "lbf_config": config,
         "num_agents": int(num_agents),
         "num_actions": int(num_actions),
@@ -1317,50 +986,3 @@ def train_lbf_deep_srq_vectorized_experiment(
     print_summary_table(summarize_rewards(stats))
     _print_lbf_evaluation_metrics(stats)
     return stats
-
-
-def run_lbf_solver_ablation(
-    *,
-    variants=None,
-    n_episodes=500,
-    base_seed=BASE_SEED,
-    output_root=DEFAULT_OUTPUT_ROOT / "solver_ablation",
-    use_gpu=True,
-    write_plots=True,
-    lbf_config_overrides=None,
-    hyperparameter_overrides=None,
-):
-    if variants is None:
-        variants = [{"label": "path_mcp", "solver_name": "path_mcp_nplayer"}]
-        nfg_checkpoint_path = (hyperparameter_overrides or {}).get("nfg_checkpoint_path")
-        if nfg_checkpoint_path:
-            variants.append(
-                {"label": "nfg_transformer", "solver_name": "nfg_transformer_sre"}
-            )
-    results = {}
-    for variant_index, variant in enumerate(variants):
-        label = variant["label"]
-        stats = train_lbf_deep_srq_experiment(
-            n_episodes=variant.get("n_episodes", n_episodes),
-            solver_name=variant.get("solver_name", DEFAULT_LBF_SOLVER),
-            epsilon_robust_initial=variant.get("epsilon_robust_initial", 0.5),
-            epsilon_schedule=variant.get("epsilon_schedule", "linear"),
-            seed=int(variant.get("seed", base_seed + variant_index)),
-            output_root=Path(output_root) / label,
-            lbf_config_overrides={
-                **(lbf_config_overrides or {}),
-                **variant.get("lbf_config_overrides", {}),
-            },
-            hyperparameter_overrides={
-                **(hyperparameter_overrides or {}),
-                **variant.get("hyperparameter_overrides", {}),
-            },
-            use_gpu=variant.get("use_gpu", use_gpu),
-            write_plots=variant.get("write_plots", write_plots),
-            run_name_suffix=label,
-            print_full_stats=variant.get("print_full_stats", False),
-        )
-        stats["ablation_variant"] = label
-        results[label] = stats
-    save_training_stats(Path(output_root) / "lbf_solver_ablation_manifest.txt", results)
-    return results

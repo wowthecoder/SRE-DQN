@@ -164,6 +164,7 @@ def test_dueling_double_dqn_slices_masked_stage_game_actions():
             use_gpu=False,
             sre_solver=solver,
             sre_policy_cache_enabled=True,
+            sre_remove_fixed_players=False,
         )
     )
     try:
@@ -182,7 +183,154 @@ def test_dueling_double_dqn_slices_masked_stage_game_actions():
     assert solver.closed
 
 
-def test_sre_cache_key_separates_solver_names():
+def test_dueling_double_dqn_removes_fixed_masked_players_from_solver_game():
+    torch = pytest.importorskip("torch")
+    from dueling_double_dqn_sre import DuelingDoubleDqnSreAgent, DuelingDoubleDqnSreAgentConfig
+
+    solver = _RecordingVariableShapeSolver()
+    agent = DuelingDoubleDqnSreAgent(
+        DuelingDoubleDqnSreAgentConfig(
+            obs_dim=4,
+            num_agents=3,
+            num_actions=3,
+            epsilon_explore=0.0,
+            learning_starts=999,
+            use_gpu=False,
+            sre_solver=solver,
+            sre_policy_cache_enabled=False,
+            sre_remove_fixed_players=True,
+        )
+    )
+    try:
+        q_batch = torch.zeros((1, 3, 3, 3, 3), dtype=torch.float32)
+        policies = agent._solve_sre_batch_masked(
+            q_batch,
+            [
+                [
+                    np.array([True, False, True]),
+                    np.array([False, True, False]),
+                    np.array([True, True, False]),
+                ]
+            ],
+        )
+        assert solver.shapes == [(2, 2, 2)]
+        assert len(policies[0]) == 3
+        assert np.allclose(policies[0][1], [0.0, 1.0, 0.0])
+    finally:
+        agent.close()
+
+
+def test_dueling_double_dqn_reuses_greedy_masked_warm_policy_on_path_failure():
+    torch = pytest.importorskip("torch")
+    from dueling_double_dqn_sre import DuelingDoubleDqnSreAgent, DuelingDoubleDqnSreAgentConfig
+
+    class FailingPathBatchSolver:
+        name = "failing_path_batch"
+
+        def __init__(self):
+            self.initial_policies_batch = None
+
+        def solve_batch(self, q_tensors, epsilon, **kwargs):
+            del epsilon
+            self.initial_policies_batch = kwargs.get("initial_policies_batch")
+            results = []
+            for q_tensor in q_tensors:
+                q_tensor = np.asarray(q_tensor)
+                results.append(
+                    SreSolveResult(
+                        policies=[],
+                        solutions=[],
+                        utilities_sr=[],
+                        utilities_nominal=[],
+                        success=False,
+                        message="PATH failed",
+                        metadata={
+                            "path_failed": True,
+                            "action_sizes": list(q_tensor.shape[:-1]),
+                        },
+                    )
+                )
+            return results
+
+        def close(self):
+            pass
+
+    solver = FailingPathBatchSolver()
+    agent = DuelingDoubleDqnSreAgent(
+        DuelingDoubleDqnSreAgentConfig(
+            obs_dim=4,
+            num_agents=3,
+            num_actions=3,
+            epsilon_explore=0.0,
+            learning_starts=999,
+            use_gpu=False,
+            sre_solver=solver,
+            sre_policy_cache_enabled=True,
+            sre_uniform_fallback_enabled=False,
+        )
+    )
+    try:
+        q_batch = torch.zeros((1, 3, 3, 3, 3), dtype=torch.float32)
+        q_batch[0, 2, :, :, 0] = 10.0
+        q_batch[0, :, 1, :, 1] = 5.0
+        q_batch[0, :, :, 0, 2] = 3.0
+        policies = agent._solve_sre_batch_masked(
+            q_batch,
+            [
+                [
+                    np.array([True, False, True]),
+                    np.array([True, True, False]),
+                    np.array([True, True, False]),
+                ]
+            ],
+        )[0]
+
+        assert solver.initial_policies_batch is not None
+        assert np.allclose(policies[0], [0.0, 0.0, 1.0])
+        assert np.allclose(policies[1], [0.0, 1.0, 0.0])
+        assert np.allclose(policies[2], [1.0, 0.0, 0.0])
+        summary = agent.get_sre_cache_summary()
+        assert summary["solver_failure_warm_start_reuses"] == 1
+        assert summary["uniform_fallbacks"] == 0
+    finally:
+        agent.close()
+
+
+def test_dueling_double_dqn_masked_targets_exclude_illegal_profiles():
+    pytest.importorskip("torch")
+    from dueling_double_dqn_sre import DuelingDoubleDqnSreAgent, DuelingDoubleDqnSreAgentConfig
+
+    agent = DuelingDoubleDqnSreAgent(
+        DuelingDoubleDqnSreAgentConfig(
+            obs_dim=4,
+            num_agents=2,
+            num_actions=2,
+            epsilon_robust=0.5,
+            use_gpu=False,
+            sre_solver=_FakeSolver(),
+        )
+    )
+    try:
+        q_tensor = np.zeros((2, 2, 2), dtype=np.float32)
+        q_tensor[0, 0, 0] = 10.0
+        q_tensor[0, 1, 0] = -100.0
+        policies = [
+            np.array([1.0, 0.0], dtype=np.float32),
+            np.array([1.0, 0.0], dtype=np.float32),
+        ]
+        masked = agent._sre_target_values_batch_masked(
+            np.asarray([q_tensor]),
+            [policies],
+            [[np.array([True, False]), np.array([True, False])]],
+        )
+        unmasked = agent._sre_target_values_batch(np.asarray([q_tensor]), [policies])
+        assert masked[0, 0] == pytest.approx(10.0)
+        assert unmasked[0, 0] < masked[0, 0]
+    finally:
+        agent.close()
+
+
+def test_sre_batch_key_separates_solver_names():
     pytest.importorskip("torch")
     from dueling_double_dqn_sre import DuelingDoubleDqnSreAgent, DuelingDoubleDqnSreAgentConfig
 
@@ -199,9 +347,9 @@ def test_sre_cache_key_separates_solver_names():
     )
     try:
         q_tensor = np.zeros((2, 2, 2), dtype=np.float32)
-        key_a = agent._sre_cache_key(q_tensor)
+        key_a = agent._sre_batch_key(q_tensor)
         solver.name = "solver_b"
-        key_b = agent._sre_cache_key(q_tensor)
+        key_b = agent._sre_batch_key(q_tensor)
         assert key_a != key_b
     finally:
         agent.close()

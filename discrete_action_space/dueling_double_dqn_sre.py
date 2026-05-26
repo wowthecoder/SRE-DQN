@@ -94,7 +94,7 @@ class DuelingDoubleDqnSreAgentConfig:
     # Learning rate for the Q-network optimizer.
     lr: float = 3e-4
     # Discount factor for Bellman targets.
-    gamma: float = 0.9
+    gamma: float = 0.99
     # Exponential decay factor for robust epsilon scheduling.
     decay_rate: float = 0.999
     # Maximum number of transitions stored in replay.
@@ -111,7 +111,7 @@ class DuelingDoubleDqnSreAgentConfig:
     # default approximate budget small. Set these back to 20/True for
     # exhaustive offline solver comparisons.
     # Number of random solver restarts for SRE stage games.
-    sre_num_repeats: int = 4
+    sre_num_repeats: int = 5
     # Whether solver starts should include pure-strategy profiles.
     sre_include_pure_starts: bool = False
     # Number of environment updates between gradient updates.
@@ -143,7 +143,7 @@ class DuelingDoubleDqnSreAgentConfig:
     # Initial robust epsilon value used by schedules.
     epsilon_robust_initial: float = 1.0
     # Robust epsilon schedule type.
-    epsilon_schedule: str = "exponential"
+    epsilon_schedule: str = "constant"
     # Whether to cache SRE policies for repeated stage games.
     sre_policy_cache_enabled: bool = True
     # Maximum number of cached SRE policy entries.
@@ -170,6 +170,8 @@ class DuelingDoubleDqnSreAgentConfig:
     sre_target_value_mode: str = "robust"
     # Whether to fall back to uniform policies when SRE solving fails.
     sre_uniform_fallback_enabled: bool = False
+    # Whether masked single-action players are fixed outside the PATH game.
+    sre_remove_fixed_players: bool = True
 
 
 _CHECKPOINT_CONFIG_EXCLUDE = {"sre_solver"}
@@ -590,6 +592,33 @@ class DuelingDoubleDqnSreAgent:
                 raise ValueError(f"Action mask for agent {agent_id} has no valid actions.")
         return q_tensor[np.ix_(*indices)], indices
 
+    def _masked_stage_game(self, q_tensor, action_masks):
+        legal_q, action_indices = self._slice_q_tensor_for_masks(q_tensor, action_masks)
+        if bool(self.config.sre_remove_fixed_players):
+            strategic_agent_ids = [
+                agent_id
+                for agent_id, valid in enumerate(action_indices)
+                if int(valid.size) > 1
+            ]
+        else:
+            strategic_agent_ids = list(range(self.config.num_agents))
+
+        solver_q = None
+        if len(strategic_agent_ids) >= 2:
+            solver_q = legal_q
+            for axis in reversed(range(self.config.num_agents)):
+                if axis not in strategic_agent_ids:
+                    solver_q = np.take(solver_q, 0, axis=axis)
+            solver_q = np.take(solver_q, strategic_agent_ids, axis=-1)
+            solver_q = np.asarray(solver_q, dtype=np.float32)
+
+        return {
+            "legal_q": legal_q,
+            "action_indices": action_indices,
+            "strategic_agent_ids": strategic_agent_ids,
+            "solver_q": solver_q,
+        }
+
     def _expand_reduced_policies(self, reduced_policies, action_masks, action_indices):
         expanded = []
         for agent_id, (policy, mask, valid_indices) in enumerate(
@@ -607,6 +636,105 @@ class DuelingDoubleDqnSreAgent:
                 full_policy[np.flatnonzero(mask)] = 1.0 / max(1, int(np.sum(mask)))
             expanded.append(full_policy)
         return expanded
+
+    def _expand_strategic_policies(
+        self,
+        strategic_policies,
+        action_masks,
+        action_indices,
+        strategic_agent_ids,
+    ):
+        by_agent = {
+            int(agent_id): np.asarray(policy, dtype=np.float32)
+            for agent_id, policy in zip(strategic_agent_ids, strategic_policies)
+        }
+        expanded = []
+        for agent_id, (mask, valid_indices) in enumerate(zip(action_masks, action_indices)):
+            full_policy = np.zeros(self.config.num_actions, dtype=np.float32)
+            if agent_id in by_agent:
+                policy = self._normalize_policy(by_agent[agent_id])
+                if policy.shape[0] != valid_indices.size:
+                    raise ValueError(
+                        "Solver returned malformed masked policy for agent "
+                        f"{agent_id}: expected length {valid_indices.size}, got {policy.shape[0]}."
+                    )
+                full_policy[valid_indices] = policy
+            else:
+                full_policy[valid_indices[0]] = 1.0
+            if not np.any(full_policy):
+                valid = np.flatnonzero(mask)
+                full_policy[valid] = 1.0 / max(1, valid.size)
+            expanded.append(full_policy)
+        return expanded
+
+    def _legal_policies_from_full(self, full_policies, action_indices):
+        legal_policies = []
+        for policy, valid_indices in zip(full_policies, action_indices):
+            p = np.asarray(policy, dtype=np.float32)[valid_indices]
+            total = float(np.sum(p))
+            if total <= 0.0:
+                p = np.full(valid_indices.size, 1.0 / valid_indices.size, dtype=np.float32)
+            else:
+                p = np.clip(p / total, 0.0, None).astype(np.float32, copy=False)
+            legal_policies.append(p)
+        return legal_policies
+
+    def _strategic_policies_from_full(self, full_policies, action_indices, strategic_agent_ids):
+        if full_policies is None:
+            return None
+        legal_policies = self._legal_policies_from_full(full_policies, action_indices)
+        return [legal_policies[agent_id] for agent_id in strategic_agent_ids]
+
+    def _single_strategic_policy(self, legal_q, strategic_agent_id, action_indices):
+        values = legal_q[..., strategic_agent_id]
+        for axis in reversed(range(self.config.num_agents)):
+            if axis != strategic_agent_id:
+                values = np.take(values, 0, axis=axis)
+        values = np.asarray(values, dtype=np.float32).reshape(-1)
+        best = np.flatnonzero(values >= np.max(values) - 1e-8)
+        policy = np.zeros(action_indices[strategic_agent_id].size, dtype=np.float32)
+        policy[best] = 1.0 / max(1, int(best.size))
+        return policy
+
+    def _masked_greedy_warm_policies(self, stage):
+        legal_q = np.asarray(stage["legal_q"], dtype=np.float32)
+        policies = []
+        for agent_id, valid_indices in enumerate(stage["action_indices"]):
+            policy = np.zeros(self.config.num_actions, dtype=np.float32)
+            valid_indices = np.asarray(valid_indices, dtype=np.int64)
+            if valid_indices.size == 1:
+                policy[valid_indices[0]] = 1.0
+                policies.append(policy)
+                continue
+
+            values = legal_q[..., agent_id]
+            other_axes = tuple(axis for axis in range(self.config.num_agents) if axis != agent_id)
+            if other_axes:
+                values = np.max(values, axis=other_axes)
+            values = np.asarray(values, dtype=np.float32).reshape(-1)
+            best = np.flatnonzero(values >= np.max(values) - 1e-8)
+            policy[valid_indices[best]] = 1.0 / max(1, int(best.size))
+            policies.append(policy)
+        return policies
+
+    def _fixed_or_singleton_masked_policies(self, stage, action_masks):
+        strategic_agent_ids = stage["strategic_agent_ids"]
+        if len(strategic_agent_ids) == 1:
+            strategic_policies = [
+                self._single_strategic_policy(
+                    stage["legal_q"],
+                    strategic_agent_ids[0],
+                    stage["action_indices"],
+                )
+            ]
+        else:
+            strategic_policies = []
+        return self._expand_strategic_policies(
+            strategic_policies,
+            action_masks,
+            stage["action_indices"],
+            strategic_agent_ids,
+        )
 
     def _fallback_policies(self, reason):
         if not bool(self.config.sre_uniform_fallback_enabled):
@@ -637,9 +765,27 @@ class DuelingDoubleDqnSreAgent:
             q_key.tobytes(),
         )
 
-    def _sre_cache_key(self, q_tensor):
-        # Backward-compatible alias retained for older tests/notebooks.
-        return self._sre_batch_key(q_tensor)
+    def _sre_masked_batch_key(self, stage):
+        legal_q_key = np.ascontiguousarray(
+            np.round(stage["legal_q"], int(self.config.sre_policy_cache_round_digits)),
+            dtype=np.float32,
+        )
+        action_indices_key = tuple(
+            tuple(int(action_id) for action_id in valid)
+            for valid in stage["action_indices"]
+        )
+        solver_name = getattr(self.sre_solver, "name", type(self.sre_solver).__name__)
+        return (
+            "masked",
+            solver_name,
+            round(float(self.config.epsilon_robust), 6),
+            int(self.config.sre_num_repeats),
+            bool(self.config.sre_include_pure_starts),
+            bool(self.config.sre_remove_fixed_players),
+            tuple(int(agent_id) for agent_id in stage["strategic_agent_ids"]),
+            action_indices_key,
+            legal_q_key.tobytes(),
+        )
 
     def _sre_state_key(self, state):
         if state is None:
@@ -945,6 +1091,77 @@ class DuelingDoubleDqnSreAgent:
 
         return self._masked_uniform_policies(action_masks)
 
+    def _expanded_policies_from_strategic_sre_result(
+        self,
+        result,
+        *,
+        action_masks,
+        action_indices,
+        strategic_agent_ids,
+        warm_policies=None,
+    ):
+        metadata = {} if result is None else dict(getattr(result, "metadata", None) or {})
+        if result is None or not result.policies or metadata.get("path_failed", False):
+            warm_strategic = self._strategic_policies_from_full(
+                warm_policies,
+                action_indices,
+                strategic_agent_ids,
+            )
+            if warm_strategic is not None:
+                self.sre_solver_failure_warm_start_reuses += 1
+                return (
+                    self._expand_strategic_policies(
+                        warm_strategic,
+                        action_masks,
+                        action_indices,
+                        strategic_agent_ids,
+                    ),
+                    False,
+                )
+            return self._masked_uniform_policies(action_masks), False
+
+        self.sre_candidate_return_count += 1
+        try:
+            policies = self._expand_strategic_policies(
+                result.policies,
+                action_masks,
+                action_indices,
+                strategic_agent_ids,
+            )
+        except ValueError:
+            return self._masked_uniform_policies(action_masks), False
+
+        if result.success:
+            return policies, True
+
+        if bool(getattr(self.sre_solver, "trust_approximate_policies", False)):
+            return policies, True
+
+        if not self.config.sre_exploitability_filter_enabled:
+            return policies, True
+
+        gap = metadata.get("robust_exploitability")
+        if gap is not None and float(gap) <= float(self.config.sre_approx_accept_tol):
+            return policies, True
+
+        warm_strategic = self._strategic_policies_from_full(
+            warm_policies,
+            action_indices,
+            strategic_agent_ids,
+        )
+        if warm_strategic is not None:
+            self.sre_solver_failure_warm_start_reuses += 1
+            return (
+                self._expand_strategic_policies(
+                    warm_strategic,
+                    action_masks,
+                    action_indices,
+                    strategic_agent_ids,
+                ),
+                False,
+            )
+        return self._masked_uniform_policies(action_masks), False
+
     def _solve_sre(self, q_tensor, state_key=None):
         q_tensor = np.asarray(q_tensor, dtype=np.float32)
         if not self._sre_policy_cache_active():
@@ -1063,7 +1280,6 @@ class DuelingDoubleDqnSreAgent:
         allow_solver=True,
         allow_cache_reuse=True,
     ):
-        del states, allow_solver, allow_cache_reuse
         q_tensors_torch = q_tensors if isinstance(q_tensors, torch.Tensor) else None
         if q_tensors_torch is not None:
             q_tensors_np = q_tensors_torch.detach().cpu().numpy().astype(
@@ -1093,49 +1309,184 @@ class DuelingDoubleDqnSreAgent:
             np.ones(self.config.num_actions, dtype=bool)
             for _ in range(self.config.num_agents)
         ]
-        reduced_q_tensors = []
-        reduced_indices = []
+        if states is not None:
+            states = np.asarray(states, dtype=np.float32)
+            if states.shape[0] != batch_size:
+                raise ValueError(
+                    "states must be None or have the same leading dimension as q_tensors."
+                )
+
+        stages = []
         normalized_masks_batch = []
         for q_tensor, masks in zip(q_tensors_np, masks_batch):
             if masks is None:
                 masks = [mask.copy() for mask in full_mask_profile]
-            reduced_q, action_indices = self._slice_q_tensor_for_masks(q_tensor, masks)
-            reduced_q_tensors.append(reduced_q.astype(np.float32, copy=False))
-            reduced_indices.append(action_indices)
+            stages.append(self._masked_stage_game(q_tensor, masks))
             normalized_masks_batch.append(masks)
 
-        solve_start = time.perf_counter()
-        try:
-            if hasattr(self.sre_solver, "solve_batch"):
-                results = self._call_sre_solver_batch(reduced_q_tensors)
-            else:
-                results = [self._solve_sre_result(q_tensor) for q_tensor in reduced_q_tensors]
-        except Exception as exc:
-            elapsed = time.perf_counter() - solve_start
-            self._record_sre_solve_time(elapsed, count=batch_size)
-            if not bool(self.config.sre_uniform_fallback_enabled):
-                raise RuntimeError(
-                    "Masked SRE batch solver failed and uniform fallback is disabled. "
-                    f"Solver raised {exc!r}."
-                ) from exc
-            results = [None] * batch_size
-        else:
-            elapsed = time.perf_counter() - solve_start
-            self._record_sre_solve_time(elapsed, count=batch_size)
+        policies_batch = [None] * batch_size
+        pending_q_tensors = []
+        pending_indices = []
+        pending_warm_policies = []
+        pending_warm_strategic = []
 
-        policies_batch = []
-        for result, masks, action_indices in zip(
-            results,
-            normalized_masks_batch,
-            reduced_indices,
-        ):
-            policies_batch.append(
-                self._expanded_policies_from_masked_sre_result(
+        for batch_index, (stage, masks) in enumerate(zip(stages, normalized_masks_batch)):
+            if stage["solver_q"] is None:
+                policies_batch[batch_index] = self._fixed_or_singleton_masked_policies(
+                    stage,
+                    masks,
+                )
+                continue
+
+            cache_key = self._sre_masked_batch_key(stage)
+            state_key = None
+            if states is not None:
+                state_key = self._sre_state_key(states[batch_index])
+            cached_full = None
+            warm_full = None
+            if self._sre_policy_cache_active():
+                entry = self._sre_policy_cache.get(cache_key)
+                if entry is not None:
+                    self._sre_policy_cache.move_to_end(cache_key)
+                    entry["uses"] = int(entry.get("uses", 0)) + 1
+                    self._last_sre_cache_key = cache_key
+                    warm_full = self._copy_policies(entry["policies"])
+                    if allow_cache_reuse:
+                        cached_full = self._copy_policies(entry["policies"])
+                        self.sre_cache_exact_hits += 1
+
+                if cached_full is None:
+                    for candidate_key in self._cache_candidate_keys(cache_key, state_key):
+                        candidate = self._sre_policy_cache[candidate_key]
+                        candidate_full = self._copy_policies(candidate["policies"])
+                        if warm_full is None:
+                            warm_full = candidate_full
+                        if allow_cache_reuse and self.config.sre_approx_cache_enabled:
+                            warm_strategic = self._strategic_policies_from_full(
+                                candidate_full,
+                                stage["action_indices"],
+                                stage["strategic_agent_ids"],
+                            )
+                            if warm_strategic is None:
+                                continue
+                            gap, _, _ = robust_exploitability(
+                                stage["solver_q"],
+                                warm_strategic,
+                                self.config.epsilon_robust,
+                            )
+                            if gap <= float(self.config.sre_cache_exploitability_tol):
+                                cached_full = self._expand_strategic_policies(
+                                    warm_strategic,
+                                    masks,
+                                    stage["action_indices"],
+                                    stage["strategic_agent_ids"],
+                                )
+                                candidate["uses"] = int(candidate.get("uses", 0)) + 1
+                                self._sre_policy_cache.move_to_end(candidate_key)
+                                self.sre_cache_approx_hits += 1
+                                self._store_sre_policy_cache(
+                                    cache_key,
+                                    cached_full,
+                                    state_key=state_key,
+                                    metadata={
+                                        "source": "verified_masked_cached_policy",
+                                        "robust_exploitability": float(gap),
+                                    },
+                                )
+                                break
+
+            if cached_full is not None:
+                policies_batch[batch_index] = cached_full
+                continue
+
+            self.sre_cache_misses += int(self._sre_policy_cache_active())
+            if warm_full is None:
+                warm_full = self._masked_greedy_warm_policies(stage)
+            warm_strategic = self._strategic_policies_from_full(
+                warm_full,
+                stage["action_indices"],
+                stage["strategic_agent_ids"],
+            )
+            if not allow_solver:
+                if self._policies_valid(warm_full):
+                    warm_strategic = self._strategic_policies_from_full(
+                        warm_full,
+                        stage["action_indices"],
+                        stage["strategic_agent_ids"],
+                    )
+                    if warm_strategic is not None:
+                        policies_batch[batch_index] = self._expand_strategic_policies(
+                            warm_strategic,
+                            masks,
+                            stage["action_indices"],
+                            stage["strategic_agent_ids"],
+                        )
+                    else:
+                        policies_batch[batch_index] = self._masked_uniform_policies(masks)
+                else:
+                    policies_batch[batch_index] = self._masked_uniform_policies(masks)
+                continue
+
+            pending_q_tensors.append(stage["solver_q"])
+            pending_indices.append(batch_index)
+            pending_warm_policies.append(warm_full)
+            pending_warm_strategic.append(warm_strategic)
+
+        if pending_q_tensors:
+            solve_start = time.perf_counter()
+            try:
+                if hasattr(self.sre_solver, "solve_batch"):
+                    results = self._call_sre_solver_batch(
+                        pending_q_tensors,
+                        initial_policies_batch=pending_warm_strategic,
+                    )
+                else:
+                    results = [
+                        self._solve_sre_result(q_tensor, initial_policies=warm_policies)
+                        for q_tensor, warm_policies in zip(
+                            pending_q_tensors,
+                            pending_warm_strategic,
+                        )
+                    ]
+            except Exception as exc:
+                elapsed = time.perf_counter() - solve_start
+                self._record_sre_solve_time(elapsed, count=len(pending_q_tensors))
+                if not bool(self.config.sre_uniform_fallback_enabled):
+                    raise RuntimeError(
+                        "Masked SRE batch solver failed and uniform fallback is disabled. "
+                        f"Solver raised {exc!r}."
+                    ) from exc
+                results = [None] * len(pending_q_tensors)
+            else:
+                elapsed = time.perf_counter() - solve_start
+                self._record_sre_solve_time(elapsed, count=len(pending_q_tensors))
+
+            for batch_index, result, warm_full in zip(
+                pending_indices,
+                results,
+                pending_warm_policies,
+            ):
+                stage = stages[batch_index]
+                masks = normalized_masks_batch[batch_index]
+                policies, cacheable = self._expanded_policies_from_strategic_sre_result(
                     result,
                     action_masks=masks,
-                    action_indices=action_indices,
+                    action_indices=stage["action_indices"],
+                    strategic_agent_ids=stage["strategic_agent_ids"],
+                    warm_policies=warm_full,
                 )
-            )
+                policies_batch[batch_index] = policies
+                if cacheable and self._sre_policy_cache_active():
+                    state_key = None
+                    if states is not None:
+                        state_key = self._sre_state_key(states[batch_index])
+                    self._store_sre_policy_cache(
+                        self._sre_masked_batch_key(stage),
+                        policies,
+                        state_key=state_key,
+                        metadata=getattr(result, "metadata", None),
+                    )
+
         return policies_batch
 
     def _solve_sre_batch(
@@ -1348,6 +1699,39 @@ class DuelingDoubleDqnSreAgent:
             "sre_target_value_mode must be 'robust' or 'nominal', "
             f"got {self.config.sre_target_value_mode!r}."
         )
+
+    def _sre_target_values_batch_masked(self, q_tensors, policies_batch, action_masks_batch):
+        q_tensors = np.asarray(q_tensors, dtype=np.float32)
+        masks_batch = self._normalize_action_masks_batch(
+            action_masks_batch,
+            int(q_tensors.shape[0]),
+        )
+        mode = str(self.config.sre_target_value_mode).lower()
+        values = []
+        for q_tensor, policies, masks in zip(q_tensors, policies_batch, masks_batch):
+            if masks is None:
+                if mode == "robust":
+                    values.append(self._sre_robust_values(q_tensor, policies))
+                elif mode == "nominal":
+                    values.append(self._sre_expected_values(q_tensor, policies))
+                else:
+                    raise ValueError(
+                        "sre_target_value_mode must be 'robust' or 'nominal', "
+                        f"got {self.config.sre_target_value_mode!r}."
+                    )
+                continue
+            legal_q, action_indices = self._slice_q_tensor_for_masks(q_tensor, masks)
+            legal_policies = self._legal_policies_from_full(policies, action_indices)
+            if mode == "robust":
+                values.append(self._sre_robust_values(legal_q, legal_policies))
+            elif mode == "nominal":
+                values.append(self._sre_expected_values(legal_q, legal_policies))
+            else:
+                raise ValueError(
+                    "sre_target_value_mode must be 'robust' or 'nominal', "
+                    f"got {self.config.sre_target_value_mode!r}."
+                )
+        return np.stack(values, axis=0).astype(np.float32)
 
     def act(self, state, agent_id=None, action_masks=None):
         if agent_id is None:
@@ -1663,6 +2047,11 @@ class DuelingDoubleDqnSreAgent:
                             allow_solver=refresh_target_equilibria,
                             allow_cache_reuse=not refresh_target_equilibria,
                         )
+                        target_values_np = self._sre_target_values_batch_masked(
+                            next_target[nonterminal_indices],
+                            policies_batch,
+                            next_masks_nonterminal,
+                        )
                     else:
                         policies_batch = self._solve_sre_batch(
                             next_online[nonterminal_t],
@@ -1670,11 +2059,12 @@ class DuelingDoubleDqnSreAgent:
                             allow_solver=refresh_target_equilibria,
                             allow_cache_reuse=not refresh_target_equilibria,
                         )
-                    next_values_t[nonterminal_t] = torch.as_tensor(
-                        self._sre_target_values_batch(
+                        target_values_np = self._sre_target_values_batch(
                             next_target[nonterminal_indices],
                             policies_batch,
-                        ),
+                        )
+                    next_values_t[nonterminal_t] = torch.as_tensor(
+                        target_values_np,
                         device=self.device,
                         dtype=torch.float32,
                     )

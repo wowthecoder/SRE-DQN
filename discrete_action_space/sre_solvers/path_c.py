@@ -1,19 +1,13 @@
 from pathlib import Path
+from dataclasses import dataclass, replace
 import multiprocessing as mp
 import time
 
 import numpy as np
-
-try:
-    from path_solver import (
-        PathSolverWrapper,
-        solve_strategically_robust_bimatrix_game_path_lcp,
-    )
-except ImportError:  # Package import from repository root.
-    from ..path_solver import (
-        PathSolverWrapper,
-        solve_strategically_robust_bimatrix_game_path_lcp,
-    )
+from path_solver import (
+    PathSolverWrapper,
+    solve_strategically_robust_bimatrix_game_path_lcp,
+)
 
 from .base import (
     SreSolveResult,
@@ -25,6 +19,23 @@ from .base import (
 
 
 DEFAULT_PATHWRAP_PATH = Path(__file__).resolve().with_name("pathwrap.so")
+
+
+@dataclass(frozen=True)
+class PathCBimatrixSreSolverConfig:
+    pathwrap_path: object = DEFAULT_PATHWRAP_PATH
+
+
+@dataclass(frozen=True)
+class ProcessPoolPathCBimatrixSreSolverConfig:
+    pathwrap_path: object = DEFAULT_PATHWRAP_PATH
+    max_workers: int = 4
+    start_method: str | None = None
+
+    def __post_init__(self):
+        object.__setattr__(self, "max_workers", int(self.max_workers))
+        if self.max_workers <= 0:
+            raise ValueError("max_workers must be positive for process-pool SRE.")
 
 
 def _select_best_solution(q_tensor, solutions):
@@ -87,8 +98,13 @@ def _solution_from_lcp_vector(z, lcp, *, round_digits=4):
 class PathCBimatrixSreSolver(SreStageGameSolver):
     name = "path_c"
 
-    def __init__(self, pathwrap_path=DEFAULT_PATHWRAP_PATH):
-        self.path_solver = PathSolverWrapper(pathwrap_path)
+    def __init__(self, config: PathCBimatrixSreSolverConfig | None = None, **overrides):
+        if config is None:
+            config = PathCBimatrixSreSolverConfig(**overrides)
+        elif overrides:
+            config = replace(config, **overrides)
+        self.config = config
+        self.path_solver = PathSolverWrapper(self.config.pathwrap_path)
 
     def solve(
         self,
@@ -184,22 +200,22 @@ def _path_pool_solve_task(payload):
 class ProcessPoolPathCBimatrixSreSolver(SreStageGameSolver):
     name = "path_c_pool"
 
-    def __init__(self, pathwrap_path=DEFAULT_PATHWRAP_PATH, max_workers=4, start_method=None):
-        self.pathwrap_path = pathwrap_path
-        self.max_workers = int(max_workers)
-        self.start_method = start_method
+    def __init__(self, config: ProcessPoolPathCBimatrixSreSolverConfig | None = None, **overrides):
+        if config is None:
+            config = ProcessPoolPathCBimatrixSreSolverConfig(**overrides)
+        elif overrides:
+            config = replace(config, **overrides)
+        self.config = config
         self.solve_time_count = 0
         self.solve_time_sum = 0.0
         self.solve_time_sumsq = 0.0
         self.solve_time_min = None
         self.solve_time_max = None
-        if self.max_workers <= 0:
-            raise ValueError("max_workers must be positive for process-pool SRE.")
-        ctx = mp.get_context(start_method) if start_method else mp.get_context()
+        ctx = mp.get_context(self.config.start_method) if self.config.start_method else mp.get_context()
         self._pool = ctx.Pool(
-            processes=self.max_workers,
+            processes=self.config.max_workers,
             initializer=_path_pool_initializer,
-            initargs=(self.pathwrap_path,),
+            initargs=(self.config.pathwrap_path,),
         )
 
     def _record_solve_time(self, duration):
@@ -256,7 +272,7 @@ class ProcessPoolPathCBimatrixSreSolver(SreStageGameSolver):
             duration = float(result.metadata.get("worker_sre_wall_seconds", 0.0))
             self._record_solve_time(duration)
             result.metadata["solver"] = self.name
-            result.metadata["max_workers"] = self.max_workers
+            result.metadata["max_workers"] = self.config.max_workers
         return results
 
     def get_solve_time_summary(self):
@@ -285,4 +301,3 @@ class ProcessPoolPathCBimatrixSreSolver(SreStageGameSolver):
             pool.close()
             pool.join()
             self._pool = None
-

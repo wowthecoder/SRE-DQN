@@ -9,10 +9,7 @@ from numbers import Number
 from pathlib import Path
 from typing import Any
 
-try:
-    from .instrumented_env import InstrumentedForagingEnv
-except ImportError:  # Script/notebook import from the lbf_grid directory
-    from instrumented_env import InstrumentedForagingEnv
+from .instrumented_env import InstrumentedForagingEnv
 
 
 @dataclass(frozen=True)

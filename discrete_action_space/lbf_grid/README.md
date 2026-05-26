@@ -17,9 +17,9 @@ pip install lbforaging
 
 ```python
 import sys; sys.path.insert(0, "../..")
-from discrete_action_space.lbf_grid import make_basic_lbf_pz_env
+from discrete_action_space.lbf_grid.pz_wrapper import LBFParallelEnv
 
-env = make_basic_lbf_pz_env()
+env = LBFParallelEnv()
 
 obs, infos = env.reset(seed=2025)
 while env.agents:
@@ -30,7 +30,7 @@ env.close()
 
 ## Default Scenario
 
-`make_basic_lbf_pz_env()` creates:
+`LBFParallelEnv()` creates:
 
 - 3 agents.
 - 10x10 grid.
@@ -116,7 +116,7 @@ discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/training/<scenario_
 
 The notebook writes the following files for each scenario/epsilon run:
 
-- `training_stats.json`: JSON stats emitted by `train_lbf_deep_srq_experiment`
+- `training_stats.json`: JSON stats emitted by `train_lbf_deep_srq_vectorized`
   and then overwritten by the notebook wrapper after it adds scenario/family
   metadata and plot paths.
 - `training_summary.txt`: compact human-readable summary.
@@ -182,49 +182,56 @@ The nested fields inside the stats payload are:
 
 ```text
 hyperparameters
-  learning_rate
-  batch_size
-  replay_buffer_capacity
-  learning_starts
-  gamma
-  action_epsilon_start
-  action_epsilon_end
-  action_epsilon_decay_fraction
-  grad_clip_max_norm
-  sre_num_repeats
-  sre_include_pure_starts
-  train_every
-  network_type
-  target_update_steps
-  target_equilibrium_update_steps
-  target_tau
-  solver_max_iter
-  solver_tol
-  solver_damping
-  solver_temperature
-  sre_solver_workers
-  sre_policy_cache_enabled
-  sre_policy_cache_size
-  sre_policy_cache_round_digits
-  sre_state_cache_round_digits
-  sre_approx_cache_enabled
-  sre_cache_exploitability_tol
-  sre_solver_exploitability_tol
-  sre_approx_accept_tol
-  sre_solver_early_exit
-  sre_uniform_fallback_enabled
-  nfg_checkpoint_path
-  nfg_device
-  nfg_fallback_enabled
-  nfg_accept_gap
-  sre_target_value_mode
-  sr_adidas_max_iters
-  sr_adidas_lr
-  sr_adidas_tau_init
-  sr_adidas_tau_min
-  sr_adidas_tau_threshold
-  sr_adidas_exploitability_tol
-  sr_adidas_device
+  agent
+    lr
+    batch_size
+    buffer_size
+    learning_starts
+    gamma
+    action_epsilon_start
+    action_epsilon_end
+    action_epsilon_decay_fraction
+    grad_clip_norm
+    sre_num_repeats
+    sre_include_pure_starts
+    train_every
+    network_type
+    target_update_steps
+    target_equilibrium_update_steps
+    target_tau
+    sre_policy_cache_enabled
+    sre_policy_cache_size
+    sre_policy_cache_round_digits
+    sre_state_cache_round_digits
+    sre_approx_cache_enabled
+    sre_cache_exploitability_tol
+    sre_solver_exploitability_tol
+    sre_approx_accept_tol
+    sre_solver_early_exit
+    sre_uniform_fallback_enabled
+    sre_target_value_mode
+  path_mcp
+    pathwrap_path
+    random_seed
+  path_mcp_pool
+    pathwrap_path
+    max_workers
+    start_method
+    random_seed
+  nfg_transformer
+    checkpoint_path
+    device
+    fallback_enabled
+    accept_exploitability_tol
+  logit_qre
+    precision_max
+    precision_growth
+    max_homotopy_steps
+    corrector_max_iters
+    qre_tol
+    damping
+    min_prob
+    device
 
 lbf_config
   players

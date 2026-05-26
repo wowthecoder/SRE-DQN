@@ -1,3 +1,3 @@
-from .solver import SredGradientSreSolver
+from .solver import SredGradientSreSolver, SredGradientSreSolverConfig
 
-__all__ = ["SredGradientSreSolver"]
+__all__ = ["SredGradientSreSolver", "SredGradientSreSolverConfig"]

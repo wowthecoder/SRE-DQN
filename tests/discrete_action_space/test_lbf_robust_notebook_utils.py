@@ -18,8 +18,8 @@ def test_robust_artifact_paths_use_requested_layout(tmp_path):
         deepsrq_path_mcp_pool_evaluation_dir,
         deepsrq_path_mcp_pool_training_dir,
         deepsrq_training_dir,
-        sr_adidas_evaluation_dir,
-        sr_adidas_training_dir,
+        srac_evaluation_dir,
+        srac_training_dir,
     )
 
     assert deepsrq_training_dir("scenario_a", 0.01, repo_root=tmp_path) == (
@@ -34,18 +34,12 @@ def test_robust_artifact_paths_use_requested_layout(tmp_path):
     assert deepsrq_path_mcp_pool_evaluation_dir("scenario_a", 1.0, repo_root=tmp_path) == (
         tmp_path / "discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/evaluation/scenario_a/1.0"
     )
-    assert sr_adidas_training_dir("scenario_b", 0.5, repo_root=tmp_path) == (
-        tmp_path / "discrete_action_space/lbf_grid/sr_adidas/training/scenario_b/0.5"
+    assert srac_training_dir("scenario_c", 0.5, repo_root=tmp_path) == (
+        tmp_path / "discrete_action_space/lbf_grid/srac/training/scenario_c/0.5"
     )
-    assert sr_adidas_evaluation_dir("scenario_b", 0.1, repo_root=tmp_path) == (
-        tmp_path / "discrete_action_space/lbf_grid/sr_adidas/evaluation/scenario_b/0.1"
+    assert srac_evaluation_dir("scenario_c", 1.0, repo_root=tmp_path) == (
+        tmp_path / "discrete_action_space/lbf_grid/srac/evaluation/scenario_c/1.0"
     )
-
-
-def test_constant_epsilon_schedules_stay_constant():
-    from lbf_grid.deep_srq_lbf import robust_epsilon_value
-
-    assert robust_epsilon_value(0.5, "constant", 50, 100) == 0.5
 
 
 def test_rotated_episode_counts_allocate_all_episodes():
@@ -139,6 +133,116 @@ def test_deepsrq_policy_adapter_batches_action_selection():
     assert agent.closed is True
 
 
+def test_srac_policy_adapter_batches_actor_action_selection():
+    from lbf_grid.robust_notebook_utils import SracPolicyAdapter
+
+    class FakeAgent:
+        def __init__(self):
+            self.seen_states = None
+            self.seen_local_obs = None
+            self.closed = False
+
+        def act_joint_batch(self, states, local_obs_batch, action_masks_batch=None):
+            del action_masks_batch
+            self.seen_states = list(states)
+            self.seen_local_obs = np.asarray(local_obs_batch)
+            return [[idx, idx + 1] for idx, _ in enumerate(states)]
+
+        def close(self):
+            self.closed = True
+
+    agent = FakeAgent()
+    adapter = SracPolicyAdapter(agent)
+    contexts = [
+        {
+            "state": [1.0, 0.0],
+            "obs_dict": {
+                "agent_0": np.array([0.0, 0.1]),
+                "agent_1": np.array([1.0, 1.1]),
+            },
+            "agent_order": ["agent_0", "agent_1"],
+        },
+        {
+            "state": [0.0, 1.0],
+            "obs_dict": {
+                "agent_0": np.array([2.0, 2.1]),
+                "agent_1": np.array([3.0, 3.1]),
+            },
+            "agent_order": ["agent_0", "agent_1"],
+        },
+    ]
+
+    actions = adapter.act_all_batch(contexts)
+
+    assert actions == [[0, 1], [1, 2]]
+    assert agent.seen_states == [[1.0, 0.0], [0.0, 1.0]]
+    assert agent.seen_local_obs.shape == (2, 2, 2)
+    adapter.close()
+    assert agent.closed is True
+
+
+def test_load_srac_policy_uses_actor_only_checkpoint(tmp_path):
+    torch = pytest.importorskip("torch")
+    from lbf_grid.robust_notebook_utils import (
+        LbfNotebookScenario,
+        load_srac_policy,
+    )
+    from srac import SracAgent, SracConfig
+
+    class FakeSolver:
+        name = "fake_solver"
+
+        def close(self):
+            pass
+
+    agent = SracAgent(
+        SracConfig(
+            state_dim=2,
+            actor_obs_dim=2,
+            num_agents=2,
+            num_actions=2,
+            use_gpu=False,
+            sre_solver=FakeSolver(),
+        )
+    )
+    try:
+        checkpoint = tmp_path / "shared_srac_best.pt"
+        agent.save_checkpoint(checkpoint)
+    finally:
+        agent.close()
+    (tmp_path / "training_stats.json").write_text("{}", encoding="utf-8")
+    scenario = LbfNotebookScenario(
+        key="scenario_a",
+        name="Scenario A",
+        gym_id="fake",
+        time_limit=1,
+        config={},
+    )
+
+    adapter = load_srac_policy(
+        scenario,
+        0.5,
+        run_dir_override=tmp_path,
+        use_gpu=False,
+    )
+    try:
+        actions = adapter.act_all(
+            state=np.zeros(2, dtype=np.float32),
+            obs_dict={
+                "agent_0": np.zeros(2, dtype=np.float32),
+                "agent_1": np.ones(2, dtype=np.float32),
+            },
+            agent_order=["agent_0", "agent_1"],
+            action_masks=[
+                np.array([True, False]),
+                np.array([False, True]),
+            ],
+        )
+        assert actions == [0, 1]
+    finally:
+        adapter.close()
+
+
 def test_vectorized_lbf_deepsrq_trainer_smoke(tmp_path, monkeypatch):
     torch = pytest.importorskip("torch")
     from lbf_grid import deep_srq_lbf
@@ -200,14 +304,14 @@ def test_vectorized_lbf_deepsrq_trainer_smoke(tmp_path, monkeypatch):
         def close(self):
             pass
 
-    monkeypatch.setattr(deep_srq_lbf, "make_pz_env", lambda **kwargs: FakeEnv())
+    monkeypatch.setattr(deep_srq_lbf, "LBFParallelEnv", lambda **kwargs: FakeEnv())
     monkeypatch.setattr(
         deep_srq_lbf,
         "_make_solver",
         lambda solver_name, hp, seed: FakeDirectPolicySolver(),
     )
 
-    stats = deep_srq_lbf.train_lbf_deep_srq_vectorized_experiment(
+    stats = deep_srq_lbf.train_lbf_deep_srq_vectorized(
         n_episodes=2,
         num_envs=2,
         solver_name="nfg_transformer_sre",
@@ -217,10 +321,12 @@ def test_vectorized_lbf_deepsrq_trainer_smoke(tmp_path, monkeypatch):
         run_dir=tmp_path,
         lbf_config_overrides={"max_episode_steps": 1},
         hyperparameter_overrides={
-            "learning_starts": 99,
-            "batch_size": 2,
-            "action_epsilon_start": 0.0,
-            "action_epsilon_end": 0.0,
+            "agent": {
+                "learning_starts": 99,
+                "batch_size": 2,
+                "action_epsilon_start": 0.0,
+                "action_epsilon_end": 0.0,
+            },
         },
         use_gpu=False,
         write_plots=False,
@@ -245,8 +351,8 @@ def test_new_lbf_notebooks_have_parseable_code_cells():
         ROOT / "discrete_action_space/lbf_grid/deepsrq_nfgtransformer_evaluation.ipynb",
         ROOT / "discrete_action_space/lbf_grid/deepsrq_path_pool_training.ipynb",
         ROOT / "discrete_action_space/lbf_grid/deepsrq_path_pool_evaluation.ipynb",
-        ROOT / "discrete_action_space/lbf_grid/sr_adidas_training.ipynb",
-        ROOT / "discrete_action_space/lbf_grid/sr_adidas_evaluation.ipynb",
+        ROOT / "discrete_action_space/lbf_grid/srac_training.ipynb",
+        ROOT / "discrete_action_space/lbf_grid/srac_evaluation.ipynb",
     ]
     for path in notebook_paths:
         nb = json.loads(path.read_text(encoding="utf-8"))

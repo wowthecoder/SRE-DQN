@@ -1,3 +1,3 @@
-from .solver import LogitQreHomotopySreSolver
+from .solver import LogitQreHomotopySreSolver, LogitQreHomotopySreSolverConfig
 
-__all__ = ["LogitQreHomotopySreSolver"]
+__all__ = ["LogitQreHomotopySreSolver", "LogitQreHomotopySreSolverConfig"]
