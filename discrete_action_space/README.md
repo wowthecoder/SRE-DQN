@@ -44,10 +44,8 @@ During training, the agent uses Double-DQN semantics:
   nonterminal next state;
 - the target network `next_target_t` supplies the Q tensor used to compute the
   Bellman target values under that policy profile;
-- `sre_target_value_mode="nominal"` is the default and matches tabular SRQ:
-  it uses the product-policy expected Q value under the SRE policy profile;
-- `sre_target_value_mode="robust"` remains available as an experimental variant
-  and uses `robust_policy_values(...)` for the Bellman target value.
+- the Bellman value matches tabular SRQ: it is the product-policy expected Q
+  value under the SRE policy profile.
 
 The default direct constructor chooses `PathCBimatrixSreSolver` for two agents
 and `PathMcpNPlayerSreSolver` for more than two agents. Notebook and experiment
@@ -151,8 +149,6 @@ stage-game solves. The methods are grouped below by role.
 
 ### Masked game handling
 
-- `_masked_uniform_policies(action_masks)`: builds legal-action uniform policies
-  when fallback is enabled.
 - `_slice_q_tensor_for_masks(q_tensor, action_masks)`: extracts the legal-action
   subgame from a full Q tensor.
 - `_masked_stage_game(q_tensor, action_masks)`: builds a description of the
@@ -173,12 +169,8 @@ stage-game solves. The methods are grouped below by role.
 - `_fixed_or_singleton_masked_policies(stage, action_masks)`: handles masked
   games that do not require an SRE solve because too few players have choices.
 
-### Fallback and cache plumbing
+### Cache plumbing
 
-- `_fallback_policies(reason)`: returns uniform fallback policies or raises when
-  solver fallback is disabled.
-- `_warm_start_policies_or_fallback(warm_policies, reason)`: reuses a previous
-  warm-start policy after solver failure, otherwise falls back.
 - `_sre_batch_key(q_tensor)`: builds a cache key from `epsilon_robust` and the
   rounded unmasked Q tensor bytes.
 - `_sre_masked_batch_key(stage)`: builds a rounded cache key for a masked legal
@@ -229,13 +221,8 @@ stage-game solves. The methods are grouped below by role.
   expectation `E_pi[Q]` for one game.
 - `_sre_expected_values_batch(q_tensors, policies_batch)`: batched wrapper for
   nominal expected values.
-- `_sre_robust_values(q_tensor, policies)`: computes the robust value of one
-  policy profile via `robust_policy_values(...)`; this is an optional target
-  variant, not the Deep SRQ default.
-- `_sre_robust_values_batch(q_tensors, policies_batch)`: batched wrapper for
-  robust policy values.
-- `_sre_target_values_batch(q_tensors, policies_batch)`: dispatches to nominal
-  or robust target values according to `sre_target_value_mode`.
+- `_sre_target_values_batch(q_tensors, policies_batch)`: computes nominal
+  expected target values for a batch of unmasked games.
 - `_sre_target_values_batch_masked(q_tensors, policies_batch, action_masks_batch)`:
   computes target values after restricting each game to legal masked actions.
 

@@ -1,11 +1,11 @@
 scenario=lbf_10x10_3p_8f_levels123
 algorithm=deepsrq_path_mcp_nplayer_pool
 epsilon=0.5
-episodes=3000
-best_loss=0.00042673907591961324
-latest_loss=0.573043942451477
+episodes=5000
+best_loss=7.604168786201626e-05
+latest_loss=0.021334633231163025
 best_checkpoint=/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/training/lbf_10x10_3p_8f_levels123/0.5/shared_deepsrq_best.pt
 final_checkpoint=/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/training/lbf_10x10_3p_8f_levels123/0.5/shared_deepsrq_final.pt
-agent_1_reward_mean=0.020350 std=0.027113
-agent_2_reward_mean=0.066598 std=0.060711
-agent_3_reward_mean=0.143325 std=0.099633
+agent_1_reward_mean=0.447400 std=0.667633
+agent_2_reward_mean=1.595500 std=1.711655
+agent_3_reward_mean=3.566700 std=3.150307

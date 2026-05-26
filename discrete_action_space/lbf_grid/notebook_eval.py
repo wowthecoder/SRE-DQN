@@ -620,12 +620,22 @@ def _record_label(record: dict) -> str:
 
 
 def _load_reward_payload(record: dict) -> dict:
-    stats_path = record.get("reward_stats_path") or record.get("stats_path")
-    if stats_path and Path(stats_path).exists():
+    candidate_paths = [
+        record.get("reward_stats_path"),
+        record.get("reward_history_path"),
+        record.get("stats_path"),
+    ]
+    for stats_path in candidate_paths:
+        if not stats_path or not Path(stats_path).exists():
+            continue
         try:
-            return json.loads(Path(stats_path).read_text())
+            payload = json.loads(Path(stats_path).read_text())
         except json.JSONDecodeError:
-            return {}
+            continue
+        if payload.get("rewards") is not None or payload.get("reward_curve"):
+            return payload
+        if stats_path == candidate_paths[-1]:
+            return payload
     return {}
 
 

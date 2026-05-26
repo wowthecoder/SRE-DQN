@@ -30,9 +30,12 @@ from stats_utils import (
 from .deep_srq_lbf import (
     BASE_SEED,
     DEFAULT_OUTPUT_ROOT,
+    DEFAULT_REWARD_SAVE_INTERVAL,
     _action_dict_from_list,
     _action_masks,
+    _should_save_reward_snapshot,
     _slugify,
+    _write_reward_history_snapshot,
     basic_lbf_config,
     lbf_config,
 )
@@ -392,6 +395,7 @@ def train_lbf_sra2c_vectorized(
     print_full_stats=True,
     scenario_key=None,
     scenario_name=None,
+    reward_save_interval=DEFAULT_REWARD_SAVE_INTERVAL,
 ):
     set_global_seed(seed)
     hp = sra2c_lbf_hyperparams(hyperparameter_overrides)
@@ -434,6 +438,8 @@ def train_lbf_sra2c_vectorized(
     rewards_history = [[] for _ in range(num_agents)]
     episode_lengths = []
     eval_history = []
+    reward_history_path = run_dir / "training_rewards.json"
+    agent_labels = [f"Agent {agent_id + 1} (SR-A2C)" for agent_id in range(num_agents)]
     global_step = 0
     gradient_steps = 0
     best_joint_reward = -float("inf")
@@ -446,6 +452,31 @@ def train_lbf_sra2c_vectorized(
     episodes_started = 0
     training_start = time.perf_counter()
     slots = []
+
+    def save_reward_snapshot(status=None):
+        return _write_reward_history_snapshot(
+            reward_history_path,
+            environment="lbf_grid",
+            algorithm="sra2c",
+            rewards_history=rewards_history,
+            episode_lengths=episode_lengths,
+            completed_episodes=completed_episodes,
+            n_episodes=n_episodes,
+            seed=seed,
+            agent_labels=agent_labels,
+            artifact_dir=run_dir,
+            scenario_key=scenario_key,
+            scenario_name=scenario_name,
+            pair_label="SR-A2C self-play",
+            pair_slug=run_name,
+            training_mode="vectorized",
+            epsilon_robust_initial=epsilon_robust_initial,
+            epsilon_schedule=epsilon_schedule,
+            periodic_eval=eval_history,
+            total_environment_steps=global_step,
+            gradient_steps=gradient_steps,
+            status=status,
+        )
 
     print(
         f"LBF SR-A2C vectorized | players={num_agents} | solver={solver_name} | "
@@ -621,6 +652,9 @@ def train_lbf_sra2c_vectorized(
                             include_replay_buffer=include_replay_buffer,
                         )
 
+                    if _should_save_reward_snapshot(completed_episodes, reward_save_interval):
+                        save_reward_snapshot()
+
                     if episodes_started < int(n_episodes):
                         slot["done"] = False
                         start_slot(slot)
@@ -642,6 +676,7 @@ def train_lbf_sra2c_vectorized(
             include_episode_durations=False,
         )
         solver_usage = _solver_usage_summary(agent)
+        save_reward_snapshot()
         agent.close()
         for slot in slots:
             slot["env"].close()
@@ -690,9 +725,10 @@ def train_lbf_sra2c_vectorized(
             "final": str(run_dir / "shared_sra2c_final.pt"),
         },
         "include_replay_buffer": bool(include_replay_buffer),
-        "agent_labels": [f"Agent {agent_id + 1} (SR-A2C)" for agent_id in range(num_agents)],
+        "agent_labels": agent_labels,
         "artifact_dir": str(run_dir),
         "stats_path": str(stats_path),
+        "reward_history_path": str(reward_history_path),
         "timing": timing,
         "solver_usage": solver_usage,
     }

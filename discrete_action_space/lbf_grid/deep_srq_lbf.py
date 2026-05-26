@@ -103,7 +103,6 @@ class DeepSrqLbfHyperparams:
             action_epsilon_end=0.05,
             action_epsilon_decay_fraction=0.6,
             sre_policy_cache_enabled=True,
-            sre_uniform_fallback_enabled=False,
         )
     )
     path_mcp: PathMcpNPlayerSreSolverConfig = field(
@@ -119,6 +118,7 @@ class DeepSrqLbfHyperparams:
     )
 
 DEFAULT_LBF_CONFIG = basic_lbf_config()
+DEFAULT_REWARD_SAVE_INTERVAL = 10
 
 
 def set_global_seed(seed=BASE_SEED):
@@ -174,6 +174,78 @@ def _hyperparams_payload(hp):
     payload = json_safe(asdict(hp))
     payload["agent"].pop("sre_solver", None)
     return payload
+
+
+def _should_save_reward_snapshot(completed_episodes, interval):
+    if interval in (None, 0, False):
+        return False
+    return int(completed_episodes) > 0 and int(completed_episodes) % max(1, int(interval)) == 0
+
+
+def _episode_rewards_from_agent_history(rewards_history):
+    if not rewards_history:
+        return []
+    episode_count = min((len(agent_rewards) for agent_rewards in rewards_history), default=0)
+    return [
+        [float(rewards_history[agent_id][episode]) for agent_id in range(len(rewards_history))]
+        for episode in range(episode_count)
+    ]
+
+
+def _write_reward_history_snapshot(
+    path,
+    *,
+    environment,
+    algorithm,
+    rewards_history,
+    episode_lengths,
+    completed_episodes,
+    n_episodes,
+    seed,
+    agent_labels,
+    artifact_dir,
+    scenario_key=None,
+    scenario_name=None,
+    pair_label=None,
+    pair_slug=None,
+    training_mode=None,
+    epsilon_robust_initial=None,
+    epsilon_schedule=None,
+    periodic_eval=None,
+    total_environment_steps=None,
+    gradient_steps=None,
+    status=None,
+):
+    record = {
+        "environment": str(environment),
+        "algorithm": str(algorithm),
+        "scenario_key": None if scenario_key is None else str(scenario_key),
+        "scenario_name": None if scenario_name is None else str(scenario_name),
+        "pair_label": None if pair_label is None else str(pair_label),
+        "pair_slug": None if pair_slug is None else str(pair_slug),
+        "training_mode": None if training_mode is None else str(training_mode),
+        "completed_episodes": int(completed_episodes),
+        "n_episodes": int(n_episodes),
+        "seed": int(seed),
+        "epsilon_robust_initial": (
+            None if epsilon_robust_initial is None else float(epsilon_robust_initial)
+        ),
+        "epsilon_schedule": None if epsilon_schedule is None else str(epsilon_schedule),
+        "rewards": rewards_history,
+        "episode_rewards": _episode_rewards_from_agent_history(rewards_history),
+        "episode_lengths": [int(length) for length in episode_lengths],
+        "periodic_eval": list(periodic_eval or []),
+        "total_environment_steps": (
+            None if total_environment_steps is None else int(total_environment_steps)
+        ),
+        "gradient_steps": None if gradient_steps is None else int(gradient_steps),
+        "agent_labels": list(agent_labels),
+        "artifact_dir": str(artifact_dir),
+        "status": status or (
+            "complete" if int(completed_episodes) >= int(n_episodes) else "partial"
+        ),
+    }
+    return save_training_stats(path, record)
 
 
 def lbf_config(overrides=None):
@@ -511,6 +583,7 @@ def train_lbf_deep_srq_vectorized(
     print_full_stats=True,
     scenario_key=None,
     scenario_name=None,
+    reward_save_interval=DEFAULT_REWARD_SAVE_INTERVAL,
 ):
     set_global_seed(seed)
     hp = deep_srq_lbf_hyperparams(hyperparameter_overrides)
@@ -546,6 +619,10 @@ def train_lbf_deep_srq_vectorized(
     rewards_history = [[] for _ in range(num_agents)]
     episode_lengths = []
     eval_history = []
+    reward_history_path = run_dir / "training_rewards.json"
+    agent_labels = [
+        f"Agent {agent_id + 1} (DeepSRQ)" for agent_id in range(num_agents)
+    ]
     global_step = 0
     gradient_steps = 0
     best_joint_reward = -float("inf")
@@ -558,6 +635,31 @@ def train_lbf_deep_srq_vectorized(
     episodes_started = 0
     training_start = time.perf_counter()
     slots = []
+
+    def save_reward_snapshot(status=None):
+        return _write_reward_history_snapshot(
+            reward_history_path,
+            environment="lbf_grid",
+            algorithm="DeepSRQ",
+            rewards_history=rewards_history,
+            episode_lengths=episode_lengths,
+            completed_episodes=completed_episodes,
+            n_episodes=n_episodes,
+            seed=seed,
+            agent_labels=agent_labels,
+            artifact_dir=run_dir,
+            scenario_key=scenario_key,
+            scenario_name=scenario_name,
+            pair_label="DeepSRQ self-play",
+            pair_slug=run_name,
+            training_mode="vectorized",
+            epsilon_robust_initial=epsilon_robust_initial,
+            epsilon_schedule=epsilon_schedule,
+            periodic_eval=eval_history,
+            total_environment_steps=global_step,
+            gradient_steps=gradient_steps,
+            status=status,
+        )
 
     print(
         f"LBF DeepSRQ vectorized | players={num_agents} | solver={solver_name} | "
@@ -738,6 +840,9 @@ def train_lbf_deep_srq_vectorized(
                             include_replay_buffer=include_replay_buffer,
                         )
 
+                    if _should_save_reward_snapshot(completed_episodes, reward_save_interval):
+                        save_reward_snapshot()
+
                     if episodes_started < int(n_episodes):
                         slot["done"] = False
                         start_slot(slot)
@@ -759,6 +864,7 @@ def train_lbf_deep_srq_vectorized(
             include_episode_durations=False,
         )
         solver_usage = _solver_usage_summary(getattr(agent, "sre_solver", None))
+        save_reward_snapshot()
         agent.close()
         for slot in slots:
             slot["env"].close()
@@ -806,11 +912,10 @@ def train_lbf_deep_srq_vectorized(
             "final": str(run_dir / "shared_deepsrq_final.pt"),
         },
         "include_replay_buffer": bool(include_replay_buffer),
-        "agent_labels": [
-            f"Agent {agent_id + 1} (DeepSRQ)" for agent_id in range(num_agents)
-        ],
+        "agent_labels": agent_labels,
         "artifact_dir": str(run_dir),
         "stats_path": str(stats_path),
+        "reward_history_path": str(reward_history_path),
         "timing": timing,
         "solver_usage": solver_usage,
     }

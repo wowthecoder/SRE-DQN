@@ -1069,10 +1069,6 @@ def load_deepsrq_path_mcp_pool_policy(
             sre_exploitability_filter_enabled=hp.get(
                 "sre_exploitability_filter_enabled", False
             ),
-            sre_uniform_fallback_enabled=hp.get(
-                "sre_uniform_fallback_enabled",
-                _agent_hp(hp, "sre_uniform_fallback_enabled"),
-            ),
         )
     )
     agent.load_checkpoint(checkpoint, map_location=None if use_gpu else "cpu")

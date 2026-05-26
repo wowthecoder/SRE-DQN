@@ -198,12 +198,9 @@ def test_pommerman_iql_training_accepts_vectorized_envs(monkeypatch, tmp_path):
 def test_pommerman_notebooks_are_valid_json():
     notebook_dir = ROOT / "discrete_action_space" / "pommerman_ffa"
     for name in (
-        "pommerman_baselines.ipynb",
-        "pommerman_sr_algorithms.ipynb",
-        "pommerman_deepsrq_path_tvc_pool_training.ipynb",
-        "pommerman_deepsrq_path_tvc_pool_evaluation.ipynb",
-        "pommerman_sr_adidas_training.ipynb",
-        "pommerman_sr_adidas_evaluation.ipynb",
+        "pommerman_baseline_training.ipynb",
+        "srac_training.ipynb",
+        "pommerman_deepsrq_evaluation.ipynb",
     ):
         data = json.loads((notebook_dir / name).read_text())
         assert data["nbformat"] == 4

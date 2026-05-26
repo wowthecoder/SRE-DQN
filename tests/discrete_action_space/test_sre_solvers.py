@@ -266,7 +266,6 @@ def test_dueling_double_dqn_reuses_greedy_masked_warm_policy_on_path_failure():
             use_gpu=False,
             sre_solver=solver,
             sre_policy_cache_enabled=True,
-            sre_uniform_fallback_enabled=False,
         )
     )
     try:
@@ -274,24 +273,18 @@ def test_dueling_double_dqn_reuses_greedy_masked_warm_policy_on_path_failure():
         q_batch[0, 2, :, :, 0] = 10.0
         q_batch[0, :, 1, :, 1] = 5.0
         q_batch[0, :, :, 0, 2] = 3.0
-        policies = agent._solve_sre_batch_masked(
-            q_batch,
-            [
+        with pytest.raises(RuntimeError, match="Strategic masked SRE solver failed"):
+            agent._solve_sre_batch_masked(
+                q_batch,
                 [
-                    np.array([True, False, True]),
-                    np.array([True, True, False]),
-                    np.array([True, True, False]),
-                ]
-            ],
-        )[0]
-
+                    [
+                        np.array([True, False, True]),
+                        np.array([True, True, False]),
+                        np.array([True, True, False]),
+                    ]
+                ],
+            )
         assert solver.initial_policies_batch is not None
-        assert np.allclose(policies[0], [0.0, 0.0, 1.0])
-        assert np.allclose(policies[1], [0.0, 1.0, 0.0])
-        assert np.allclose(policies[2], [1.0, 0.0, 0.0])
-        summary = agent.get_sre_cache_summary()
-        assert summary["solver_failure_warm_start_reuses"] == 1
-        assert summary["uniform_fallbacks"] == 0
     finally:
         agent.close()
 
@@ -308,7 +301,6 @@ def test_dueling_double_dqn_masked_targets_exclude_illegal_profiles():
             epsilon_robust=0.5,
             use_gpu=False,
             sre_solver=_FakeSolver(),
-            sre_target_value_mode="robust",
         )
     )
     try:
@@ -326,7 +318,7 @@ def test_dueling_double_dqn_masked_targets_exclude_illegal_profiles():
         )
         unmasked = agent._sre_target_values_batch(np.asarray([q_tensor]), [policies])
         assert masked[0, 0] == pytest.approx(10.0)
-        assert unmasked[0, 0] < masked[0, 0]
+        assert unmasked[0, 0] == pytest.approx(masked[0, 0])
     finally:
         agent.close()
 
@@ -457,7 +449,6 @@ def test_dueling_double_dqn_accepts_approximate_sre_candidate():
             sre_solver=_FakeSolver(),
             sre_approx_accept_tol=1e-2,
             sre_exploitability_filter_enabled=True,
-            sre_uniform_fallback_enabled=True,
         )
     )
     try:
@@ -477,49 +468,11 @@ def test_dueling_double_dqn_accepts_approximate_sre_candidate():
         assert np.allclose(policies[0], [0.8, 0.2])
         summary = agent.get_sre_cache_summary()
         assert summary["candidate_returned"] == 1
-        assert summary["uniform_fallbacks"] == 0
     finally:
         agent.close()
 
 
-def test_dueling_double_dqn_rejects_large_gap_sre_candidate():
-    pytest.importorskip("torch")
-    from dueling_double_dqn_sre import DuelingDoubleDqnSreAgent, DuelingDoubleDqnSreAgentConfig
-
-    agent = DuelingDoubleDqnSreAgent(
-        DuelingDoubleDqnSreAgentConfig(
-            obs_dim=4,
-            num_agents=2,
-            num_actions=2,
-            use_gpu=False,
-            sre_solver=_FakeSolver(),
-            sre_approx_accept_tol=1e-2,
-            sre_exploitability_filter_enabled=True,
-            sre_uniform_fallback_enabled=True,
-        )
-    )
-    try:
-        result = SreSolveResult(
-            policies=[
-                np.array([1.0, 0.0], dtype=np.float64),
-                np.array([1.0, 0.0], dtype=np.float64),
-            ],
-            solutions=[],
-            utilities_sr=[],
-            utilities_nominal=[],
-            success=False,
-            metadata={"robust_exploitability": 5e-2},
-        )
-        policies, cacheable = agent._policies_from_sre_result(result)
-        assert cacheable is False
-        assert np.allclose(policies[0], [0.5, 0.5])
-        summary = agent.get_sre_cache_summary()
-        assert summary["uniform_fallbacks"] == 1
-    finally:
-        agent.close()
-
-
-def test_dueling_double_dqn_raises_when_uniform_fallback_disabled():
+def test_dueling_double_dqn_raises_on_large_gap_sre_candidate():
     pytest.importorskip("torch")
     from dueling_double_dqn_sre import DuelingDoubleDqnSreAgent, DuelingDoubleDqnSreAgentConfig
 
@@ -546,16 +499,13 @@ def test_dueling_double_dqn_raises_when_uniform_fallback_disabled():
             success=False,
             metadata={"robust_exploitability": 5e-2},
         )
-        with pytest.raises(RuntimeError, match="uniform fallback is disabled"):
+        with pytest.raises(RuntimeError, match="Rejected approximate SRE candidate"):
             agent._policies_from_sre_result(result)
-        summary = agent.get_sre_cache_summary()
-        assert summary["uniform_fallback_enabled"] is False
-        assert summary["uniform_fallbacks"] == 0
     finally:
         agent.close()
 
 
-def test_dueling_double_dqn_reuses_warm_policy_when_path_returns_no_candidate():
+def test_dueling_double_dqn_raises_on_rejected_sre_candidate():
     pytest.importorskip("torch")
     from dueling_double_dqn_sre import DuelingDoubleDqnSreAgent, DuelingDoubleDqnSreAgentConfig
 
@@ -566,7 +516,39 @@ def test_dueling_double_dqn_reuses_warm_policy_when_path_returns_no_candidate():
             num_actions=2,
             use_gpu=False,
             sre_solver=_FakeSolver(),
-            sre_uniform_fallback_enabled=False,
+            sre_approx_accept_tol=1e-2,
+            sre_exploitability_filter_enabled=True,
+        )
+    )
+    try:
+        result = SreSolveResult(
+            policies=[
+                np.array([1.0, 0.0], dtype=np.float64),
+                np.array([1.0, 0.0], dtype=np.float64),
+            ],
+            solutions=[],
+            utilities_sr=[],
+            utilities_nominal=[],
+            success=False,
+            metadata={"robust_exploitability": 5e-2},
+        )
+        with pytest.raises(RuntimeError, match="Rejected approximate SRE candidate"):
+            agent._policies_from_sre_result(result)
+    finally:
+        agent.close()
+
+
+def test_dueling_double_dqn_raises_when_path_returns_no_candidate():
+    pytest.importorskip("torch")
+    from dueling_double_dqn_sre import DuelingDoubleDqnSreAgent, DuelingDoubleDqnSreAgentConfig
+
+    agent = DuelingDoubleDqnSreAgent(
+        DuelingDoubleDqnSreAgentConfig(
+            obs_dim=4,
+            num_agents=2,
+            num_actions=2,
+            use_gpu=False,
+            sre_solver=_FakeSolver(),
         )
     )
     try:
@@ -586,16 +568,11 @@ def test_dueling_double_dqn_reuses_warm_policy_when_path_returns_no_candidate():
             message="PATH MCP failed to return a candidate.",
             metadata={"path_failed": True, "robust_exploitability": 5e-2},
         )
-        policies, cacheable = agent._policies_from_sre_result(
-            result,
-            warm_policies=warm_policies,
-        )
-        assert cacheable is False
-        assert np.allclose(policies[0], warm_policies[0])
-        assert np.allclose(policies[1], warm_policies[1])
-        summary = agent.get_sre_cache_summary()
-        assert summary["solver_failure_warm_start_reuses"] == 1
-        assert summary["uniform_fallbacks"] == 0
+        with pytest.raises(RuntimeError, match="SRE solver failed"):
+            agent._policies_from_sre_result(
+                result,
+                warm_policies=warm_policies,
+            )
     finally:
         agent.close()
 
@@ -632,7 +609,6 @@ def test_dueling_double_dqn_can_disable_exploitability_filter():
         assert np.allclose(policies[0], [1.0, 0.0])
         summary = agent.get_sre_cache_summary()
         assert summary["candidate_returned"] == 1
-        assert summary["uniform_fallbacks"] == 0
     finally:
         agent.close()
 
@@ -683,56 +659,11 @@ def test_dueling_double_dqn_default_targets_match_tabular_srq_nominal_expectatio
             np.array([1.0, 0.0], dtype=np.float32),
         ]
         nominal = agent._sre_expected_values(q_tensor, policies)
-        robust = agent._sre_robust_values(q_tensor, policies)
         target = agent._sre_target_values_batch([q_tensor], [policies])
         assert nominal[0] == pytest.approx(10.0)
-        assert robust[0] == pytest.approx(5.0)
-        assert robust[1] == pytest.approx(0.0)
         assert target[0, 0] == pytest.approx(nominal[0])
     finally:
         agent.close()
-
-
-def test_dueling_double_dqn_target_value_mode_switches_between_robust_and_nominal():
-    pytest.importorskip("torch")
-    from dueling_double_dqn_sre import DuelingDoubleDqnSreAgent, DuelingDoubleDqnSreAgentConfig
-
-    q_tensor = np.zeros((2, 2, 2), dtype=np.float32)
-    q_tensor[:, :, 0] = np.array([[0.0, 3.0], [1.0, 1.0]], dtype=np.float32)
-    policies = [
-        np.array([0.5, 0.5], dtype=np.float32),
-        np.array([0.5, 0.5], dtype=np.float32),
-    ]
-
-    robust_agent = DuelingDoubleDqnSreAgent(
-        DuelingDoubleDqnSreAgentConfig(
-            obs_dim=4,
-            num_agents=2,
-            num_actions=2,
-            epsilon_robust=0.5,
-            use_gpu=False,
-            sre_solver=_FakeSolver(),
-            sre_target_value_mode="robust",
-        )
-    )
-    nominal_agent = DuelingDoubleDqnSreAgent(
-        DuelingDoubleDqnSreAgentConfig(
-            obs_dim=4,
-            num_agents=2,
-            num_actions=2,
-            epsilon_robust=0.5,
-            use_gpu=False,
-            sre_solver=_FakeSolver(),
-            sre_target_value_mode="nominal",
-        )
-    )
-    try:
-        robust = robust_agent._sre_target_values_batch([q_tensor], [policies])
-        nominal = nominal_agent._sre_target_values_batch([q_tensor], [policies])
-        assert robust[0, 0] != pytest.approx(nominal[0, 0])
-    finally:
-        robust_agent.close()
-        nominal_agent.close()
 
 
 def test_dueling_double_dqn_skips_sre_solves_for_terminal_targets():

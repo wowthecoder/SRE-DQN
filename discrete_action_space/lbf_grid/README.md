@@ -206,8 +206,6 @@ hyperparameters
     sre_solver_exploitability_tol
     sre_approx_accept_tol
     sre_solver_early_exit
-    sre_uniform_fallback_enabled
-    sre_target_value_mode
   path_mcp
     pathwrap_path
     random_seed
@@ -385,9 +383,7 @@ timing
 	      hit_rate
 	      path_solves_avoided
 	      evictions
-	      uniform_fallbacks
 	      candidate_returned
-	      solver_failure_warm_start_reuses
 	      cache_round_digits
 	      state_round_digits
 	      approx_exploitability_tol
@@ -395,8 +391,6 @@ timing
 	      solver_approx_accept_tol
 	      candidate_selection
 	      exploitability_filter_enabled
-	      target_value_mode
-	      uniform_fallback_enabled
 	      target_equilibrium_update_steps
 	    update_time
 	      count
