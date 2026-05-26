@@ -27,3 +27,6 @@ relevant_papers/
 
 **/training_stats.txt
 **/training_stats.json
+*.pth
+*.ckpt
+*.pt
