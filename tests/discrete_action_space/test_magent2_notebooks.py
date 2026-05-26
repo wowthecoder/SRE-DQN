@@ -132,6 +132,6 @@ def test_magent2_task_smoke_when_installed():
     pytest.importorskip("magent2")
     from mean_field_dsrq.benchmarl_magent2 import make_magent_task
 
-    task = make_magent_task({"map_size": 8, "max_cycles": 5})
-    assert task.name == "ADVERSARIAL_PURSUIT"
-    assert task.config["map_size"] == 8
+    task = make_magent_task({"map_size": 40, "max_cycles": 5})
+    assert task.name == "BATTLE"
+    assert task.config["map_size"] == 40

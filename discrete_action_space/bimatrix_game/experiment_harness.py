@@ -171,7 +171,7 @@ class _DeepSrqAgentAdapter:
         )
 
     def act(self, state, policies=None):
-        return int(self.agent.act(state, agent_id=self.agent_id))
+        return int(self.agent.act_joint(state)[self.agent_id])
 
     def update(self, state, actions, rewards, next_state, done=False, next_policies=None):
         if not self.owns_training:
@@ -549,7 +549,7 @@ def train_pairing(
     stats["artifact_dir"] = str(run_dir)
     stats["stats_path"] = str(stats_path)
     stats["total_environment_steps"] = int(total_environment_steps)
-    save_training_stats(stats_path, stats)
+    save_training_stats(stats_path, stats, drop_reward_histories=True)
     print(f"Saved stats to {stats_path}")
     title = f"{stats['scenario_name']} - {stats['pair_label']} - {run_slug}"
     if print_full_stats:

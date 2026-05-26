@@ -308,6 +308,6 @@ def test_dueling_double_dqn_supports_three_agents_with_fake_solver():
             __import__("torch").zeros((4, 5), dtype=__import__("torch").float32)
         )
         assert tuple(q.shape) == (4, 2, 2, 2, 3)
-        assert agent.act(np.zeros(5, dtype=np.float32), agent_id=0) == 0
+        assert agent.act_joint(np.zeros(5, dtype=np.float32))[0] == 0
     finally:
         agent.close()

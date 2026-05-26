@@ -21,7 +21,6 @@ from sre_solvers import (
     robust_exploitability,
     robust_policy_values,
 )
-from sre_solvers.nfg_transformer.torch_utils import robust_policy_values_torch
 
 
 def _linear_schedule(start, end, step, total_steps):
@@ -167,7 +166,7 @@ class DuelingDoubleDqnSreAgentConfig:
     # Whether approximate candidates are filtered by exploitability.
     sre_exploitability_filter_enabled: bool = False
     # Value mode used when computing SRE Bellman targets.
-    sre_target_value_mode: str = "robust"
+    sre_target_value_mode: str = "nominal"
     # Whether to fall back to uniform policies when SRE solving fails.
     sre_uniform_fallback_enabled: bool = False
     # Whether masked single-action players are fixed outside the PATH game.
@@ -451,7 +450,6 @@ class DuelingDoubleDqnSreAgent:
         return {
             "enabled": bool(self._sre_policy_cache_active()),
             "config_enabled": bool(self.config.sre_policy_cache_enabled),
-            "disabled_by_solver": bool(self._sre_solver_bypasses_policy_cache()),
             "approx_enabled": bool(self.config.sre_approx_cache_enabled),
             "entries": int(len(self._sre_policy_cache)),
             "max_entries": int(self.config.sre_policy_cache_size),
@@ -479,26 +477,8 @@ class DuelingDoubleDqnSreAgent:
             "target_equilibrium_update_steps": int(self.config.target_equilibrium_update_steps),
         }
 
-    def _sre_solver_bypasses_policy_cache(self):
-        return bool(getattr(self.sre_solver, "bypass_deep_srq_policy_cache", False))
-
-    def _sre_solver_supports_torch_action_solve(self):
-        return bool(
-            self._sre_solver_bypasses_policy_cache()
-            and hasattr(self.sre_solver, "solve_batch_torch")
-        )
-
-    def _sre_solver_supports_torch_policy_solve(self):
-        return bool(
-            self._sre_solver_bypasses_policy_cache()
-            and hasattr(self.sre_solver, "solve_policy_batch_torch")
-        )
-
     def _sre_policy_cache_active(self):
-        return bool(
-            self.config.sre_policy_cache_enabled
-            and not self._sre_solver_bypasses_policy_cache()
-        )
+        return bool(self.config.sre_policy_cache_enabled)
 
     def _state_to_vector(self, state):
         vector = np.asarray(state, dtype=np.float32).reshape(-1)
@@ -756,12 +736,8 @@ class DuelingDoubleDqnSreAgent:
             np.round(q_tensor, int(self.config.sre_policy_cache_round_digits)),
             dtype=np.float32,
         )
-        solver_name = getattr(self.sre_solver, "name", type(self.sre_solver).__name__)
         return (
-            solver_name,
             round(float(self.config.epsilon_robust), 6),
-            int(self.config.sre_num_repeats),
-            bool(self.config.sre_include_pure_starts),
             q_key.tobytes(),
         )
 
@@ -968,42 +944,6 @@ class DuelingDoubleDqnSreAgent:
                         removed = True
                 if not removed:
                     raise
-
-    def _call_sre_solver_batch_torch(self, q_tensors, *, initial_policies_batch=None):
-        kwargs = {
-            "epsilon": self.config.epsilon_robust,
-            "num_repeats": self.config.sre_num_repeats,
-            "include_pure_starts": self.config.sre_include_pure_starts,
-            "exploitability_tol": self.config.sre_solver_exploitability_tol,
-            "early_exit": self.config.sre_solver_early_exit,
-            "candidate_selection": self.config.sre_candidate_selection,
-        }
-        if initial_policies_batch is not None:
-            kwargs["initial_policies_batch"] = initial_policies_batch
-        while True:
-            try:
-                return self.sre_solver.solve_batch_torch(q_tensors, **kwargs)
-            except TypeError as exc:
-                message = str(exc)
-                removed = False
-                for key in (
-                    "initial_policies_batch",
-                    "exploitability_tol",
-                    "early_exit",
-                    "include_pure_starts",
-                    "candidate_selection",
-                ):
-                    if key in kwargs and key in message:
-                        kwargs.pop(key, None)
-                        removed = True
-                if not removed:
-                    raise
-
-    def _call_sre_solver_policy_batch_torch(self, q_tensors):
-        return self.sre_solver.solve_policy_batch_torch(
-            q_tensors,
-            self.config.epsilon_robust,
-        )
 
     def _policies_from_sre_result(self, result, *, warm_policies=None):
         if result is None:
@@ -1236,9 +1176,7 @@ class DuelingDoubleDqnSreAgent:
 
         solve_start = time.perf_counter()
         try:
-            if q_tensors_torch is not None and hasattr(self.sre_solver, "solve_batch_torch"):
-                results = self._call_sre_solver_batch_torch(pending_q_tensors)
-            elif hasattr(self.sre_solver, "solve_batch"):
+            if hasattr(self.sre_solver, "solve_batch"):
                 pending_for_solver = (
                     pending_q_tensors.detach().cpu().numpy().astype(np.float32, copy=False)
                     if q_tensors_torch is not None
@@ -1589,12 +1527,7 @@ class DuelingDoubleDqnSreAgent:
         if pending_q_tensors:
             solve_start = time.perf_counter()
             try:
-                if q_tensors_torch is not None and hasattr(self.sre_solver, "solve_batch_torch"):
-                    results = self._call_sre_solver_batch_torch(
-                        torch.stack(pending_q_tensors, dim=0),
-                        initial_policies_batch=pending_warm_policies,
-                    )
-                elif hasattr(self.sre_solver, "solve_batch"):
+                if hasattr(self.sre_solver, "solve_batch"):
                     pending_for_solver = (
                         [
                             q_tensor.detach().cpu().numpy().astype(np.float32, copy=False)
@@ -1733,50 +1666,6 @@ class DuelingDoubleDqnSreAgent:
                 )
         return np.stack(values, axis=0).astype(np.float32)
 
-    def act(self, state, agent_id=None, action_masks=None):
-        if agent_id is None:
-            agent_id = self.config.agent_id
-        if not 0 <= agent_id < self.config.num_agents:
-            raise ValueError(f"Expected agent_id in [0, {self.config.num_agents}), got {agent_id}.")
-        masks = None
-        if action_masks is not None:
-            masks_arr = np.asarray(action_masks, dtype=bool)
-            if masks_arr.ndim == 1:
-                masks = [np.ones(self.config.num_actions, dtype=bool) for _ in range(self.config.num_agents)]
-                masks[agent_id] = masks_arr.reshape(-1)
-                masks = self._normalize_action_masks(masks)
-            else:
-                masks = self._normalize_action_masks(action_masks)
-
-        if np.random.rand() < self.config.epsilon_explore:
-            return self._sample_action_with_mask(None if masks is None else masks[agent_id])
-
-        state_vec = self._state_to_vector(state)
-        state_t = torch.as_tensor(
-            state_vec, dtype=torch.float32, device=self.device
-        ).unsqueeze(0)
-
-        with torch.no_grad():
-            q_batch = self.q_net(state_t).detach()
-
-        if masks is not None:
-            policies = self._solve_sre_batch_masked(q_batch, [masks])[0]
-        elif self._sre_solver_supports_torch_policy_solve():
-            solve_start = time.perf_counter()
-            policy_tensors = self._call_sre_solver_policy_batch_torch(q_batch)
-            self._record_sre_solve_time(time.perf_counter() - solve_start, count=1)
-            policies = [
-                policy[0].detach().cpu().numpy().astype(np.float32, copy=True)
-                for policy in policy_tensors
-            ]
-        elif self._sre_solver_supports_torch_action_solve():
-            policies = self._solve_sre_batch_uncached(q_batch)[0]
-        else:
-            q_tensor = q_batch.squeeze(0).detach().cpu().numpy()
-            policies = self._solve_sre(q_tensor, state_key=self._sre_state_key(state_vec))
-        my_policy = self._normalize_policy(policies[agent_id])
-        return int(np.random.choice(self.config.num_actions, p=my_policy))
-
     def act_joint(self, state, action_masks=None):
         """Sample one joint action, solving the SRE policy profile at most once."""
         state_vec = self._state_to_vector(state)
@@ -1801,16 +1690,6 @@ class DuelingDoubleDqnSreAgent:
 
         if action_masks is not None:
             policies = self._solve_sre_batch_masked(q_batch, [action_masks])[0]
-        elif self._sre_solver_supports_torch_policy_solve():
-            solve_start = time.perf_counter()
-            policy_tensors = self._call_sre_solver_policy_batch_torch(q_batch)
-            self._record_sre_solve_time(time.perf_counter() - solve_start, count=1)
-            policies = [
-                policy[0].detach().cpu().numpy().astype(np.float32, copy=True)
-                for policy in policy_tensors
-            ]
-        elif self._sre_solver_supports_torch_action_solve():
-            policies = self._solve_sre_batch_uncached(q_batch)[0]
         else:
             q_tensor = q_batch.squeeze(0).detach().cpu().numpy()
             policies = self._solve_sre(
@@ -1863,27 +1742,6 @@ class DuelingDoubleDqnSreAgent:
             has_masks = any(masks is not None for masks in pending_masks)
             if has_masks:
                 policies_batch = self._solve_sre_batch_masked(q_batch, pending_masks)
-            elif self._sre_solver_supports_torch_policy_solve():
-                solve_start = time.perf_counter()
-                policy_tensors = self._call_sre_solver_policy_batch_torch(q_batch)
-                self._record_sre_solve_time(
-                    time.perf_counter() - solve_start,
-                    count=int(pending_indices.size),
-                )
-                policies_batch = []
-                for local_idx in range(int(pending_indices.size)):
-                    policies_batch.append(
-                        [
-                            policy[local_idx]
-                            .detach()
-                            .cpu()
-                            .numpy()
-                            .astype(np.float32, copy=True)
-                            for policy in policy_tensors
-                        ]
-                    )
-            elif self._sre_solver_supports_torch_action_solve():
-                policies_batch = self._solve_sre_batch_uncached(q_batch)
             else:
                 policies_batch = self._solve_sre_batch(
                     q_batch,
@@ -2014,60 +1872,36 @@ class DuelingDoubleDqnSreAgent:
                     next_action_masks_batch[int(index)] for index in nonterminal_indices
                 ]
                 has_next_masks = any(masks is not None for masks in next_masks_nonterminal)
-                if (
-                    not has_next_masks
-                    and
-                    self._sre_solver_supports_torch_policy_solve()
-                    and str(self.config.sre_target_value_mode).lower() == "robust"
-                ):
-                    solve_start = time.perf_counter()
-                    policy_tensors = self._call_sre_solver_policy_batch_torch(
-                        next_online[nonterminal_t]
+                next_target = next_target_t.detach().cpu().numpy()
+                if has_next_masks:
+                    policies_batch = self._solve_sre_batch_masked(
+                        next_online[nonterminal_t],
+                        next_masks_nonterminal,
+                        states=next_states_arr[nonterminal_indices],
+                        allow_solver=refresh_target_equilibria,
+                        allow_cache_reuse=not refresh_target_equilibria,
                     )
-                    self._record_sre_solve_time(
-                        time.perf_counter() - solve_start,
-                        count=int(nonterminal_indices.size),
+                    target_values_np = self._sre_target_values_batch_masked(
+                        next_target[nonterminal_indices],
+                        policies_batch,
+                        next_masks_nonterminal,
                     )
-                    policy_device = policy_tensors[0].device
-                    value_tensors = robust_policy_values_torch(
-                        next_target_t[nonterminal_t].to(policy_device),
-                        policy_tensors,
-                        self.config.epsilon_robust,
-                    )
-                    next_values_t[nonterminal_t] = torch.stack(
-                        value_tensors, dim=-1
-                    ).to(device=self.device, dtype=torch.float32)
                 else:
-                    next_target = next_target_t.detach().cpu().numpy()
-                    if has_next_masks:
-                        policies_batch = self._solve_sre_batch_masked(
-                            next_online[nonterminal_t],
-                            next_masks_nonterminal,
-                            states=next_states_arr[nonterminal_indices],
-                            allow_solver=refresh_target_equilibria,
-                            allow_cache_reuse=not refresh_target_equilibria,
-                        )
-                        target_values_np = self._sre_target_values_batch_masked(
-                            next_target[nonterminal_indices],
-                            policies_batch,
-                            next_masks_nonterminal,
-                        )
-                    else:
-                        policies_batch = self._solve_sre_batch(
-                            next_online[nonterminal_t],
-                            states=next_states_arr[nonterminal_indices],
-                            allow_solver=refresh_target_equilibria,
-                            allow_cache_reuse=not refresh_target_equilibria,
-                        )
-                        target_values_np = self._sre_target_values_batch(
-                            next_target[nonterminal_indices],
-                            policies_batch,
-                        )
-                    next_values_t[nonterminal_t] = torch.as_tensor(
-                        target_values_np,
-                        device=self.device,
-                        dtype=torch.float32,
+                    policies_batch = self._solve_sre_batch(
+                        next_online[nonterminal_t],
+                        states=next_states_arr[nonterminal_indices],
+                        allow_solver=refresh_target_equilibria,
+                        allow_cache_reuse=not refresh_target_equilibria,
                     )
+                    target_values_np = self._sre_target_values_batch(
+                        next_target[nonterminal_indices],
+                        policies_batch,
+                    )
+                next_values_t[nonterminal_t] = torch.as_tensor(
+                    target_values_np,
+                    device=self.device,
+                    dtype=torch.float32,
+                )
             target_q = rewards_t + (1.0 - dones_t) * self.config.gamma * next_values_t
 
         loss = self.loss_fn(current_q, target_q)

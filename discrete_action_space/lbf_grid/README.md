@@ -130,8 +130,8 @@ discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/training/manifest_e
 ```
 
 The manifest stores `algorithm`, `solver_name`, `sre_solver_workers`,
-`epsilon`, and a `results` map keyed by scenario. Each result is the full
-per-scenario `training_stats.json` payload.
+`epsilon`, and a `results` map keyed by scenario. The persisted payloads are
+compact: per-episode reward histories are replaced by summary statistics.
 
 The full top-level stats payload persisted in `training_stats.json` contains:
 
@@ -142,7 +142,7 @@ scenario_name
 pairing
 pair_label
 pair_slug
-rewards
+reward_summary
 n_episodes
 seed
 solver_name
@@ -155,7 +155,6 @@ num_actions
 obs_dim
 total_environment_steps
 gradient_steps
-episode_lengths
 best_loss
 latest_loss
 periodic_eval
@@ -169,7 +168,6 @@ artifact_dir
 stats_path
 timing
 solver_usage
-nfg_transformer_usage
 algorithm
 gym_id
 time_limit
@@ -218,11 +216,6 @@ hyperparameters
     max_workers
     start_method
     random_seed
-  nfg_transformer
-    checkpoint_path
-    device
-    fallback_enabled
-    accept_exploitability_tol
   logit_qre
     precision_max
     precision_growth
@@ -382,7 +375,6 @@ timing
     sre_policy_cache
       enabled
       config_enabled
-      disabled_by_solver
       approx_enabled
       entries
       max_entries
@@ -437,18 +429,6 @@ solver_usage
     max_microseconds
     std_microseconds
 
-nfg_transformer_usage
-  solve_time
-    count
-    mean_seconds
-    min_seconds
-    max_seconds
-    std_seconds
-    mean_microseconds
-    min_microseconds
-    max_microseconds
-    std_microseconds
-
 training_reward_plot_paths
   agent_<n>
   combined
@@ -456,21 +436,15 @@ training_reward_plot_paths
 
 The recorded training metrics are:
 
-- Reward metrics: `rewards` is one reward series per agent; `episode_lengths`
-  stores environment steps per episode; `total_environment_steps` stores the
-  total number of environment transitions; `best_joint_reward` stores the best
-  training joint reward when no periodic eval checkpoint has taken over.
+- Reward metrics: `reward_summary` stores per-agent and joint summary
+  statistics; `total_environment_steps` stores the total number of environment
+  transitions; `best_joint_reward` stores the best training joint reward when
+  no periodic eval checkpoint has taken over.
 - Optimisation metrics: `gradient_steps`, `best_loss`, and `latest_loss`.
 - Periodic evaluation metrics: `periodic_eval` stores one record per evaluation
-  point when `eval_interval` is enabled. Each record contains
-  `episode_rewards`, `joint_rewards`, `episode_lengths`, `mean_joint_reward`,
-  `episode`, `global_step`, and `gradient_step`.
-- LBF diagnostics: each periodic eval record also stores `episode_metrics` and
-  `metric_totals`. These include agent starting coordinates, starting food
-  coordinates and levels, episode length, total foods collected, foods
-  collected per agent, per-agent lists of collected foods with coordinates and
-  level, empty-load totals and per-agent counts, and invalid-load totals and
-  per-agent counts.
+  point when `eval_interval` is enabled. Each record contains compact
+  `mean_agent_rewards`, `mean_joint_reward`, `n_eval_episodes`, `episode`,
+  `global_step`, and `gradient_step`.
 - Checkpoint metrics: `best_eval_joint_reward`, `best_checkpoint_source`, and
   `checkpoint_paths.best` / `checkpoint_paths.final`.
 - Timing metrics: `timing.wall_clock_seconds`, `timing.episode_time`,
@@ -486,8 +460,7 @@ The recorded training metrics are:
   `exact_hits`, `approx_hits`, `misses`, `path_solves_avoided`,
   `evictions`, and `hit_rate`.
 - Solver metrics: `solver_usage.solve_time` records backend solve duration
-  summaries. `nfg_transformer_usage` is populated with the same object for
-  compatibility with neural-solver notebooks, even in the PATH pool run.
+  summaries.
 
 `training_summary.txt` persists the most useful headline values:
 `scenario`, `algorithm`, `epsilon`, `episodes`, `best_loss`, `latest_loss`,

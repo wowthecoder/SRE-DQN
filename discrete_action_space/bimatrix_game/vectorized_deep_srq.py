@@ -263,7 +263,7 @@ def train_vectorized_deep_srq_experiment(
     if write_plots:
         plot_training_stats(stats, out_path=plot_path)
         stats["plot_path"] = str(plot_path)
-    save_training_stats(stats_path, stats)
+    save_training_stats(stats_path, stats, drop_reward_histories=True)
     title = f"{stats['scenario_name']} - vectorized DeepSRQ"
     if print_full_stats:
         print_stats_payload(stats, title)

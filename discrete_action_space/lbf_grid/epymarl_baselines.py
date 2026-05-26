@@ -52,80 +52,6 @@ def _epymarl_model_token(scenario_key: str, seed: int, algorithm: str) -> str:
     return f"{scenario_key}/{int(seed)}/{str(algorithm).lower()}"
 
 
-def _load_episode_metrics(metrics_dir: str | Path) -> list[dict]:
-    metrics_dir = Path(metrics_dir)
-    if not metrics_dir.exists():
-        return []
-
-    records = []
-    sequence = 0
-    for path in sorted(metrics_dir.glob("*.jsonl")):
-        with path.open(encoding="utf-8") as handle:
-            for line in handle:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    payload = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                payload["_source_file"] = path.name
-                payload["_sequence"] = sequence
-                sequence += 1
-                records.append(payload)
-    return sorted(
-        records,
-        key=lambda item: (
-            str(item.get("phase", "")),
-            int(item.get("episode_index", 0)),
-            int(item.get("pid", 0)),
-            int(item.get("_sequence", 0)),
-        ),
-    )
-
-
-def _episode_metric_totals(records: list[dict]) -> dict:
-    num_agents = 0
-    for record in records:
-        for key in (
-            "foods_collected_per_agent",
-            "empty_loads_per_agent",
-            "invalid_loads_per_agent",
-        ):
-            values = record.get(key)
-            if isinstance(values, dict):
-                for agent_key in values:
-                    try:
-                        num_agents = max(num_agents, int(str(agent_key).split("_")[-1]) + 1)
-                    except ValueError:
-                        pass
-
-    per_agent = lambda: {f"agent_{idx}": 0 for idx in range(num_agents)}
-    totals = {
-        "episode_count": len(records),
-        "episode_lengths": [int(record.get("episode_length", 0)) for record in records],
-        "foods_collected_total": 0,
-        "foods_collected_per_agent": per_agent(),
-        "empty_loads_total": 0,
-        "empty_loads_per_agent": per_agent(),
-        "invalid_loads_total": 0,
-        "invalid_loads_per_agent": per_agent(),
-    }
-
-    for record in records:
-        totals["foods_collected_total"] += int(record.get("foods_collected_total", 0))
-        totals["empty_loads_total"] += int(record.get("empty_loads_total", 0))
-        totals["invalid_loads_total"] += int(record.get("invalid_loads_total", 0))
-        for src_key, dst_key in (
-            ("foods_collected_per_agent", "foods_collected_per_agent"),
-            ("empty_loads_per_agent", "empty_loads_per_agent"),
-            ("invalid_loads_per_agent", "invalid_loads_per_agent"),
-        ):
-            for agent, value in (record.get(src_key) or {}).items():
-                totals[dst_key][agent] = totals[dst_key].get(agent, 0) + int(value)
-    return totals
-
-
 def _normalize_config_overrides(config_overrides):
     if isinstance(config_overrides, tuple) and len(config_overrides) == 1:
         config_overrides = config_overrides[0]
@@ -443,13 +369,6 @@ def run_epymarl_baseline(
     )
     if model_root.exists():
         shutil.rmtree(model_root)
-    metrics_dir = run_dir / "episode_metrics" / "training"
-    metrics_dir.mkdir(parents=True, exist_ok=True)
-    for path in metrics_dir.glob("*.jsonl"):
-        path.unlink()
-    env["SREDQN_LBF_METRICS_DIR"] = str(metrics_dir)
-    env["SREDQN_LBF_METRICS_RUN_ID"] = f"{scenario.key}_{algorithm}_seed{int(seed)}"
-    env["SREDQN_LBF_METRICS_PHASE"] = "training"
     t_max = n_frames_for_episodes(scenario_key, n_episodes)
     sacred_base = epymarl_root / "results" / "sacred" / algorithm / scenario.gym_id
 
@@ -550,13 +469,6 @@ def run_epymarl_baseline(
         }
         curves = {}
 
-    episode_metrics = _load_episode_metrics(metrics_dir)
-    episode_metrics_path = run_dir / "training_episode_metrics.json"
-    episode_metrics_path.write_text(json.dumps(_json_safe(episode_metrics), indent=2))
-    reward_stats["episode_metrics"] = episode_metrics
-    reward_stats["episode_metric_totals"] = _episode_metric_totals(episode_metrics)
-    reward_stats["episode_metrics_path"] = str(episode_metrics_path)
-
     reward_stats_path.write_text(json.dumps(_json_safe(reward_stats), indent=2))
     reward_max_curve_path = _save_reward_curve(
         curves,
@@ -579,7 +491,6 @@ def run_epymarl_baseline(
         "reward_max_curve_path": None
         if reward_max_curve_path is None
         else str(reward_max_curve_path),
-        "episode_metrics_path": str(episode_metrics_path),
         "model_root": str(model_root),
         "sacred_metrics_path": sacred_metrics_path,
     }

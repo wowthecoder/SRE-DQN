@@ -141,7 +141,7 @@ def test_dueling_double_dqn_uses_injected_solver_policy():
         )
     )
     try:
-        action = agent.act(np.zeros(4, dtype=np.float32), agent_id=0)
+        action = agent.act_joint(np.zeros(4, dtype=np.float32))[0]
         assert action == 0
         assert solver.calls == 1
     finally:
@@ -308,6 +308,7 @@ def test_dueling_double_dqn_masked_targets_exclude_illegal_profiles():
             epsilon_robust=0.5,
             use_gpu=False,
             sre_solver=_FakeSolver(),
+            sre_target_value_mode="robust",
         )
     )
     try:
@@ -330,7 +331,7 @@ def test_dueling_double_dqn_masked_targets_exclude_illegal_profiles():
         agent.close()
 
 
-def test_sre_batch_key_separates_solver_names():
+def test_sre_batch_key_depends_only_on_epsilon_and_q_bytes():
     pytest.importorskip("torch")
     from dueling_double_dqn_sre import DuelingDoubleDqnSreAgent, DuelingDoubleDqnSreAgentConfig
 
@@ -350,7 +351,14 @@ def test_sre_batch_key_separates_solver_names():
         key_a = agent._sre_batch_key(q_tensor)
         solver.name = "solver_b"
         key_b = agent._sre_batch_key(q_tensor)
-        assert key_a != key_b
+        agent.config.sre_num_repeats += 1
+        agent.config.sre_include_pure_starts = not agent.config.sre_include_pure_starts
+        key_c = agent._sre_batch_key(q_tensor)
+        agent.config.epsilon_robust += 0.1
+        key_d = agent._sre_batch_key(q_tensor)
+
+        assert key_a == key_b == key_c
+        assert key_d != key_a
     finally:
         agent.close()
 
@@ -375,8 +383,8 @@ def test_dueling_double_dqn_reuses_policy_cache_for_repeated_state():
     )
     try:
         state = np.zeros(4, dtype=np.float32)
-        assert agent.act(state, agent_id=0) == 0
-        assert agent.act(state, agent_id=0) == 0
+        assert agent.act_joint(state)[0] == 0
+        assert agent.act_joint(state)[0] == 0
         summary = agent.get_sre_cache_summary()
         assert solver.calls == 1
         assert summary["misses"] == 1
@@ -648,7 +656,7 @@ def test_nplayer_path_candidate_selection_can_prefer_joint_welfare():
     assert by_welfare[0]["joint_nominal_welfare"] == pytest.approx(10.0)
 
 
-def test_dueling_double_dqn_robust_values_are_used_for_targets():
+def test_dueling_double_dqn_default_targets_match_tabular_srq_nominal_expectation():
     pytest.importorskip("torch")
     from dueling_double_dqn_sre import DuelingDoubleDqnSreAgent, DuelingDoubleDqnSreAgentConfig
 
@@ -676,9 +684,11 @@ def test_dueling_double_dqn_robust_values_are_used_for_targets():
         ]
         nominal = agent._sre_expected_values(q_tensor, policies)
         robust = agent._sre_robust_values(q_tensor, policies)
+        target = agent._sre_target_values_batch([q_tensor], [policies])
         assert nominal[0] == pytest.approx(10.0)
         assert robust[0] == pytest.approx(5.0)
         assert robust[1] == pytest.approx(0.0)
+        assert target[0, 0] == pytest.approx(nominal[0])
     finally:
         agent.close()
 
@@ -853,570 +863,19 @@ def test_target_equilibrium_frequency_reuses_cache_between_refreshes():
         agent.close()
 
 
-def test_nfg_style_solver_bypasses_deep_srq_policy_cache_keying():
-    torch = pytest.importorskip("torch")
-    from dueling_double_dqn_sre import DuelingDoubleDqnSreAgent, DuelingDoubleDqnSreAgentConfig
-
-    class FakeTorchBatchSolver:
-        name = "nfg_transformer_sre"
-        bypass_deep_srq_policy_cache = True
-
-        def __init__(self):
-            self.batch_calls = 0
-
-        def solve_batch_torch(
-            self,
-            q_tensors,
-            epsilon,
-            *,
-            num_repeats=20,
-            include_pure_starts=True,
-            initial_policies_batch=None,
-            exploitability_tol=1e-4,
-            early_exit=True,
-        ):
-            del epsilon, num_repeats, include_pure_starts, initial_policies_batch
-            del exploitability_tol, early_exit
-            self.batch_calls += 1
-            assert isinstance(q_tensors, torch.Tensor)
-            return [
-                SreSolveResult(
-                    policies=[
-                        np.array([1.0, 0.0], dtype=np.float64),
-                        np.array([0.0, 1.0], dtype=np.float64),
-                    ],
-                    solutions=[],
-                    utilities_sr=[],
-                    utilities_nominal=[],
-                    success=True,
-                )
-                for _ in range(q_tensors.shape[0])
-            ]
-
-        def close(self):
-            pass
-
-    solver = FakeTorchBatchSolver()
-    agent = DuelingDoubleDqnSreAgent(
-        DuelingDoubleDqnSreAgentConfig(
-            obs_dim=4,
-            num_agents=2,
-            num_actions=2,
-            use_gpu=False,
-            sre_solver=solver,
-        )
-    )
-    try:
-        agent._sre_batch_key = lambda q_tensor: (_ for _ in ()).throw(
-            AssertionError("cache keying should be bypassed")
-        )
-        q_batch = torch.zeros((3, 2, 2, 2), dtype=torch.float32)
-        policies = agent._solve_sre_batch(q_batch, allow_solver=False)
-        summary = agent.get_sre_cache_summary()
-        assert solver.batch_calls == 1
-        assert len(policies) == 3
-        assert summary["enabled"] is False
-        assert summary["disabled_by_solver"] is True
-        assert summary["misses"] == 0
-    finally:
-        agent.close()
-
-
-def test_replay_target_uses_vectorized_torch_batch_for_cache_bypass_solver():
-    torch = pytest.importorskip("torch")
-    from dueling_double_dqn_sre import DuelingDoubleDqnSreAgent, DuelingDoubleDqnSreAgentConfig
-
-    class FakeTorchTargetSolver:
-        name = "nfg_transformer_sre"
-        bypass_deep_srq_policy_cache = True
-        trust_approximate_policies = True
-
-        def __init__(self):
-            self.batch_calls = 0
-            self.batch_shapes = []
-            self.solve_calls = 0
-
-        def solve(self, *args, **kwargs):
-            del args, kwargs
-            self.solve_calls += 1
-            raise AssertionError("replay target should use solve_batch_torch")
-
-        def solve_batch_torch(
-            self,
-            q_tensors,
-            epsilon,
-            *,
-            num_repeats=20,
-            include_pure_starts=True,
-            initial_policies_batch=None,
-            exploitability_tol=1e-4,
-            early_exit=True,
-        ):
-            del epsilon, num_repeats, include_pure_starts, initial_policies_batch
-            del exploitability_tol, early_exit
-            self.batch_calls += 1
-            assert isinstance(q_tensors, torch.Tensor)
-            self.batch_shapes.append(tuple(q_tensors.shape))
-            return [
-                SreSolveResult(
-                    policies=[
-                        np.array([1.0, 0.0], dtype=np.float64),
-                        np.array([0.0, 1.0], dtype=np.float64),
-                    ],
-                    solutions=[],
-                    utilities_sr=[],
-                    utilities_nominal=[],
-                    success=False,
-                )
-                for _ in range(q_tensors.shape[0])
-            ]
-
-        def close(self):
-            pass
-
-    solver = FakeTorchTargetSolver()
-    agent = DuelingDoubleDqnSreAgent(
-        DuelingDoubleDqnSreAgentConfig(
-            obs_dim=4,
-            num_agents=2,
-            num_actions=2,
-            epsilon_explore=0.0,
-            learning_starts=3,
-            train_every=1,
-            target_equilibrium_update_steps=1,
-            use_gpu=False,
-            sre_solver=solver,
-            sre_policy_cache_enabled=True,
-            sre_uniform_fallback_enabled=False,
-        )
-    )
-    try:
-        for index in range(3):
-            state = np.full(4, index, dtype=np.float32)
-            next_state = np.full(4, index + 1, dtype=np.float32)
-            agent.replay_buffer.push(
-                state,
-                np.array([0, 1], dtype=np.int64),
-                np.array([1.0, 0.0], dtype=np.float32),
-                next_state,
-                False,
-            )
-
-        loss = agent.train_step(batch_size=3)
-
-        assert loss is not None
-        assert solver.batch_calls == 1
-        assert solver.batch_shapes == [(3, 2, 2, 2)]
-        assert solver.solve_calls == 0
-    finally:
-        agent.close()
-
-
-def test_replay_target_uses_direct_torch_policy_path_for_nfg_solver():
-    torch = pytest.importorskip("torch")
-    from dueling_double_dqn_sre import DuelingDoubleDqnSreAgent, DuelingDoubleDqnSreAgentConfig
-
-    class FakeDirectTorchPolicySolver:
-        name = "nfg_transformer_sre"
-        bypass_deep_srq_policy_cache = True
-        trust_approximate_policies = True
-
-        def __init__(self):
-            self.policy_calls = 0
-            self.batch_calls = 0
-            self.policy_shapes = []
-
-        def solve_policy_batch_torch(self, q_tensors, epsilon):
-            del epsilon
-            self.policy_calls += 1
-            assert isinstance(q_tensors, torch.Tensor)
-            self.policy_shapes.append(tuple(q_tensors.shape))
-            batch_size = int(q_tensors.shape[0])
-            return [
-                torch.tensor([[1.0, 0.0]], dtype=torch.float32).expand(batch_size, -1),
-                torch.tensor([[0.0, 1.0]], dtype=torch.float32).expand(batch_size, -1),
-            ]
-
-        def solve_batch_torch(self, *args, **kwargs):
-            del args, kwargs
-            self.batch_calls += 1
-            raise AssertionError("direct policy path should skip result wrapping")
-
-        def close(self):
-            pass
-
-    solver = FakeDirectTorchPolicySolver()
-    agent = DuelingDoubleDqnSreAgent(
-        DuelingDoubleDqnSreAgentConfig(
-            obs_dim=4,
-            num_agents=2,
-            num_actions=2,
-            epsilon_explore=0.0,
-            learning_starts=3,
-            train_every=1,
-            target_equilibrium_update_steps=1,
-            use_gpu=False,
-            sre_solver=solver,
-            sre_policy_cache_enabled=True,
-            sre_uniform_fallback_enabled=False,
-        )
-    )
-    try:
-        for index in range(3):
-            agent.replay_buffer.push(
-                np.full(4, index, dtype=np.float32),
-                np.array([0, 1], dtype=np.int64),
-                np.array([1.0, 0.0], dtype=np.float32),
-                np.full(4, index + 1, dtype=np.float32),
-                False,
-            )
-
-        loss = agent.train_step(batch_size=3)
-
-        assert loss is not None
-        assert solver.policy_calls == 1
-        assert solver.batch_calls == 0
-        assert solver.policy_shapes == [(3, 2, 2, 2)]
-    finally:
-        agent.close()
-
-
-def test_act_joint_uses_torch_batch_path_for_cache_bypass_solver():
-    torch = pytest.importorskip("torch")
-    from dueling_double_dqn_sre import DuelingDoubleDqnSreAgent, DuelingDoubleDqnSreAgentConfig
-
-    class FakeTorchActionSolver:
-        name = "sred_gradient_sre"
-        bypass_deep_srq_policy_cache = True
-
-        def __init__(self):
-            self.batch_calls = 0
-            self.solve_calls = 0
-
-        def solve(self, *args, **kwargs):
-            del args, kwargs
-            self.solve_calls += 1
-            raise AssertionError("act_joint should use solve_batch_torch")
-
-        def solve_batch_torch(
-            self,
-            q_tensors,
-            epsilon,
-            *,
-            num_repeats=20,
-            include_pure_starts=True,
-            initial_policies_batch=None,
-            exploitability_tol=1e-4,
-            early_exit=True,
-        ):
-            del epsilon, num_repeats, include_pure_starts, initial_policies_batch
-            del exploitability_tol, early_exit
-            self.batch_calls += 1
-            assert isinstance(q_tensors, torch.Tensor)
-            assert tuple(q_tensors.shape) == (1, 2, 2, 2)
-            return [
-                SreSolveResult(
-                    policies=[
-                        np.array([1.0, 0.0], dtype=np.float64),
-                        np.array([0.0, 1.0], dtype=np.float64),
-                    ],
-                    solutions=[],
-                    utilities_sr=[],
-                    utilities_nominal=[],
-                    success=True,
-                )
-            ]
-
-        def close(self):
-            pass
-
-    solver = FakeTorchActionSolver()
-    agent = DuelingDoubleDqnSreAgent(
-        DuelingDoubleDqnSreAgentConfig(
-            obs_dim=4,
-            num_agents=2,
-            num_actions=2,
-            epsilon_explore=0.0,
-            learning_starts=99,
-            use_gpu=False,
-            sre_solver=solver,
-            sre_policy_cache_enabled=True,
-        )
-    )
-    try:
-        agent._sre_batch_key = lambda q_tensor: (_ for _ in ()).throw(
-            AssertionError("act_joint torch path should bypass cache keying")
-        )
-        actions = agent.act_joint(np.zeros(4, dtype=np.float32))
-        assert actions == [0, 1]
-        assert solver.batch_calls == 1
-        assert solver.solve_calls == 0
-    finally:
-        agent.close()
-
-
-def test_act_uses_torch_batch_path_for_cache_bypass_solver():
-    torch = pytest.importorskip("torch")
-    from dueling_double_dqn_sre import DuelingDoubleDqnSreAgent, DuelingDoubleDqnSreAgentConfig
-
-    class FakeTorchActionSolver:
-        name = "sr_adidas_sre"
-        bypass_deep_srq_policy_cache = True
-
-        def __init__(self):
-            self.batch_calls = 0
-            self.solve_calls = 0
-
-        def solve(self, *args, **kwargs):
-            del args, kwargs
-            self.solve_calls += 1
-            raise AssertionError("act should use solve_batch_torch")
-
-        def solve_batch_torch(
-            self,
-            q_tensors,
-            epsilon,
-            *,
-            num_repeats=20,
-            include_pure_starts=True,
-            initial_policies_batch=None,
-            exploitability_tol=1e-4,
-            early_exit=True,
-        ):
-            del epsilon, num_repeats, include_pure_starts, initial_policies_batch
-            del exploitability_tol, early_exit
-            self.batch_calls += 1
-            assert isinstance(q_tensors, torch.Tensor)
-            assert tuple(q_tensors.shape) == (1, 2, 2, 2)
-            return [
-                SreSolveResult(
-                    policies=[
-                        np.array([0.0, 1.0], dtype=np.float64),
-                        np.array([1.0, 0.0], dtype=np.float64),
-                    ],
-                    solutions=[],
-                    utilities_sr=[],
-                    utilities_nominal=[],
-                    success=True,
-                )
-            ]
-
-        def close(self):
-            pass
-
-    solver = FakeTorchActionSolver()
-    agent = DuelingDoubleDqnSreAgent(
-        DuelingDoubleDqnSreAgentConfig(
-            obs_dim=4,
-            num_agents=2,
-            num_actions=2,
-            agent_id=0,
-            epsilon_explore=0.0,
-            learning_starts=99,
-            use_gpu=False,
-            sre_solver=solver,
-            sre_policy_cache_enabled=True,
-        )
-    )
-    try:
-        agent._sre_batch_key = lambda q_tensor: (_ for _ in ()).throw(
-            AssertionError("act torch path should bypass cache keying")
-        )
-        assert agent.act(np.zeros(4, dtype=np.float32)) == 1
-        assert solver.batch_calls == 1
-        assert solver.solve_calls == 0
-    finally:
-        agent.close()
-
-
-def test_act_joint_uses_direct_torch_policy_path_for_nfg_solver():
-    torch = pytest.importorskip("torch")
-    from dueling_double_dqn_sre import DuelingDoubleDqnSreAgent, DuelingDoubleDqnSreAgentConfig
-
-    class FakeDirectTorchPolicySolver:
-        name = "nfg_transformer_sre"
-        bypass_deep_srq_policy_cache = True
-
-        def __init__(self):
-            self.policy_calls = 0
-            self.batch_calls = 0
-
-        def solve_policy_batch_torch(self, q_tensors, epsilon):
-            del epsilon
-            self.policy_calls += 1
-            batch_size = int(q_tensors.shape[0])
-            return [
-                torch.tensor([[1.0, 0.0]], dtype=torch.float32).expand(batch_size, -1),
-                torch.tensor([[0.0, 1.0]], dtype=torch.float32).expand(batch_size, -1),
-            ]
-
-        def solve_batch_torch(self, *args, **kwargs):
-            del args, kwargs
-            self.batch_calls += 1
-            raise AssertionError("act_joint should prefer direct policy tensors")
-
-        def close(self):
-            pass
-
-    solver = FakeDirectTorchPolicySolver()
-    agent = DuelingDoubleDqnSreAgent(
-        DuelingDoubleDqnSreAgentConfig(
-            obs_dim=4,
-            num_agents=2,
-            num_actions=2,
-            epsilon_explore=0.0,
-            learning_starts=99,
-            use_gpu=False,
-            sre_solver=solver,
-            sre_policy_cache_enabled=True,
-        )
-    )
-    try:
-        actions = agent.act_joint(np.zeros(4, dtype=np.float32))
-        assert actions == [0, 1]
-        assert solver.policy_calls == 1
-        assert solver.batch_calls == 0
-    finally:
-        agent.close()
-
-
-def test_act_joint_batch_uses_direct_torch_policy_path_for_nfg_solver():
-    torch = pytest.importorskip("torch")
-    from dueling_double_dqn_sre import DuelingDoubleDqnSreAgent, DuelingDoubleDqnSreAgentConfig
-
-    class FakeDirectTorchPolicySolver:
-        name = "nfg_transformer_sre"
-        bypass_deep_srq_policy_cache = True
-
-        def __init__(self):
-            self.policy_calls = 0
-            self.batch_calls = 0
-            self.policy_shapes = []
-
-        def solve_policy_batch_torch(self, q_tensors, epsilon):
-            del epsilon
-            self.policy_calls += 1
-            self.policy_shapes.append(tuple(q_tensors.shape))
-            batch_size = int(q_tensors.shape[0])
-            return [
-                torch.tensor([[1.0, 0.0]], dtype=torch.float32).expand(batch_size, -1),
-                torch.tensor([[0.0, 1.0]], dtype=torch.float32).expand(batch_size, -1),
-            ]
-
-        def solve_batch_torch(self, *args, **kwargs):
-            del args, kwargs
-            self.batch_calls += 1
-            raise AssertionError("act_joint_batch should prefer direct policy tensors")
-
-        def close(self):
-            pass
-
-    solver = FakeDirectTorchPolicySolver()
-    agent = DuelingDoubleDqnSreAgent(
-        DuelingDoubleDqnSreAgentConfig(
-            obs_dim=4,
-            num_agents=2,
-            num_actions=2,
-            epsilon_explore=0.0,
-            learning_starts=99,
-            use_gpu=False,
-            sre_solver=solver,
-            sre_policy_cache_enabled=True,
-        )
-    )
-    try:
-        actions = agent.act_joint_batch(
-            [np.zeros(4, dtype=np.float32) for _ in range(3)]
-        )
-        assert actions == [[0, 1], [0, 1], [0, 1]]
-        assert solver.policy_calls == 1
-        assert solver.policy_shapes == [(3, 2, 2, 2)]
-        assert solver.batch_calls == 0
-    finally:
-        agent.close()
-
-
-def test_act_joint_batch_uses_torch_batch_path_for_cache_bypass_solver():
-    torch = pytest.importorskip("torch")
-    from dueling_double_dqn_sre import DuelingDoubleDqnSreAgent, DuelingDoubleDqnSreAgentConfig
-
-    class FakeTorchActionSolver:
-        name = "sr_adidas_sre"
-        bypass_deep_srq_policy_cache = True
-
-        def __init__(self):
-            self.batch_calls = 0
-            self.solve_calls = 0
-            self.batch_shapes = []
-
-        def solve(self, *args, **kwargs):
-            del args, kwargs
-            self.solve_calls += 1
-            raise AssertionError("act_joint_batch should use solve_batch_torch")
-
-        def solve_batch_torch(self, q_tensors, epsilon, **kwargs):
-            del epsilon, kwargs
-            self.batch_calls += 1
-            self.batch_shapes.append(tuple(q_tensors.shape))
-            return [
-                SreSolveResult(
-                    policies=[
-                        np.array([1.0, 0.0], dtype=np.float64),
-                        np.array([0.0, 1.0], dtype=np.float64),
-                    ],
-                    solutions=[],
-                    utilities_sr=[],
-                    utilities_nominal=[],
-                    success=True,
-                )
-                for _ in range(int(q_tensors.shape[0]))
-            ]
-
-        def close(self):
-            pass
-
-    solver = FakeTorchActionSolver()
-    agent = DuelingDoubleDqnSreAgent(
-        DuelingDoubleDqnSreAgentConfig(
-            obs_dim=4,
-            num_agents=2,
-            num_actions=2,
-            epsilon_explore=0.0,
-            learning_starts=99,
-            use_gpu=False,
-            sre_solver=solver,
-            sre_policy_cache_enabled=True,
-        )
-    )
-    try:
-        agent._sre_batch_key = lambda q_tensor: (_ for _ in ()).throw(
-            AssertionError("cache-bypass torch action path should not key policies")
-        )
-        actions = agent.act_joint_batch(
-            [np.zeros(4, dtype=np.float32) for _ in range(4)]
-        )
-        assert actions == [[0, 1], [0, 1], [0, 1], [0, 1]]
-        assert solver.batch_calls == 1
-        assert solver.batch_shapes == [(4, 2, 2, 2)]
-        assert solver.solve_calls == 0
-    finally:
-        agent.close()
-
-
 def test_act_joint_batch_all_explore_skips_solver():
     from dueling_double_dqn_sre import DuelingDoubleDqnSreAgent, DuelingDoubleDqnSreAgentConfig
 
     class ExplodingSolver:
         name = "exploding"
-        bypass_deep_srq_policy_cache = True
 
-        def solve_policy_batch_torch(self, *args, **kwargs):
+        def solve(self, *args, **kwargs):
             del args, kwargs
-            raise AssertionError("all-explore action batch should not solve policies")
+            raise AssertionError("all-explore action batch should not solve")
 
-        def solve_batch_torch(self, *args, **kwargs):
+        def solve_batch(self, *args, **kwargs):
             del args, kwargs
-            raise AssertionError("all-explore action batch should not solve results")
+            raise AssertionError("all-explore action batch should not solve")
 
         def close(self):
             pass

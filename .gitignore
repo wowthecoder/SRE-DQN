@@ -24,3 +24,6 @@ AGENTs.md
 CLAUDE.md
 
 relevant_papers/
+
+**/training_stats.txt
+**/training_stats.json

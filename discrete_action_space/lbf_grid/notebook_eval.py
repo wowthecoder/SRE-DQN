@@ -945,16 +945,24 @@ def periodic_eval_reward_series(record: dict) -> tuple[np.ndarray, list[tuple[st
     reward_rows = []
     for item in eval_history:
         episode = item.get("episode")
-        rewards = item.get("episode_rewards")
-        if episode is None or rewards is None:
+        if episode is None:
             continue
-        rewards_arr = np.asarray(rewards, dtype=np.float64)
-        if rewards_arr.ndim == 1:
-            rewards_arr = rewards_arr.reshape(-1, 1)
-        if rewards_arr.ndim != 2 or rewards_arr.size == 0:
+        mean_rewards = item.get("mean_agent_rewards")
+        if mean_rewards is None:
+            rewards = item.get("episode_rewards")
+            if rewards is None:
+                continue
+            rewards_arr = np.asarray(rewards, dtype=np.float64)
+            if rewards_arr.ndim == 1:
+                rewards_arr = rewards_arr.reshape(-1, 1)
+            if rewards_arr.ndim != 2 or rewards_arr.size == 0:
+                continue
+            mean_rewards = rewards_arr.mean(axis=0)
+        mean_rewards = np.asarray(mean_rewards, dtype=np.float64)
+        if mean_rewards.ndim != 1 or mean_rewards.size == 0:
             continue
         episodes.append(float(episode))
-        reward_rows.append(rewards_arr.mean(axis=0))
+        reward_rows.append(mean_rewards)
 
     if not reward_rows:
         return np.asarray([], dtype=np.float64), []

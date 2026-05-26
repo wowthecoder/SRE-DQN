@@ -1,7 +1,7 @@
 # MF-DSRQ config for MAgent2 battle_v4
 env_name: battle_v4
 env_backend: magent2
-map_size: 45
+map_size: 40
 max_cycles: 400
 
 # Two teams; agents named "red_N" and "blue_N".

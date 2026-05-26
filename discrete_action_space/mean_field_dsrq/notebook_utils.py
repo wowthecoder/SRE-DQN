@@ -18,7 +18,7 @@ from .train_mf_dsrq import train
 
 
 DEFAULT_CONFIG_PATH = (
-    Path(__file__).resolve().parent / "configs" / "adversarial_pursuit_v4.yaml"
+    Path(__file__).resolve().parent / "configs" / "battle_v4.yaml"
 )
 RUNS_DIR = Path(__file__).resolve().parent / "runs"
 
@@ -46,9 +46,9 @@ def notebook_mfdsrq_config(
     seed: int = 42,
     extra_overrides: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Small MAgent2 adversarial_pursuit config for interactive notebook runs."""
+    """Small MAgent2 battle config for interactive notebook runs."""
     overrides: dict[str, Any] = {
-        "env_name": "adversarial_pursuit_v4",
+        "env_name": "battle_v4",
         "env_backend": "magent2",
         "map_size": int(map_size),
         "max_cycles": int(max_cycles),

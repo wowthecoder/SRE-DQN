@@ -166,15 +166,118 @@ def _to_jsonable(value):
     return value
 
 
-def save_training_stats(stats_path, stats):
+def _reward_summary(rows, *, agent_first, labels=None):
+    try:
+        values = np.asarray(rows, dtype=np.float64)
+    except (TypeError, ValueError):
+        return None
+    if values.size == 0:
+        return None
+    if values.ndim == 1:
+        values = values.reshape(1, -1) if agent_first else values.reshape(-1, 1)
+    if values.ndim != 2:
+        return None
+    agent_values = values if agent_first else values.T
+    if labels is None or len(labels) != agent_values.shape[0]:
+        labels = [f"Agent {idx + 1}" for idx in range(agent_values.shape[0])]
+    joint = agent_values.sum(axis=0)
+    return {
+        "episodes": int(agent_values.shape[1]),
+        "per_agent": [
+            {
+                "agent": str(labels[idx]),
+                "mean": float(np.mean(agent_values[idx])),
+                "std": float(np.std(agent_values[idx])),
+                "min": float(np.min(agent_values[idx])),
+                "max": float(np.max(agent_values[idx])),
+            }
+            for idx in range(agent_values.shape[0])
+        ],
+        "joint": {
+            "mean": float(np.mean(joint)),
+            "std": float(np.std(joint)),
+            "min": float(np.min(joint)),
+            "max": float(np.max(joint)),
+        },
+    }
+
+
+def compact_training_stats(
+    stats,
+    *,
+    drop_reward_histories=False,
+    drop_lbf_episode_details=False,
+    drop_episode_lengths=False,
+):
+    """Return a copy with bulky per-episode histories replaced by summaries."""
+
+    def compact(value):
+        if isinstance(value, dict):
+            result = {}
+            labels = value.get("agent_labels")
+            if drop_reward_histories and "rewards" in value:
+                summary = _reward_summary(value["rewards"], agent_first=True, labels=labels)
+                if summary is not None:
+                    result["reward_summary"] = summary
+            if drop_reward_histories and "episode_rewards" in value:
+                summary = _reward_summary(
+                    value["episode_rewards"],
+                    agent_first=False,
+                    labels=labels,
+                )
+                if summary is not None:
+                    result["episode_reward_summary"] = summary
+                    means = [row["mean"] for row in summary["per_agent"]]
+                    result.setdefault("mean_agent_rewards", means)
+                    result.setdefault("mean_joint_reward", summary["joint"]["mean"])
+
+            for key, child in value.items():
+                if drop_reward_histories and key in {
+                    "rewards",
+                    "episode_rewards",
+                    "joint_rewards",
+                }:
+                    continue
+                if drop_lbf_episode_details and key in {
+                    "episode_metrics",
+                    "metric_totals",
+                }:
+                    continue
+                if drop_episode_lengths and key == "episode_lengths":
+                    continue
+                result[str(key)] = compact(child)
+            return result
+        if isinstance(value, list):
+            return [compact(item) for item in value]
+        if isinstance(value, tuple):
+            return [compact(item) for item in value]
+        return value
+
+    return compact(stats)
+
+
+def save_training_stats(
+    stats_path,
+    stats,
+    *,
+    drop_reward_histories=False,
+    drop_lbf_episode_details=False,
+    drop_episode_lengths=False,
+):
     stats_path = Path(stats_path)
     stats_path.parent.mkdir(parents=True, exist_ok=True)
+    stats_to_save = compact_training_stats(
+        stats,
+        drop_reward_histories=drop_reward_histories,
+        drop_lbf_episode_details=drop_lbf_episode_details,
+        drop_episode_lengths=drop_episode_lengths,
+    )
     if stats_path.suffix == ".pkl":
         with open(stats_path, "wb") as f:
-            pickle.dump(stats, f, protocol=pickle.HIGHEST_PROTOCOL)
+            pickle.dump(stats_to_save, f, protocol=pickle.HIGHEST_PROTOCOL)
         return stats_path
 
-    serialized = _to_jsonable(stats)
+    serialized = _to_jsonable(stats_to_save)
     with open(stats_path, "w", encoding="utf-8") as f:
         json.dump(serialized, f, indent=2, sort_keys=False)
         f.write("\n")

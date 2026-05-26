@@ -27,8 +27,6 @@ from sre_solvers import (
     LemkeLcpBimatrixSreSolverConfig,
     LogitQreHomotopySreSolverConfig,
     LogitQreHomotopySreSolver,
-    NfgTransformerSreSolverConfig,
-    NfgTransformerSreSolver,
     PathCBimatrixSreSolver,
     PathCBimatrixSreSolverConfig,
     PathMcpNPlayerSreSolverConfig,
@@ -52,7 +50,6 @@ from stats_utils import (
     summarize_rewards,
 )
 
-from .instrumented_env import aggregate_lbf_episode_metrics, extract_lbf_metrics
 from .pz_wrapper import LBFParallelEnv
 from .state_action_encoding import canonical_lbf_state, lbf_action_masks
 
@@ -117,18 +114,11 @@ class DeepSrqLbfHyperparams:
             max_workers=8,
         )
     )
-    nfg_transformer: NfgTransformerSreSolverConfig = field(
-        default_factory=lambda: NfgTransformerSreSolverConfig(
-            fallback_enabled=False,
-            compute_exploitability_diagnostics=False,
-        )
-    )
     logit_qre: LogitQreHomotopySreSolverConfig = field(
         default_factory=LogitQreHomotopySreSolverConfig
     )
 
 DEFAULT_LBF_CONFIG = basic_lbf_config()
-NFG_TRANSFORMER_SOLVER_NAMES = {"nfg_transformer_sre", "nfg_sre"}
 
 
 def set_global_seed(seed=BASE_SEED):
@@ -221,134 +211,6 @@ def _solver_usage_summary(solver):
     return {}
 
 
-def _format_agent_metric_counts(counts, num_agents):
-    counts = counts or {}
-    return ", ".join(
-        f"Agent {idx + 1}: {int(counts.get(f'agent_{idx}', 0))}"
-        for idx in range(int(num_agents))
-    )
-
-
-def _format_agent_positions(records):
-    if not records:
-        return "[]"
-    return ", ".join(
-        f"Agent {int(record.get('agent_id', idx)) + 1}: "
-        f"({int(record.get('row', -1))}, {int(record.get('col', -1))}) "
-        f"L{int(record.get('level', 0))}"
-        for idx, record in enumerate(records)
-    )
-
-
-def _format_food_records(records):
-    if not records:
-        return "[]"
-    return ", ".join(
-        f"({int(record.get('row', -1))}, {int(record.get('col', -1))}) "
-        f"L{int(record.get('level', 0))}"
-        for record in records
-    )
-
-
-def _print_lbf_evaluation_metrics(stats, *, max_episode_metrics=None):
-    eval_history = list(stats.get("periodic_eval") or [])
-    if not eval_history:
-        print("\nLBF Evaluation Metrics")
-        print("No periodic evaluation metrics recorded.")
-        return
-
-    latest = eval_history[-1]
-    episode = latest.get("episode")
-    global_step = latest.get("global_step")
-    metrics = [
-        metric for metric in latest.get("episode_metrics", []) if isinstance(metric, dict)
-    ]
-    totals = latest.get("metric_totals") or aggregate_lbf_episode_metrics(
-        metrics,
-        stats.get("num_agents"),
-    )
-    num_agents = int(stats.get("num_agents") or len(totals.get("empty_loads_per_agent", {})))
-    if max_episode_metrics is None:
-        max_episode_metrics = len(metrics)
-
-    print("\nLBF Evaluation Metrics")
-    print(
-        "Latest periodic eval"
-        f" | training_episode={episode}"
-        f" | global_step={global_step}"
-        f" | eval_episodes={len(metrics)}"
-    )
-    print(
-        "Episode lengths: "
-        + ", ".join(str(int(value)) for value in totals.get("episode_lengths", []))
-    )
-    print(f"Foods collected total: {int(totals.get('foods_collected_total', 0))}")
-    print(
-        "Foods collected per agent: "
-        + _format_agent_metric_counts(
-            totals.get("foods_collected_per_agent"),
-            num_agents,
-        )
-    )
-    print(f"Empty loads total: {int(totals.get('empty_loads_total', 0))}")
-    print(
-        "Empty loads per agent: "
-        + _format_agent_metric_counts(totals.get("empty_loads_per_agent"), num_agents)
-    )
-    print(f"Invalid loads total: {int(totals.get('invalid_loads_total', 0))}")
-    print(
-        "Invalid loads per agent: "
-        + _format_agent_metric_counts(totals.get("invalid_loads_per_agent"), num_agents)
-    )
-
-    for eval_idx, metric in enumerate(metrics[: int(max_episode_metrics)], start=1):
-        print(f"\nEval episode {eval_idx}")
-        print(
-            "  Agent starting coordinates: "
-            + _format_agent_positions(metric.get("initial_agent_positions") or [])
-        )
-        print(
-            "  Food coordinates: "
-            + _format_food_records(metric.get("initial_foods") or [])
-        )
-        print(f"  Episode length: {int(metric.get('episode_length', 0))}")
-        print(
-            f"  Foods collected total: "
-            f"{int(metric.get('foods_collected_total', 0))}"
-        )
-        print(
-            "  Foods collected per agent: "
-            + _format_agent_metric_counts(
-                metric.get("foods_collected_per_agent"),
-                num_agents,
-            )
-        )
-        collected_by_agent = metric.get("foods_collected_by_agent") or {}
-        print("  Foods collected by agent:")
-        for agent_id in range(num_agents):
-            key = f"agent_{agent_id}"
-            foods = collected_by_agent.get(key) or []
-            print(f"    Agent {agent_id + 1}: {_format_food_records(foods)}")
-        print(f"  Empty loads total: {int(metric.get('empty_loads_total', 0))}")
-        print(
-            "  Empty loads per agent: "
-            + _format_agent_metric_counts(
-                metric.get("empty_loads_per_agent"),
-                num_agents,
-            )
-        )
-        print(f"  Invalid loads total: {int(metric.get('invalid_loads_total', 0))}")
-        print(
-            "  Invalid loads per agent: "
-            + _format_agent_metric_counts(
-                metric.get("invalid_loads_per_agent"),
-                num_agents,
-            )
-        )
-    if len(metrics) > int(max_episode_metrics):
-        print(f"\n... {len(metrics) - int(max_episode_metrics)} more eval episodes omitted.")
-
-
 def _evaluate_agent_rewards(
     agent,
     *,
@@ -361,8 +223,6 @@ def _evaluate_agent_rewards(
     old_epsilon = agent.config.epsilon_explore
     agent.config.epsilon_explore = 0.0
     rewards = []
-    episode_metrics = []
-    episode_lengths = []
     try:
         if int(num_envs) > 1:
             env_count = max(1, min(int(num_envs), int(n_episodes)))
@@ -370,14 +230,13 @@ def _evaluate_agent_rewards(
             next_episode_seed = 0
             for _ in range(env_count):
                 env = LBFParallelEnv(**lbf_env_config)
-                obs_dict, reset_info = env.reset(seed=int(seed) + next_episode_seed)
+                obs_dict, _ = env.reset(seed=int(seed) + next_episode_seed)
                 agent_order = list(env.possible_agents)
                 slots.append(
                     {
                         "env": env,
                         "agent_order": agent_order,
                         "obs_dict": obs_dict,
-                        "latest_metrics": extract_lbf_metrics(reset_info),
                         "totals": np.zeros(len(agent_order), dtype=np.float64),
                         "steps": 0,
                         "active": True,
@@ -414,10 +273,7 @@ def _evaluate_agent_rewards(
                         env = slot["env"]
                         agent_order = slot["agent_order"]
                         action_dict = _action_dict_from_list(actions_batch[local_idx], agent_order)
-                        next_obs, reward_dict, term_dict, trunc_dict, step_info = env.step(action_dict)
-                        slot["latest_metrics"] = (
-                            extract_lbf_metrics(step_info) or slot["latest_metrics"]
-                        )
+                        next_obs, reward_dict, term_dict, trunc_dict, _ = env.step(action_dict)
                         slot["totals"] += np.asarray(
                             [reward_dict.get(agent_name, 0.0) for agent_name in agent_order],
                             dtype=np.float64,
@@ -436,18 +292,15 @@ def _evaluate_agent_rewards(
                         if not done:
                             continue
                         rewards.append(slot["totals"].tolist())
-                        episode_lengths.append(int(slot["steps"]))
-                        episode_metrics.append(slot["latest_metrics"])
                         completed += 1
                         if completed >= int(n_episodes) or next_episode_seed >= int(n_episodes):
                             slot["active"] = False
                             continue
-                        obs_dict, reset_info = env.reset(seed=int(seed) + next_episode_seed)
+                        obs_dict, _ = env.reset(seed=int(seed) + next_episode_seed)
                         next_episode_seed += 1
                         slot.update(
                             {
                                 "obs_dict": obs_dict,
-                                "latest_metrics": extract_lbf_metrics(reset_info),
                                 "totals": np.zeros(len(agent_order), dtype=np.float64),
                                 "steps": 0,
                                 "active": True,
@@ -460,8 +313,7 @@ def _evaluate_agent_rewards(
             for episode in range(int(n_episodes)):
                 env = LBFParallelEnv(**lbf_env_config)
                 try:
-                    obs_dict, reset_info = env.reset(seed=int(seed) + episode)
-                    latest_metrics = extract_lbf_metrics(reset_info)
+                    obs_dict, _ = env.reset(seed=int(seed) + episode)
                     agent_order = list(env.possible_agents)
                     totals = np.zeros(len(agent_order), dtype=np.float64)
                     steps = 0
@@ -472,8 +324,7 @@ def _evaluate_agent_rewards(
                             action_masks=_action_masks(env, agent_order),
                         )
                         action_dict = _action_dict_from_list(action_list, agent_order)
-                        obs_dict, reward_dict, term_dict, trunc_dict, step_info = env.step(action_dict)
-                        latest_metrics = extract_lbf_metrics(step_info) or latest_metrics
+                        obs_dict, reward_dict, term_dict, trunc_dict, _ = env.step(action_dict)
                         totals += np.asarray(
                             [reward_dict.get(agent_name, 0.0) for agent_name in agent_order],
                             dtype=np.float64,
@@ -486,22 +337,17 @@ def _evaluate_agent_rewards(
                         ):
                             break
                     rewards.append(totals.tolist())
-                    episode_lengths.append(int(steps))
-                    episode_metrics.append(latest_metrics)
                 finally:
                     env.close()
     finally:
         agent.config.epsilon_explore = old_epsilon
     rewards_arr = np.asarray(rewards, dtype=np.float64)
+    mean_agent_rewards = (
+        [] if rewards_arr.size == 0 else rewards_arr.mean(axis=0).astype(float).tolist()
+    )
     return {
-        "episode_rewards": rewards,
-        "joint_rewards": rewards_arr.sum(axis=1).tolist() if rewards_arr.size else [],
-        "episode_lengths": episode_lengths,
-        "episode_metrics": episode_metrics,
-        "metric_totals": aggregate_lbf_episode_metrics(
-            episode_metrics,
-            rewards_arr.shape[1] if rewards_arr.ndim == 2 else None,
-        ),
+        "n_eval_episodes": int(len(rewards)),
+        "mean_agent_rewards": mean_agent_rewards,
         "mean_joint_reward": (
             None if rewards_arr.size == 0 else float(rewards_arr.sum(axis=1).mean())
         ),
@@ -511,9 +357,6 @@ def _evaluate_agent_rewards(
 def _make_solver(solver_name, hp, seed):
     if not isinstance(hp, DeepSrqLbfHyperparams):
         hp = deep_srq_lbf_hyperparams(hp)
-    if solver_name in NFG_TRANSFORMER_SOLVER_NAMES:
-        config = replace(hp.nfg_transformer, fallback_enabled=False)
-        return NfgTransformerSreSolver(config=config)
     if solver_name in {"logit_qre_sre", "qre_homotopy_sre", "logit_qre"}:
         return LogitQreHomotopySreSolver(config=replace(hp.logit_qre, random_seed=seed))
     if solver_name in {"path_mcp_nplayer_pool", "path_nplayer_pool", "path_mcp_pool"}:
@@ -570,7 +413,6 @@ def _make_deep_srq_agent(
     epsilon_schedule,
     use_gpu,
 ):
-    is_nfg_transformer_solver = solver_name in NFG_TRANSFORMER_SOLVER_NAMES
     solver_exploitability_tol = hp.agent.sre_solver_exploitability_tol
     agent_config = replace(
         hp.agent,
@@ -585,9 +427,6 @@ def _make_deep_srq_agent(
         use_gpu=use_gpu,
         sre_solver=_make_solver(solver_name, hp, seed),
         sre_solver_exploitability_tol=solver_exploitability_tol,
-        sre_uniform_fallback_enabled=(
-            False if is_nfg_transformer_solver else hp.agent.sre_uniform_fallback_enabled
-        ),
     )
     return DuelingDoubleDqnSreAgent(
         agent_config
@@ -974,15 +813,19 @@ def train_lbf_deep_srq_vectorized(
         "stats_path": str(stats_path),
         "timing": timing,
         "solver_usage": solver_usage,
-        "nfg_transformer_usage": solver_usage,
     }
     if write_plots:
         plot_training_stats(stats, out_path=plot_path)
         stats["plot_path"] = str(plot_path)
-    save_training_stats(stats_path, stats)
+    save_training_stats(
+        stats_path,
+        stats,
+        drop_reward_histories=True,
+        drop_lbf_episode_details=True,
+        drop_episode_lengths=True,
+    )
     if print_full_stats:
         print_stats_payload(stats, f"LBF DeepSRQ vectorized - {solver_name}")
     print("\nReward Summary")
     print_summary_table(summarize_rewards(stats))
-    _print_lbf_evaluation_metrics(stats)
     return stats

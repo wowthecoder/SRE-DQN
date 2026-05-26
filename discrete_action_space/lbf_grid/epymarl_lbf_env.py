@@ -1,12 +1,9 @@
 """Gymnasium LBF registrations used by EPyMARL baseline runs."""
 from __future__ import annotations
 
-import json
-import os
 from copy import deepcopy
 from dataclasses import dataclass
 from numbers import Number
-from pathlib import Path
 from typing import Any
 
 from .instrumented_env import InstrumentedForagingEnv
@@ -130,65 +127,22 @@ def _epymarl_safe_info(info: Any) -> dict[str, Number]:
 
     safe = {}
     for key, value in info.items():
-        if key == "lbf_metrics" and isinstance(value, dict):
-            for metric_key in (
-                "episode_length",
-                "foods_collected_total",
-                "empty_loads_total",
-                "invalid_loads_total",
-            ):
-                metric_value = value.get(metric_key)
-                if isinstance(metric_value, Number):
-                    safe[f"lbf_{metric_key}"] = metric_value
+        if key == "lbf_metrics":
             continue
         if isinstance(value, Number):
             safe[key] = value
     return safe
 
 
-def _metrics_jsonl_path() -> Path | None:
-    metrics_dir = os.environ.get("SREDQN_LBF_METRICS_DIR")
-    if not metrics_dir:
-        return None
-    run_id = os.environ.get("SREDQN_LBF_METRICS_RUN_ID", "run")
-    phase = os.environ.get("SREDQN_LBF_METRICS_PHASE", "episodes")
-    return Path(metrics_dir) / f"{run_id}_{phase}_{os.getpid()}.jsonl"
-
-
 class ExactLevelForagingEnv(InstrumentedForagingEnv):
     """lb-foraging env with exact levels, dense spawning, and diagnostics."""
 
-    def _record_episode_metrics(self):
-        if getattr(self, "_epymarl_metrics_written", False):
-            return
-        metrics_path = _metrics_jsonl_path()
-        if metrics_path is None:
-            return
-
-        self._epymarl_metrics_written = True
-        metrics_path.parent.mkdir(parents=True, exist_ok=True)
-        payload = self._metrics_payload()
-        payload.update(
-            {
-                "run_id": os.environ.get("SREDQN_LBF_METRICS_RUN_ID"),
-                "phase": os.environ.get("SREDQN_LBF_METRICS_PHASE"),
-                "pid": os.getpid(),
-                "episode_index": int(getattr(self, "_epymarl_episode_index", 0)),
-            }
-        )
-        with metrics_path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(payload) + "\n")
-
     def reset(self, *args, **kwargs):
-        self._epymarl_metrics_written = False
-        self._epymarl_episode_index = int(getattr(self, "_epymarl_episode_index", -1)) + 1
         obs, info = super().reset(*args, **kwargs)
         return obs, _epymarl_safe_info(info)
 
     def step(self, actions):
         obs, rewards, done, truncated, info = super().step(actions)
-        if done or truncated:
-            self._record_episode_metrics()
         return obs, rewards, done, truncated, _epymarl_safe_info(info)
 
 

@@ -48,16 +48,8 @@ DEFAULT_OUTPUT_ROOT = Path("runs")
 DEFAULT_NUM_AGENTS = 4
 DEFAULT_NUM_ACTIONS = 6
 ROBUST_EPSILONS = (0.01, 0.1, 0.5, 1.0)
-DEEPSRQ_NFGTRANSFORMER_FAMILY = "deepsrq_nfgtransformer"
 DEEPSRQ_PATH_TVC_POOL_FAMILY = "deepsrq_path_tvc_mcp_nplayer_pool"
 SR_ADIDAS_FAMILY = "sr_adidas"
-DEFAULT_NFG_TRANSFORMER_CHECKPOINT = (
-    _DISCRETE_DIR
-    / "sre_solvers"
-    / "nfg_transformer"
-    / "nfg_sre_checkpoints"
-    / "nfg_sre_lbf3_online.pt"
-)
 
 
 def find_repo_root(start=None):
@@ -91,24 +83,6 @@ def pommerman_dir(repo_root=None):
 
 def pommerman_artifact_dir(family, phase, epsilon, *, repo_root=None):
     return pommerman_dir(repo_root) / str(family) / str(phase) / epsilon_slug(epsilon)
-
-
-def deepsrq_nfgtransformer_training_dir(epsilon, *, repo_root=None):
-    return pommerman_artifact_dir(
-        DEEPSRQ_NFGTRANSFORMER_FAMILY,
-        "training",
-        epsilon,
-        repo_root=repo_root,
-    )
-
-
-def deepsrq_nfgtransformer_evaluation_dir(epsilon, *, repo_root=None):
-    return pommerman_artifact_dir(
-        DEEPSRQ_NFGTRANSFORMER_FAMILY,
-        "evaluation",
-        epsilon,
-        repo_root=repo_root,
-    )
 
 
 def deepsrq_path_tvc_pool_training_dir(epsilon, *, repo_root=None):
@@ -207,7 +181,7 @@ def _write_stats(stats, output_dir, *, plot=True):
         plot_path = output_dir / "training_plot.png"
         plot_training_curves(stats, out_path=plot_path, show=False)
         stats["plot_path"] = str(plot_path)
-    save_training_stats(stats_path, stats)
+    save_training_stats(stats_path, stats, drop_reward_histories=True)
     return stats
 
 
@@ -909,7 +883,11 @@ def train_pommerman_sr_adidas_for_epsilon(
     )
     saved_stats = dict(stats)
     saved_stats.pop("agent", None)
-    save_training_stats(run_dir / "training_stats.txt", saved_stats)
+    save_training_stats(
+        run_dir / "training_stats.txt",
+        saved_stats,
+        drop_reward_histories=True,
+    )
     manifest_path = (
         pommerman_dir(repo_root)
         / SR_ADIDAS_FAMILY
@@ -938,10 +916,7 @@ def train_pommerman_deep_srq(
     use_gpu=True,
     epsilon_robust_initial=0.5,
     epsilon_schedule="linear",
-    nfg_checkpoint_path=None,
-    nfg_accept_gap=None,
-    nfg_fallback_enabled=True,
-    solver_name="nfg_transformer_sre",
+    solver_name="path_tvc_mcp_nplayer_pool",
     sre_target_value_mode="robust",
     sr_adidas_max_iters=200,
     sr_adidas_lr=0.2,
@@ -1048,23 +1023,8 @@ def train_pommerman_deep_srq(
             start_method=sre_solver_start_method,
         )
         solver_record_name = solver_name
-    elif nfg_checkpoint_path:
-        solver = make_sre_solver(
-            "nfg_transformer_sre",
-            checkpoint_path=nfg_checkpoint_path,
-            accept_exploitability_tol=nfg_accept_gap,
-            fallback_enabled=nfg_fallback_enabled,
-        )
-        solver_record_name = "nfg_transformer_sre"
     else:
-        print("Warning: no NfgTransformer checkpoint supplied; using solver fallback/smoke path.")
-        solver = make_sre_solver(
-            "nfg_transformer_sre",
-            checkpoint_path=None,
-            fallback_enabled=True,
-            accept_exploitability_tol=nfg_accept_gap,
-        )
-        solver_record_name = "nfg_transformer_sre"
+        raise ValueError(f"Unknown Deep SRQ Pommerman solver: {solver_name}")
 
     if use_action_masks is None:
         use_action_masks_resolved = str(solver_record_name).startswith("path")
@@ -1119,7 +1079,7 @@ def train_pommerman_deep_srq(
     output_dir = (
         Path(output_dir)
         if output_dir is not None
-        else Path(output_root) / "deep_srq_nfg_transformer"
+        else Path(output_root) / "deep_srq"
     )
     output_dir.mkdir(parents=True, exist_ok=True)
     episode_rewards = []
@@ -1209,16 +1169,13 @@ def train_pommerman_deep_srq(
         env.close()
 
     stats = _stats_payload(
-        algorithm="Deep SRQ + NfgTransformer",
+        algorithm="Deep SRQ",
         episode_rewards=episode_rewards,
         episode_lengths=episode_lengths,
         seed=seed,
         output_dir=output_dir,
         extra={
             "solver_name": solver_record_name,
-            "nfg_checkpoint_path": None if nfg_checkpoint_path is None else str(nfg_checkpoint_path),
-            "nfg_accept_gap": nfg_accept_gap,
-            "nfg_fallback_enabled": bool(nfg_fallback_enabled),
             "epsilon_robust_initial": float(epsilon_robust_initial),
             "epsilon_schedule": epsilon_schedule,
             "gradient_steps": int(gradient_steps),
@@ -1245,65 +1202,6 @@ def train_pommerman_deep_srq(
     )
     stats = _write_stats(stats, output_dir)
     stats["agent"] = agent
-    return stats
-
-
-def train_pommerman_deepsrq_nfgtransformer_for_epsilon(
-    epsilon,
-    *,
-    n_episodes=100,
-    max_steps=200,
-    seed=BASE_SEED,
-    repo_root=None,
-    use_gpu=True,
-    nfg_checkpoint_path=DEFAULT_NFG_TRANSFORMER_CHECKPOINT,
-    nfg_accept_gap=None,
-    nfg_fallback_enabled=False,
-    batch_size=32,
-    verbose=True,
-):
-    run_dir = deepsrq_nfgtransformer_training_dir(epsilon, repo_root=repo_root)
-    stats = train_pommerman_deep_srq(
-        n_episodes=n_episodes,
-        max_steps=max_steps,
-        seed=seed,
-        output_dir=run_dir,
-        use_gpu=use_gpu,
-        epsilon_robust_initial=float(epsilon),
-        epsilon_schedule="constant",
-        nfg_checkpoint_path=nfg_checkpoint_path,
-        nfg_accept_gap=nfg_accept_gap,
-        nfg_fallback_enabled=nfg_fallback_enabled,
-        batch_size=batch_size,
-        include_replay_buffer=True,
-        verbose=verbose,
-    )
-    stats.update(
-        {
-            "algorithm_family": DEEPSRQ_NFGTRANSFORMER_FAMILY,
-            "artifact_dir": str(run_dir),
-        }
-    )
-    saved_stats = dict(stats)
-    saved_stats.pop("agent", None)
-    save_training_stats(run_dir / "training_stats.txt", saved_stats)
-    manifest_path = (
-        pommerman_dir(repo_root)
-        / DEEPSRQ_NFGTRANSFORMER_FAMILY
-        / "training"
-        / f"manifest_eps_{epsilon_slug(epsilon)}.json"
-    )
-    save_training_stats(
-        manifest_path,
-        {
-            "algorithm": DEEPSRQ_NFGTRANSFORMER_FAMILY,
-            "solver_name": "nfg_transformer_sre",
-            "nfg_fallback_enabled": bool(nfg_fallback_enabled),
-            "epsilon": float(epsilon),
-            "training_stats_path": str(run_dir / "training_stats.txt"),
-            "artifact_dir": str(run_dir),
-        },
-    )
     return stats
 
 
@@ -1352,7 +1250,11 @@ def train_pommerman_deepsrq_path_tvc_pool_for_epsilon(
     )
     saved_stats = dict(stats)
     saved_stats.pop("agent", None)
-    save_training_stats(run_dir / "training_stats.txt", saved_stats)
+    save_training_stats(
+        run_dir / "training_stats.txt",
+        saved_stats,
+        drop_reward_histories=True,
+    )
     manifest_path = (
         pommerman_dir(repo_root)
         / DEEPSRQ_PATH_TVC_POOL_FAMILY
@@ -1462,7 +1364,11 @@ def evaluate_policy(
                 stats["rollout_video_path"] = str(video_path)
         saved_stats = dict(stats)
         saved_stats.pop("first_rollout_frames", None)
-        save_training_stats(output_dir / f"{label}_evaluation_stats.txt", saved_stats)
+        save_training_stats(
+            output_dir / f"{label}_evaluation_stats.txt",
+            saved_stats,
+            drop_reward_histories=True,
+        )
         plot_evaluation_rewards(stats, out_path=output_dir / f"{label}_evaluation_rewards.png", show=False)
     return stats
 
@@ -1541,7 +1447,11 @@ def evaluate_simple_agent_reference(
                 stats["rollout_video_path"] = str(video_path)
         saved_stats = dict(stats)
         saved_stats.pop("first_rollout_frames", None)
-        save_training_stats(output_dir / "simple_agent_evaluation_stats.txt", saved_stats)
+        save_training_stats(
+            output_dir / "simple_agent_evaluation_stats.txt",
+            saved_stats,
+            drop_reward_histories=True,
+        )
         plot_evaluation_rewards(
             stats,
             out_path=output_dir / "simple_agent_evaluation_rewards.png",
@@ -1602,82 +1512,6 @@ def policy_from_deep_srq(agent, *, use_action_masks=False):
 def _load_stats(path):
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
-
-
-def load_pommerman_deepsrq_nfgtransformer_agent(
-    epsilon,
-    *,
-    repo_root=None,
-    use_gpu=True,
-    checkpoint_name="best",
-    nfg_checkpoint_path=None,
-    nfg_accept_gap=None,
-    nfg_fallback_enabled=False,
-):
-    if torch is None:
-        raise ImportError("Deep SRQ checkpoint loading requires torch.")
-    from dueling_double_dqn_sre import DuelingDoubleDqnSreAgent, DuelingDoubleDqnSreAgentConfig
-    from sre_solvers import make_sre_solver
-
-    run_dir = deepsrq_nfgtransformer_training_dir(epsilon, repo_root=repo_root)
-    stats = _load_stats(run_dir / "training_stats.txt")
-    checkpoint_paths = stats.get("checkpoint_paths", {})
-    checkpoint_value = checkpoint_paths.get(checkpoint_name)
-    checkpoint = Path(checkpoint_value) if checkpoint_value else run_dir / "shared_deepsrq_best.pt"
-    if not checkpoint.is_file():
-        checkpoint = run_dir / "shared_deepsrq_best.pt"
-    if not checkpoint.is_file():
-        checkpoint = run_dir / "shared_deepsrq_final.pt"
-    if not checkpoint.is_file():
-        raise FileNotFoundError(f"No DeepSRQ checkpoint found in {run_dir}.")
-
-    solver_checkpoint = (
-        nfg_checkpoint_path
-        if nfg_checkpoint_path is not None
-        else stats.get("nfg_checkpoint_path")
-    )
-    solver = make_sre_solver(
-        "nfg_transformer_sre",
-        checkpoint_path=solver_checkpoint,
-        accept_exploitability_tol=(
-            nfg_accept_gap if nfg_accept_gap is not None else stats.get("nfg_accept_gap")
-        ),
-        fallback_enabled=(
-            nfg_fallback_enabled
-            if nfg_fallback_enabled is not None
-            else stats.get("nfg_fallback_enabled", False)
-        ),
-    )
-    agent = DuelingDoubleDqnSreAgent(
-        DuelingDoubleDqnSreAgentConfig(
-            obs_dim=int(stats["obs_dim"]),
-            num_agents=int(stats.get("num_agents", DEFAULT_NUM_AGENTS)),
-            num_actions=int(stats.get("num_actions", DEFAULT_NUM_ACTIONS)),
-            epsilon_robust=float(epsilon),
-            epsilon_robust_initial=float(epsilon),
-            epsilon_schedule="constant",
-            epsilon_explore=0.0,
-            action_epsilon_start=0.0,
-            action_epsilon_end=0.0,
-            lr=3e-4,
-            gamma=0.99,
-            buffer_size=20_000,
-            batch_size=int(stats.get("batch_size", 32)),
-            learning_starts=500,
-            grad_clip_norm=10.0,
-            train_every=4,
-            target_update_steps=250,
-            target_equilibrium_update_steps=4,
-            network_type="shared_trunk_separate_heads",
-            use_gpu=use_gpu,
-            sre_solver=solver,
-            sre_solver_name="nfg_transformer_sre",
-        )
-    )
-    agent.load_checkpoint(checkpoint, map_location=None if use_gpu else "cpu")
-    agent.config.epsilon_explore = 0.0
-    agent.config.epsilon_robust = float(epsilon)
-    return agent
 
 
 def load_pommerman_deepsrq_path_tvc_pool_agent(
@@ -1794,53 +1628,6 @@ def load_pommerman_sr_adidas_agent(
     agent.config.epsilon_explore = 0.0
     agent.config.epsilon_robust = float(epsilon)
     return agent
-
-
-def evaluate_pommerman_deepsrq_nfgtransformer_for_epsilon(
-    epsilon,
-    *,
-    n_episodes=20,
-    max_steps=200,
-    seed=BASE_SEED + 10_000,
-    repo_root=None,
-    use_gpu=True,
-    nfg_checkpoint_path=None,
-    nfg_accept_gap=None,
-    nfg_fallback_enabled=False,
-):
-    output_dir = deepsrq_nfgtransformer_evaluation_dir(epsilon, repo_root=repo_root)
-    agent = load_pommerman_deepsrq_nfgtransformer_agent(
-        epsilon,
-        repo_root=repo_root,
-        use_gpu=use_gpu,
-        nfg_checkpoint_path=nfg_checkpoint_path,
-        nfg_accept_gap=nfg_accept_gap,
-        nfg_fallback_enabled=nfg_fallback_enabled,
-    )
-    try:
-        stats = evaluate_policy(
-            policy_from_deep_srq(agent),
-            n_episodes=n_episodes,
-            max_steps=max_steps,
-            seed=seed,
-            output_dir=output_dir,
-            label=f"deep_srq_nfgtransformer_eps_{epsilon_slug(epsilon)}",
-        )
-    finally:
-        agent.close()
-    stats["epsilon_robust"] = float(epsilon)
-    stats["artifact_dir"] = str(output_dir)
-    save_training_stats(
-        output_dir / "evaluation_manifest.json",
-        {
-            "algorithm": DEEPSRQ_NFGTRANSFORMER_FAMILY,
-            "epsilon": float(epsilon),
-            "n_episodes": int(n_episodes),
-            "max_steps": int(max_steps),
-            "artifact_dir": str(output_dir),
-        },
-    )
-    return stats
 
 
 def evaluate_pommerman_deepsrq_path_tvc_pool_for_epsilon(

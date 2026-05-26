@@ -32,14 +32,10 @@ from .deep_srq_lbf import (
     DEFAULT_OUTPUT_ROOT,
     _action_dict_from_list,
     _action_masks,
-    _format_agent_metric_counts,
-    _format_agent_positions,
-    _format_food_records,
     _slugify,
     basic_lbf_config,
     lbf_config,
 )
-from .instrumented_env import aggregate_lbf_episode_metrics, extract_lbf_metrics
 from .pz_wrapper import LBFParallelEnv
 from .state_action_encoding import canonical_lbf_state
 
@@ -226,8 +222,6 @@ def _evaluate_agent_rewards(
     old_epsilon = float(agent.config.epsilon_explore)
     agent.config.epsilon_explore = 0.0
     rewards = []
-    episode_metrics = []
-    episode_lengths = []
     try:
         if int(num_envs) > 1:
             env_count = max(1, min(int(num_envs), int(n_episodes)))
@@ -235,14 +229,13 @@ def _evaluate_agent_rewards(
             next_episode_seed = 0
             for _ in range(env_count):
                 env = LBFParallelEnv(**lbf_env_config)
-                obs_dict, reset_info = env.reset(seed=int(seed) + next_episode_seed)
+                obs_dict, _ = env.reset(seed=int(seed) + next_episode_seed)
                 agent_order = list(env.possible_agents)
                 slots.append(
                     {
                         "env": env,
                         "agent_order": agent_order,
                         "obs_dict": obs_dict,
-                        "latest_metrics": extract_lbf_metrics(reset_info),
                         "totals": np.zeros(len(agent_order), dtype=np.float64),
                         "steps": 0,
                         "active": True,
@@ -284,11 +277,8 @@ def _evaluate_agent_rewards(
                         env = slot["env"]
                         order = slot["agent_order"]
                         action_dict = _action_dict_from_list(actions_batch[local_idx], order)
-                        obs_dict, reward_dict, term_dict, trunc_dict, step_info = env.step(
+                        obs_dict, reward_dict, term_dict, trunc_dict, _ = env.step(
                             action_dict
-                        )
-                        slot["latest_metrics"] = (
-                            extract_lbf_metrics(step_info) or slot["latest_metrics"]
                         )
                         slot["totals"] += np.asarray(
                             [reward_dict.get(agent_name, 0.0) for agent_name in order],
@@ -308,18 +298,15 @@ def _evaluate_agent_rewards(
                         if not done:
                             continue
                         rewards.append(slot["totals"].tolist())
-                        episode_lengths.append(int(slot["steps"]))
-                        episode_metrics.append(slot["latest_metrics"])
                         completed += 1
                         if completed >= int(n_episodes) or next_episode_seed >= int(n_episodes):
                             slot["active"] = False
                             continue
-                        obs_dict, reset_info = env.reset(seed=int(seed) + next_episode_seed)
+                        obs_dict, _ = env.reset(seed=int(seed) + next_episode_seed)
                         next_episode_seed += 1
                         slot.update(
                             {
                                 "obs_dict": obs_dict,
-                                "latest_metrics": extract_lbf_metrics(reset_info),
                                 "totals": np.zeros(len(order), dtype=np.float64),
                                 "steps": 0,
                                 "active": True,
@@ -332,8 +319,7 @@ def _evaluate_agent_rewards(
             for episode in range(int(n_episodes)):
                 env = LBFParallelEnv(**lbf_env_config)
                 try:
-                    obs_dict, reset_info = env.reset(seed=int(seed) + episode)
-                    latest_metrics = extract_lbf_metrics(reset_info)
+                    obs_dict, _ = env.reset(seed=int(seed) + episode)
                     agent_order = list(env.possible_agents)
                     totals = np.zeros(len(agent_order), dtype=np.float64)
                     steps = 0
@@ -345,10 +331,9 @@ def _evaluate_agent_rewards(
                             action_masks=_action_masks(env, agent_order),
                         )
                         action_dict = _action_dict_from_list(action_list, agent_order)
-                        obs_dict, reward_dict, term_dict, trunc_dict, step_info = env.step(
+                        obs_dict, reward_dict, term_dict, trunc_dict, _ = env.step(
                             action_dict
                         )
-                        latest_metrics = extract_lbf_metrics(step_info) or latest_metrics
                         totals += np.asarray(
                             [reward_dict.get(agent_name, 0.0) for agent_name in agent_order],
                             dtype=np.float64,
@@ -361,22 +346,17 @@ def _evaluate_agent_rewards(
                         ):
                             break
                     rewards.append(totals.tolist())
-                    episode_lengths.append(int(steps))
-                    episode_metrics.append(latest_metrics)
                 finally:
                     env.close()
     finally:
         agent.config.epsilon_explore = old_epsilon
     rewards_arr = np.asarray(rewards, dtype=np.float64)
+    mean_agent_rewards = (
+        [] if rewards_arr.size == 0 else rewards_arr.mean(axis=0).astype(float).tolist()
+    )
     return {
-        "episode_rewards": rewards,
-        "joint_rewards": rewards_arr.sum(axis=1).tolist() if rewards_arr.size else [],
-        "episode_lengths": episode_lengths,
-        "episode_metrics": episode_metrics,
-        "metric_totals": aggregate_lbf_episode_metrics(
-            episode_metrics,
-            rewards_arr.shape[1] if rewards_arr.ndim == 2 else None,
-        ),
+        "n_eval_episodes": int(len(rewards)),
+        "mean_agent_rewards": mean_agent_rewards,
         "mean_joint_reward": (
             None if rewards_arr.size == 0 else float(rewards_arr.sum(axis=1).mean())
         ),
@@ -713,7 +693,13 @@ def train_lbf_srac_vectorized(
     if write_plots:
         plot_training_stats(stats, out_path=plot_path)
         stats["plot_path"] = str(plot_path)
-    save_training_stats(stats_path, stats)
+    save_training_stats(
+        stats_path,
+        stats,
+        drop_reward_histories=True,
+        drop_lbf_episode_details=True,
+        drop_episode_lengths=True,
+    )
     if print_full_stats:
         print_stats_payload(stats, f"LBF SRAC vectorized - {solver_name}")
     print("\nReward Summary")

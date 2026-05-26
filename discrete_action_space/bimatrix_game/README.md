@@ -122,7 +122,7 @@ In all scenarios the agents' paths cross, creating frequent collision opportunit
 
 Each run trains for 3,000 episodes and saves/displays:
 - Best and final checkpoints (`.pkl` for tabular, `.pt` for deep)
-- A `training_stats.txt` file with the full reward history, scenario config, timing, and summary statistics
+- A compact `training_stats.txt` file with reward summaries, scenario config, and timing
 - A `training_plot.png` plot, also displayed in the notebook
 
 Results are organised under `scenario_runs/<scenario_key>/<algorithm_vs_algorithm>/`.

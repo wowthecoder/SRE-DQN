@@ -200,8 +200,6 @@ def test_pommerman_notebooks_are_valid_json():
     for name in (
         "pommerman_baselines.ipynb",
         "pommerman_sr_algorithms.ipynb",
-        "pommerman_deepsrq_nfgtransformer_training.ipynb",
-        "pommerman_deepsrq_nfgtransformer_evaluation.ipynb",
         "pommerman_deepsrq_path_tvc_pool_training.ipynb",
         "pommerman_deepsrq_path_tvc_pool_evaluation.ipynb",
         "pommerman_sr_adidas_training.ipynb",
@@ -217,20 +215,12 @@ def test_pommerman_notebooks_are_valid_json():
 
 def test_pommerman_split_notebook_artifact_paths(tmp_path):
     from discrete_action_space.pommerman_ffa.notebook_utils import (
-        deepsrq_nfgtransformer_evaluation_dir,
-        deepsrq_nfgtransformer_training_dir,
         deepsrq_path_tvc_pool_evaluation_dir,
         deepsrq_path_tvc_pool_training_dir,
         sr_adidas_evaluation_dir,
         sr_adidas_training_dir,
     )
 
-    assert deepsrq_nfgtransformer_training_dir(0.01, repo_root=tmp_path) == (
-        tmp_path / "discrete_action_space/pommerman_ffa/deepsrq_nfgtransformer/training/0.01"
-    )
-    assert deepsrq_nfgtransformer_evaluation_dir(1.0, repo_root=tmp_path) == (
-        tmp_path / "discrete_action_space/pommerman_ffa/deepsrq_nfgtransformer/evaluation/1.0"
-    )
     assert deepsrq_path_tvc_pool_training_dir(0.01, repo_root=tmp_path) == (
         tmp_path
         / "discrete_action_space/pommerman_ffa/deepsrq_path_tvc_mcp_nplayer_pool/training/0.01"

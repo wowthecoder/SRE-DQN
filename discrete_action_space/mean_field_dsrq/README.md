@@ -67,11 +67,11 @@ python -m discrete_action_space.mean_field_dsrq.eval_mf_dsrq \
 
 ## BenchMARL / MAgent2 / VMAS
 
-The baseline notebook uses BenchMARL's built-in MAgent2 `adversarial_pursuit_v4`
-task, so MAPPO, IPPO, QMIX, VDN, and IQL all run through the same BenchMARL
+The baseline notebook uses MAgent2 `battle_v4` through BenchMARL-compatible
+helpers, so MAPPO, IPPO, QMIX, VDN, and IQL all run through the same BenchMARL
 experiment machinery. BenchMARL's VMAS backend is a separate vectorized
 simulator family; VMAS parallelization applies to VMAS scenarios, not to MAgent2
-`adversarial_pursuit_v4`. For MAgent2, use BenchMARL collection settings
+`battle_v4`. For MAgent2, use BenchMARL collection settings
 (`n_envs_per_worker`, `parallel_collection`) to scale collection.
 
 The MF-DSRQ notebook keeps the algorithmic target exactly the same as the
@@ -80,6 +80,123 @@ script implementation, but the environment factory now prefers the modern
 imports only for compatibility.
 
 ## Algorithm Details
+
+### MF-DSRQ Pseudocode
+
+This is the algorithm implemented by `train_mf_dsrq.py`, `magent_env_wrapper.py`,
+and `mf_dsrq_agent.py`. The implementation is type-shared: one
+`MFDsrqAgent` controls all currently alive agents with the same type prefix
+such as `red_` or `blue_`.
+
+```text
+Inputs:
+  Environment factory E
+  Agent type prefixes T
+  TV radius schedule epsilon_tv(t)
+  Boltzmann inverse-temperature schedule beta(t)
+  Exploration schedule epsilon_explore(t)
+  Discount gamma
+  EMA momentum mu for mean actions
+
+Initialize:
+  Create N vectorized MAgent2 environments.
+  For each agent type c in T:
+      infer observation shape, own action count A_c, neighbor action count B_c
+      initialize online network Q_c(o) -> [A_c x B_c]
+      initialize target network Qbar_c <- Q_c
+      initialize replay buffer D_c
+  Reset every environment.
+  For every alive agent i:
+      initialize mean action abar_i to the uniform distribution over its type actions.
+
+For global_step = 0, 1, ... until total_steps:
+  Update epsilon_tv, beta, and epsilon_explore from their schedules.
+
+  # Rollout collection
+  For each environment e:
+      For each agent type c:
+          collect observations o_i and current mean actions abar_i
+          for all alive agents i of type c
+
+          For each alive agent i:
+              with probability epsilon_explore:
+                  sample a_i uniformly from A_c
+              otherwise:
+                  q_grid_i = Q_c(o_i)                         # [A_c x B_c]
+                  z_i[a] = TVWorst(abar_i, q_grid_i[a, :], epsilon_tv)
+                  pi_i = softmax(beta * z_i)
+                  sample a_i from pi_i
+
+      Step the environment with the joint action dictionary.
+
+      Before updating the environment state, keep abar_i,t for replay.
+      Compute the empirical one-hot action mean for each type from actions just taken.
+      For every alive agent i of that type:
+          abar_i,t+1 = (1 - mu) * abar_i,t + mu * empirical_type_action_mean
+
+      For every acted agent i of type c:
+          push into D_c:
+              (o_i,t, a_i,t, r_i,t, o_i,t+1,
+               abar_i,t, abar_i,t+1, done_i,t+1, valid_i)
+
+      If an environment has no alive agents, record episode rewards and reset it.
+
+  # Gradient updates
+  For each agent type c:
+      if D_c has at least learning_starts samples
+         and enough environment pushes passed since the last update:
+
+          Sample a minibatch from D_c:
+              (o, a, r, o_next, abar, abar_next, done, valid)
+
+          q_grid = Q_c(o)                                      # [B x A_c x B_c]
+          q_taken_row = q_grid[batch_index, a, :]              # [B x B_c]
+          q_taken = TVWorst(abar, q_taken_row, epsilon_tv)
+
+          With no gradient:
+              q_next_grid = Qbar_c(o_next)                     # [B x A_c x B_c]
+              z_next[a] = TVWorst(abar_next, q_next_grid[:, a, :], epsilon_tv)
+              pi_next = softmax(beta * z_next)
+              v_next = sum_a pi_next[a] * z_next[a]
+              y = r + gamma * (1 - done) * v_next
+
+          loss = valid-masked HuberLoss(q_taken, y)
+          take an Adam step on Q_c
+          clip gradients
+          soft-update target network:
+              Qbar_c <- tau * Q_c + (1 - tau) * Qbar_c
+
+  Periodically log metrics and save per-type checkpoints.
+```
+
+The TV-worst-case operation is the strategic-robustness replacement for the
+plain mean-field expectation over neighbor actions:
+
+```text
+TVWorst(p, v, epsilon):
+  # p is the observed mean-action distribution.
+  # v[k] is the value if the representative neighbor action is k.
+  Normalize p onto the simplex, using uniform if the row is empty.
+  If epsilon <= 0:
+      return sum_k p[k] * v[k]
+
+  q <- p
+  budget <- epsilon
+  While budget remains and a higher-value action still has mass:
+      hi <- currently highest-value action with q[hi] > 0
+      lo <- currently lowest-value action with q[lo] < 1
+      delta <- min(q[hi], 1 - q[lo], budget)
+      move delta probability mass from hi to lo
+      budget <- budget - delta
+
+  return sum_k q[k] * v[k]
+```
+
+With `epsilon_tv = 0`, `TVWorst` returns the ordinary mean-field expectation,
+so the training target reduces to deep MF-Q. Increasing `epsilon_tv` moves
+probability mass from favorable neighbor actions to unfavorable neighbor
+actions inside the TV ball, giving the SRQ-style robust Bellman target without
+constructing the full `A^(N-1)` opponent joint action game.
 
 ### Why no fixed-point in the Bellman target?
 

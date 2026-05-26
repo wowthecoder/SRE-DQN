@@ -20,22 +20,22 @@ for _path in (str(_DISCRETE_DIR), str(_BIMATRIX_DIR)):
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-from stats_utils import save_training_stats
+from stats_utils import compact_training_stats, save_training_stats
 
 from dueling_double_dqn_sre import DuelingDoubleDqnSreAgent, DuelingDoubleDqnSreAgentConfig
 from srac import SracAgent, SracConfig
+from sra2c import Sra2cAgent, Sra2cConfig
 from sre_solvers import make_sre_solver
 
 from .deep_srq_lbf import (
     BASE_SEED,
-    NFG_TRANSFORMER_SOLVER_NAMES,
     _action_masks,
     deep_srq_lbf_hyperparams,
     train_lbf_deep_srq_vectorized,
 )
 from .srac_lbf import _local_obs_matrix, train_lbf_srac_vectorized
+from .sra2c_lbf import train_lbf_sra2c_vectorized
 from .epymarl_lbf_env import EPYMARL_LBF_SCENARIOS
-from .instrumented_env import aggregate_lbf_episode_metrics, extract_lbf_metrics
 from .notebook_eval import (
     agent_training_reward_series,
     joint_training_reward_series,
@@ -55,16 +55,9 @@ ROBUST_EPSILONS = (0.01, 0.1, 0.5, 1.0)
 BASELINE_ALGORITHMS = ("random", "iql", "mappo", "qmix")
 DEFAULT_EVAL_EPISODES = 500
 DEFAULT_EVAL_VIDEO_FPS = 4
-DEFAULT_NFG_TRANSFORMER_CHECKPOINT = (
-    _DISCRETE_DIR
-    / "sre_solvers"
-    / "nfg_transformer"
-    / "nfg_sre_checkpoints"
-    / "nfg_sre_lbf3_online.pt"
-)
-DEEPSRQ_NFGTRANSFORMER_FAMILY = "deepsrq_nfgtransformer"
 DEEPSRQ_PATH_MCP_NPLAYER_POOL_FAMILY = "deepsrq_path_mcp_nplayer_pool"
 SRAC_FAMILY = "srac"
+SRA2C_FAMILY = "sra2c"
 PATH_C_POOL_SOLVER = "path_c_pool"
 PATH_MCP_NPLAYER_POOL_SOLVER = "path_mcp_nplayer_pool"
 PATH_TVC_MCP_NPLAYER_POOL_SOLVER = "path_tvc_mcp_nplayer_pool"
@@ -179,26 +172,6 @@ def robust_artifact_dir(
     return lbf_grid_dir(repo_root) / family / phase / str(scenario_key) / epsilon_slug(epsilon)
 
 
-def deepsrq_training_dir(scenario_key: str, epsilon: float, *, repo_root=None) -> Path:
-    return robust_artifact_dir(
-        DEEPSRQ_NFGTRANSFORMER_FAMILY,
-        "training",
-        scenario_key,
-        epsilon,
-        repo_root=repo_root,
-    )
-
-
-def deepsrq_evaluation_dir(scenario_key: str, epsilon: float, *, repo_root=None) -> Path:
-    return robust_artifact_dir(
-        DEEPSRQ_NFGTRANSFORMER_FAMILY,
-        "evaluation",
-        scenario_key,
-        epsilon,
-        repo_root=repo_root,
-    )
-
-
 def deepsrq_path_mcp_pool_training_dir(
     scenario_key: str,
     epsilon: float,
@@ -235,6 +208,14 @@ def srac_training_dir(scenario_key: str, epsilon: float, *, repo_root=None) -> P
 
 def srac_evaluation_dir(scenario_key: str, epsilon: float, *, repo_root=None) -> Path:
     return robust_artifact_dir(SRAC_FAMILY, "evaluation", scenario_key, epsilon, repo_root=repo_root)
+
+
+def sra2c_training_dir(scenario_key: str, epsilon: float, *, repo_root=None) -> Path:
+    return robust_artifact_dir(SRA2C_FAMILY, "training", scenario_key, epsilon, repo_root=repo_root)
+
+
+def sra2c_evaluation_dir(scenario_key: str, epsilon: float, *, repo_root=None) -> Path:
+    return robust_artifact_dir(SRA2C_FAMILY, "evaluation", scenario_key, epsilon, repo_root=repo_root)
 
 
 def _json_safe(value):
@@ -364,7 +345,7 @@ def write_training_summary(stats: dict, output_dir: str | Path) -> Path:
 
 
 def _print_live_training_status(prefix: str, episode: int, stats: dict) -> None:
-    usage = stats.get("solver_usage") or stats.get("nfg_transformer_usage") or {}
+    usage = stats.get("solver_usage") or {}
     fallback_rate = usage.get("fallback_rate")
     solve_time = usage.get("solve_time") or {}
     solve_ms = solve_time.get("mean_microseconds")
@@ -378,96 +359,6 @@ def _print_live_training_status(prefix: str, episode: int, stats: dict) -> None:
         f"{prefix} ep={episode} best_loss={stats.get('best_loss')} "
         f"latest_loss={stats.get('latest_loss')} {solver_status}"
     )
-
-
-def train_deepsrq_nfgtransformer_for_epsilon(
-    epsilon: float,
-    *,
-    n_episodes: int,
-    scenarios: tuple[LbfNotebookScenario, ...] | None = None,
-    nfg_checkpoint_path: str | Path = DEFAULT_NFG_TRANSFORMER_CHECKPOINT,
-    nfg_accept_gap: float = 0.1,
-    nfg_fallback_enabled: bool = False,
-    base_seed: int = BASE_SEED,
-    use_gpu: bool = True,
-    eval_interval: int | None = 100,
-    eval_episodes: int = 5,
-    num_envs: int = 2,
-    eval_num_envs: int | None = None,
-    hyperparameter_overrides: dict | None = None,
-    repo_root: str | Path | None = None,
-) -> dict[str, dict]:
-    scenarios = scenarios or robust_lbf_scenarios()
-    checkpoint = Path(nfg_checkpoint_path)
-    if not checkpoint.exists():
-        raise FileNotFoundError(f"NfgTransformer checkpoint not found: {checkpoint}")
-    results = {}
-    for scenario_index, scenario in enumerate(scenarios):
-        run_dir = deepsrq_training_dir(scenario.key, epsilon, repo_root=repo_root)
-        hp = _merge_hyperparameter_overrides(
-            hyperparameter_overrides,
-            {
-                "nfg_transformer": {
-                    "checkpoint_path": str(checkpoint),
-                    "accept_exploitability_tol": nfg_accept_gap,
-                    "fallback_enabled": False,
-                },
-                "agent": {
-                    "sre_uniform_fallback_enabled": False,
-                },
-            },
-        )
-        seed = int(base_seed + scenario_index)
-        stats = train_lbf_deep_srq_vectorized(
-            n_episodes=n_episodes,
-            solver_name="nfg_transformer_sre",
-            epsilon_robust_initial=float(epsilon),
-            epsilon_schedule="constant",
-            seed=seed,
-            run_dir=run_dir,
-            lbf_config_overrides=scenario.config,
-            hyperparameter_overrides=hp,
-            use_gpu=use_gpu,
-            write_plots=False,
-            include_replay_buffer=True,
-            eval_interval=eval_interval,
-            eval_episodes=eval_episodes,
-            num_envs=int(num_envs),
-            eval_num_envs=int(eval_num_envs or num_envs),
-            print_full_stats=False,
-            scenario_key=scenario.key,
-            scenario_name=scenario.name,
-        )
-        stats.update(
-            {
-                "algorithm": "deep_srq",
-                "scenario_key": scenario.key,
-                "scenario_name": scenario.name,
-                "gym_id": scenario.gym_id,
-                "time_limit": scenario.time_limit,
-                "epsilon_schedule": "constant",
-                "num_envs": int(num_envs),
-                "eval_num_envs": int(eval_num_envs or num_envs),
-            }
-        )
-        stats["training_reward_plot_paths"] = write_training_reward_plots(stats, run_dir)
-        stats["summary_path"] = str(write_training_summary(stats, run_dir))
-        save_training_stats(run_dir / "training_stats.json", stats)
-        _print_live_training_status(f"DeepSRQ {scenario.key} eps={epsilon_slug(epsilon)}", n_episodes, stats)
-        results[scenario.key] = stats
-    manifest = {
-        "algorithm": "deep_srq_nfgtransformer",
-        "num_envs": int(num_envs),
-        "eval_num_envs": int(eval_num_envs or num_envs),
-        "epsilon": float(epsilon),
-        "results": results,
-    }
-    save_training_stats(
-        lbf_grid_dir(repo_root) / "deepsrq_nfgtransformer" / "training" / f"manifest_eps_{epsilon_slug(epsilon)}.json",
-        manifest,
-    )
-    return results
-
 
 def train_deepsrq_path_mcp_pool_for_epsilon(
     epsilon: float,
@@ -542,7 +433,13 @@ def train_deepsrq_path_mcp_pool_for_epsilon(
         )
         stats["training_reward_plot_paths"] = write_training_reward_plots(stats, run_dir)
         stats["summary_path"] = str(write_training_summary(stats, run_dir))
-        save_training_stats(run_dir / "training_stats.json", stats)
+        save_training_stats(
+            run_dir / "training_stats.json",
+            stats,
+            drop_reward_histories=True,
+            drop_lbf_episode_details=True,
+            drop_episode_lengths=True,
+        )
         _print_live_training_status(
             f"DeepSRQ PATH pool {scenario.key} solver={solver_name} eps={epsilon_slug(epsilon)}",
             n_episodes,
@@ -567,6 +464,9 @@ def train_deepsrq_path_mcp_pool_for_epsilon(
         / "training"
         / f"manifest_eps_{epsilon_slug(epsilon)}.json",
         manifest,
+        drop_reward_histories=True,
+        drop_lbf_episode_details=True,
+        drop_episode_lengths=True,
     )
     return results
 
@@ -633,7 +533,13 @@ def train_srac_for_epsilon(
         )
         stats["training_reward_plot_paths"] = write_training_reward_plots(stats, run_dir)
         stats["summary_path"] = str(write_training_summary(stats, run_dir))
-        save_training_stats(run_dir / "training_stats.json", stats)
+        save_training_stats(
+            run_dir / "training_stats.json",
+            stats,
+            drop_reward_histories=True,
+            drop_lbf_episode_details=True,
+            drop_episode_lengths=True,
+        )
         _print_live_training_status(
             f"SRAC {scenario.key} eps={epsilon_slug(epsilon)}",
             n_episodes,
@@ -653,6 +559,104 @@ def train_srac_for_epsilon(
     save_training_stats(
         lbf_grid_dir(repo_root) / SRAC_FAMILY / "training" / f"manifest_eps_{epsilon_slug(epsilon)}.json",
         manifest,
+        drop_reward_histories=True,
+        drop_lbf_episode_details=True,
+        drop_episode_lengths=True,
+    )
+    return results
+
+
+def train_sra2c_for_epsilon(
+    epsilon: float,
+    *,
+    n_episodes: int,
+    scenarios: tuple[LbfNotebookScenario, ...] | None = None,
+    base_seed: int = BASE_SEED,
+    use_gpu: bool = True,
+    eval_interval: int | None = 100,
+    eval_episodes: int = 5,
+    sre_solver_workers: int | None = None,
+    num_envs: int = 2,
+    eval_num_envs: int | None = None,
+    hyperparameter_overrides: dict | None = None,
+    repo_root: str | Path | None = None,
+) -> dict[str, dict]:
+    scenarios = scenarios or robust_lbf_scenarios()
+    hp = hyperparameter_overrides
+    if sre_solver_workers is not None:
+        hp = _merge_hyperparameter_overrides(
+            hyperparameter_overrides,
+            {"agent": {"sre_solver_workers": int(sre_solver_workers)}},
+        )
+    results = {}
+    for scenario_index, scenario in enumerate(scenarios):
+        run_dir = sra2c_training_dir(scenario.key, epsilon, repo_root=repo_root)
+        seed = int(base_seed + scenario_index)
+        stats = train_lbf_sra2c_vectorized(
+            n_episodes=n_episodes,
+            epsilon_robust_initial=float(epsilon),
+            epsilon_schedule="constant",
+            seed=seed,
+            run_dir=run_dir,
+            lbf_config_overrides=scenario.config,
+            hyperparameter_overrides=hp,
+            use_gpu=use_gpu,
+            write_plots=False,
+            include_replay_buffer=True,
+            eval_interval=eval_interval,
+            eval_episodes=eval_episodes,
+            num_envs=int(num_envs),
+            eval_num_envs=int(eval_num_envs or num_envs),
+            print_full_stats=False,
+            scenario_key=scenario.key,
+            scenario_name=scenario.name,
+        )
+        stats.update(
+            {
+                "algorithm": SRA2C_FAMILY,
+                "scenario_key": scenario.key,
+                "scenario_name": scenario.name,
+                "gym_id": scenario.gym_id,
+                "time_limit": scenario.time_limit,
+                "epsilon_schedule": "constant",
+                "sre_solver_workers": None
+                if sre_solver_workers is None
+                else int(sre_solver_workers),
+                "num_envs": int(num_envs),
+                "eval_num_envs": int(eval_num_envs or num_envs),
+            }
+        )
+        stats["training_reward_plot_paths"] = write_training_reward_plots(stats, run_dir)
+        stats["summary_path"] = str(write_training_summary(stats, run_dir))
+        save_training_stats(
+            run_dir / "training_stats.json",
+            stats,
+            drop_reward_histories=True,
+            drop_lbf_episode_details=True,
+            drop_episode_lengths=True,
+        )
+        _print_live_training_status(
+            f"SR-A2C {scenario.key} eps={epsilon_slug(epsilon)}",
+            n_episodes,
+            stats,
+        )
+        results[scenario.key] = stats
+    manifest = {
+        "algorithm": SRA2C_FAMILY,
+        "sre_solver_workers": None
+        if sre_solver_workers is None
+        else int(sre_solver_workers),
+        "num_envs": int(num_envs),
+        "eval_num_envs": int(eval_num_envs or num_envs),
+        "epsilon": float(epsilon),
+        "results": results,
+    }
+    save_training_stats(
+        lbf_grid_dir(repo_root) / SRA2C_FAMILY / "training" / f"manifest_eps_{epsilon_slug(epsilon)}.json",
+        manifest,
+        drop_reward_histories=True,
+        drop_lbf_episode_details=True,
+        drop_episode_lengths=True,
     )
     return results
 
@@ -727,6 +731,13 @@ class SracPolicyAdapter:
 
     def close(self):
         self.agent.close()
+
+
+class Sra2cPolicyAdapter(SracPolicyAdapter):
+    label = "sra2c"
+
+    def __init__(self, agent: Sra2cAgent):
+        self.agent = agent
 
 
 class _EpymarlRnnAgent(nn.Module):
@@ -863,104 +874,6 @@ def resolve_epymarl_checkpoint(
     return max(checkpoint_dirs, key=lambda path: (int(path.name), path.stat().st_mtime))
 
 
-def load_deepsrq_policy(
-    scenario: LbfNotebookScenario,
-    epsilon: float,
-    *,
-    repo_root: str | Path | None = None,
-    use_gpu: bool = True,
-    run_dir_override: str | Path | None = None,
-) -> DeepSrqPolicyAdapter:
-    run_dir = (
-        Path(run_dir_override)
-        if run_dir_override is not None
-        else deepsrq_training_dir(scenario.key, epsilon, repo_root=repo_root)
-    )
-    stats_path = run_dir / "training_stats.json"
-    stats = json.loads(stats_path.read_text(encoding="utf-8"))
-    checkpoint = run_dir / "shared_deepsrq_best.pt"
-    if not checkpoint.exists():
-        checkpoint = run_dir / "shared_deepsrq_final.pt"
-    hp = dict(stats.get("hyperparameters", {}))
-    solver_name = stats.get("solver_name", "nfg_transformer_sre")
-    if solver_name not in NFG_TRANSFORMER_SOLVER_NAMES:
-        raise ValueError(
-            f"Unsupported LBF Deep SRQ checkpoint solver after cleanup: {solver_name}"
-        )
-    solver = make_sre_solver(
-        solver_name,
-        random_seed=int(stats.get("seed", BASE_SEED)),
-        checkpoint_path=_hp_value(
-            hp,
-            "nfg_transformer",
-            "checkpoint_path",
-            _DEFAULT_DEEP_SRQ_LBF_HP.nfg_transformer.checkpoint_path,
-            "nfg_checkpoint_path",
-        ),
-        device=_hp_value(
-            hp,
-            "nfg_transformer",
-            "device",
-            _DEFAULT_DEEP_SRQ_LBF_HP.nfg_transformer.device,
-            "nfg_device",
-        ),
-        fallback_enabled=False,
-        compute_exploitability_diagnostics=False,
-        accept_exploitability_tol=_hp_value(
-            hp,
-            "nfg_transformer",
-            "accept_exploitability_tol",
-            _DEFAULT_DEEP_SRQ_LBF_HP.nfg_transformer.accept_exploitability_tol,
-            "nfg_accept_gap",
-        ),
-    )
-    agent = DuelingDoubleDqnSreAgent(
-        DuelingDoubleDqnSreAgentConfig(
-            agent_id=0,
-            obs_dim=int(stats["obs_dim"]),
-            num_agents=int(stats["num_agents"]),
-            num_actions=int(stats["num_actions"]),
-            epsilon_robust=float(epsilon),
-            epsilon_explore=0.0,
-            lr=_agent_hp(hp, "lr", "learning_rate"),
-            gamma=_agent_hp(hp, "gamma"),
-            buffer_size=_agent_hp(hp, "buffer_size", "replay_buffer_capacity"),
-            learning_starts=_agent_hp(hp, "learning_starts"),
-            grad_clip_norm=_agent_hp(hp, "grad_clip_norm", "grad_clip_max_norm"),
-            sre_num_repeats=_agent_hp(hp, "sre_num_repeats"),
-            sre_include_pure_starts=hp.get(
-                "sre_include_pure_starts",
-                _agent_hp(hp, "sre_include_pure_starts"),
-            ),
-            train_every=_agent_hp(hp, "train_every"),
-            network_type=_agent_hp(hp, "network_type"),
-            use_gpu=use_gpu,
-            sre_solver=solver,
-            target_equilibrium_update_steps=hp.get(
-                "target_equilibrium_update_steps",
-                _agent_hp(hp, "target_equilibrium_update_steps"),
-            ),
-            sre_candidate_selection=hp.get(
-                "sre_candidate_selection", "robust_exploitability"
-            ),
-            sre_exploitability_filter_enabled=hp.get(
-                "sre_exploitability_filter_enabled", False
-            ),
-            sre_uniform_fallback_enabled=hp.get(
-                "sre_uniform_fallback_enabled",
-                _agent_hp(hp, "sre_uniform_fallback_enabled"),
-            )
-            if solver_name not in NFG_TRANSFORMER_SOLVER_NAMES
-            else False,
-            sre_target_value_mode=hp.get("sre_target_value_mode", "robust"),
-        )
-    )
-    agent.load_checkpoint(checkpoint, map_location=None if use_gpu else "cpu")
-    agent.config.epsilon_explore = 0.0
-    agent.config.epsilon_robust = float(epsilon)
-    return DeepSrqPolicyAdapter(agent)
-
-
 def load_srac_policy(
     scenario: LbfNotebookScenario,
     epsilon: float,
@@ -1015,6 +928,62 @@ def load_srac_policy(
     agent.config.epsilon_explore = 0.0
     agent.config.epsilon_robust = float(epsilon)
     return SracPolicyAdapter(agent)
+
+
+def load_sra2c_policy(
+    scenario: LbfNotebookScenario,
+    epsilon: float,
+    *,
+    repo_root: str | Path | None = None,
+    use_gpu: bool = True,
+    run_dir_override: str | Path | None = None,
+    sre_solver_workers: int | None = None,
+) -> Sra2cPolicyAdapter:
+    run_dir = (
+        Path(run_dir_override)
+        if run_dir_override is not None
+        else sra2c_training_dir(scenario.key, epsilon, repo_root=repo_root)
+    )
+    checkpoint = run_dir / "shared_sra2c_best.pt"
+    if not checkpoint.exists():
+        checkpoint = run_dir / "shared_sra2c_final.pt"
+    if not checkpoint.exists():
+        raise FileNotFoundError(f"SR-A2C checkpoint not found under {run_dir}.")
+
+    try:
+        payload = torch.load(
+            checkpoint,
+            map_location=None if use_gpu and torch.cuda.is_available() else "cpu",
+            weights_only=False,
+        )
+    except TypeError:
+        payload = torch.load(
+            checkpoint,
+            map_location=None if use_gpu and torch.cuda.is_available() else "cpu",
+        )
+    config_payload = dict(payload.get("config", {}))
+    config_fields = set(Sra2cConfig.__dataclass_fields__)
+    config_payload = {
+        key: value for key, value in config_payload.items() if key in config_fields
+    }
+
+    class _EvalOnlySreSolver:
+        name = "sra2c_eval_only"
+
+        def close(self):
+            return None
+
+    config_payload["use_gpu"] = bool(use_gpu)
+    config_payload["epsilon_explore"] = 0.0
+    config_payload["epsilon_robust"] = float(epsilon)
+    if sre_solver_workers is not None:
+        config_payload["sre_solver_workers"] = int(sre_solver_workers)
+    config_payload["sre_solver"] = _EvalOnlySreSolver()
+    agent = Sra2cAgent(Sra2cConfig(**config_payload))
+    agent.load_checkpoint(checkpoint, map_location=None if use_gpu else "cpu")
+    agent.config.epsilon_explore = 0.0
+    agent.config.epsilon_robust = float(epsilon)
+    return Sra2cPolicyAdapter(agent)
 
 
 def load_deepsrq_path_mcp_pool_policy(
@@ -1172,8 +1141,6 @@ def evaluate_policy_matchup(
     slot_counts = [int(n_episodes)] if opponent_policy is None else rotated_episode_counts(n_episodes, num_agents)
     all_episode_rewards = []
     all_joint_rewards = []
-    all_episode_metrics = []
-    all_episode_lengths = []
     first_frames = []
     render_error = None
 
@@ -1235,8 +1202,6 @@ def evaluate_policy_matchup(
             )
         all_episode_rewards.extend(rollouts["episode_rewards"])
         all_joint_rewards.extend(rollouts["joint_rewards"])
-        all_episode_metrics.extend(rollouts.get("episode_metrics", []))
-        all_episode_lengths.extend(rollouts.get("episode_lengths") or rollouts.get("steps", []))
         if not first_frames and rollouts.get("frames"):
             first_frames = rollouts["frames"]
         render_error = render_error or rollouts.get("render_error")
@@ -1251,19 +1216,20 @@ def evaluate_policy_matchup(
         "slot_episode_counts": slot_counts,
         "episode_rewards": all_episode_rewards,
         "joint_rewards": all_joint_rewards,
-        "episode_lengths": all_episode_lengths,
-        "episode_metrics": all_episode_metrics,
-        "metric_totals": aggregate_lbf_episode_metrics(
-            all_episode_metrics,
-            num_agents,
-        ),
         "agent_labels": [f"Agent {idx + 1}" for idx in range(num_agents)],
         "render_error": render_error,
         "artifact_dir": str(output_dir),
     }
     rewards_path = output_dir / "evaluation_rewards.json"
-    rewards_path.write_text(json.dumps(_json_safe(record), indent=2), encoding="utf-8")
+    saved_record = compact_training_stats(
+        record,
+        drop_reward_histories=True,
+        drop_lbf_episode_details=True,
+        drop_episode_lengths=True,
+    )
+    rewards_path.write_text(json.dumps(_json_safe(saved_record), indent=2), encoding="utf-8")
     record["rewards_path"] = str(rewards_path)
+    saved_record["rewards_path"] = str(rewards_path)
 
     fig = plot_evaluation_agent_reward_boxplot(
         record,
@@ -1273,6 +1239,7 @@ def evaluate_policy_matchup(
         boxplot_path = output_dir / "evaluation_boxplot.png"
         fig.savefig(boxplot_path, dpi=150)
         record["boxplot_path"] = str(boxplot_path)
+        saved_record["boxplot_path"] = str(boxplot_path)
     if first_frames:
         try:
             video_path = save_rollout_video(
@@ -1282,10 +1249,12 @@ def evaluate_policy_matchup(
                 title=f"{record['matchup_label']} rollout",
             )
             record["video_path"] = str(video_path)
+            saved_record["video_path"] = str(video_path)
         except Exception as exc:  # pragma: no cover - depends on local writers
             record["video_error"] = f"{type(exc).__name__}: {exc}"
-    rewards_path.write_text(json.dumps(_json_safe(record), indent=2), encoding="utf-8")
-    return record
+            saved_record["video_error"] = f"{type(exc).__name__}: {exc}"
+    rewards_path.write_text(json.dumps(_json_safe(saved_record), indent=2), encoding="utf-8")
+    return saved_record
 
 
 def _skip_record(output_dir: Path, *, scenario, primary_label, opponent_label, exc) -> dict:
@@ -1302,71 +1271,6 @@ def _skip_record(output_dir: Path, *, scenario, primary_label, opponent_label, e
     path = output_dir / "evaluation_rewards.json"
     path.write_text(json.dumps(_json_safe(record), indent=2), encoding="utf-8")
     return record
-
-
-def evaluate_deepsrq_suite_for_epsilon(
-    epsilon: float,
-    *,
-    scenarios: tuple[LbfNotebookScenario, ...] | None = None,
-    n_episodes: int = DEFAULT_EVAL_EPISODES,
-    repo_root: str | Path | None = None,
-    use_gpu: bool = True,
-    num_envs: int = 1,
-) -> dict[str, dict]:
-    scenarios = scenarios or robust_lbf_scenarios()
-    results = {}
-    for scenario in scenarios:
-        base_dir = deepsrq_evaluation_dir(scenario.key, epsilon, repo_root=repo_root)
-        primary = load_deepsrq_policy(scenario, epsilon, repo_root=repo_root, use_gpu=use_gpu)
-        try:
-            scenario_results = {
-                "self_play": evaluate_policy_matchup(
-                    scenario=scenario,
-                    primary_policy=primary,
-                    output_dir=base_dir / "self_play",
-                    primary_label="deepsrq_nfgtransformer",
-                    n_episodes=n_episodes,
-                    num_envs=num_envs,
-                )
-            }
-            for baseline in BASELINE_ALGORITHMS:
-                out_dir = base_dir / f"vs_{baseline}"
-                try:
-                    opponent = load_baseline_policy(baseline, scenario, use_gpu=use_gpu)
-                    try:
-                        scenario_results[f"vs_{baseline}"] = evaluate_policy_matchup(
-                            scenario=scenario,
-                            primary_policy=primary,
-                            opponent_policy=opponent,
-                            output_dir=out_dir,
-                            primary_label="deepsrq_nfgtransformer",
-                            opponent_label=baseline,
-                            n_episodes=n_episodes,
-                            num_envs=num_envs,
-                        )
-                    finally:
-                        opponent.close()
-                except Exception as exc:
-                    scenario_results[f"vs_{baseline}"] = _skip_record(
-                        out_dir,
-                        scenario=scenario,
-                        primary_label="deepsrq_nfgtransformer",
-                        opponent_label=baseline,
-                        exc=exc,
-                    )
-            results[scenario.key] = scenario_results
-        finally:
-            primary.close()
-    save_training_stats(
-        lbf_grid_dir(repo_root) / "deepsrq_nfgtransformer" / "evaluation" / f"manifest_eps_{epsilon_slug(epsilon)}.json",
-        {
-            "algorithm": "deepsrq_nfgtransformer",
-            "num_envs": int(num_envs),
-            "epsilon": float(epsilon),
-            "results": results,
-        },
-    )
-    return results
 
 
 def evaluate_deepsrq_path_mcp_pool_suite_for_epsilon(
@@ -1450,6 +1354,9 @@ def evaluate_deepsrq_path_mcp_pool_suite_for_epsilon(
             "epsilon": float(epsilon),
             "results": results,
         },
+        drop_reward_histories=True,
+        drop_lbf_episode_details=True,
+        drop_episode_lengths=True,
     )
     return results
 
@@ -1529,5 +1436,90 @@ def evaluate_srac_suite_for_epsilon(
             "epsilon": float(epsilon),
             "results": results,
         },
+        drop_reward_histories=True,
+        drop_lbf_episode_details=True,
+        drop_episode_lengths=True,
+    )
+    return results
+
+
+def evaluate_sra2c_suite_for_epsilon(
+    epsilon: float,
+    *,
+    scenarios: tuple[LbfNotebookScenario, ...] | None = None,
+    n_episodes: int = DEFAULT_EVAL_EPISODES,
+    repo_root: str | Path | None = None,
+    use_gpu: bool = True,
+    sre_solver_workers: int | None = None,
+    num_envs: int = 1,
+) -> dict[str, dict]:
+    scenarios = scenarios or robust_lbf_scenarios()
+    results = {}
+    primary_label = SRA2C_FAMILY
+    for scenario in scenarios:
+        base_dir = sra2c_evaluation_dir(scenario.key, epsilon, repo_root=repo_root)
+        primary = load_sra2c_policy(
+            scenario,
+            epsilon,
+            repo_root=repo_root,
+            use_gpu=use_gpu,
+            sre_solver_workers=sre_solver_workers,
+        )
+        try:
+            scenario_results = {
+                "self_play": evaluate_policy_matchup(
+                    scenario=scenario,
+                    primary_policy=primary,
+                    output_dir=base_dir / "self_play",
+                    primary_label=primary_label,
+                    n_episodes=n_episodes,
+                    num_envs=num_envs,
+                )
+            }
+            for baseline in BASELINE_ALGORITHMS:
+                out_dir = base_dir / f"vs_{baseline}"
+                try:
+                    opponent = load_baseline_policy(baseline, scenario, use_gpu=use_gpu)
+                    try:
+                        scenario_results[f"vs_{baseline}"] = evaluate_policy_matchup(
+                            scenario=scenario,
+                            primary_policy=primary,
+                            opponent_policy=opponent,
+                            output_dir=out_dir,
+                            primary_label=primary_label,
+                            opponent_label=baseline,
+                            n_episodes=n_episodes,
+                            num_envs=num_envs,
+                        )
+                    finally:
+                        opponent.close()
+                except Exception as exc:
+                    scenario_results[f"vs_{baseline}"] = _skip_record(
+                        out_dir,
+                        scenario=scenario,
+                        primary_label=primary_label,
+                        opponent_label=baseline,
+                        exc=exc,
+                    )
+            results[scenario.key] = scenario_results
+        finally:
+            primary.close()
+    save_training_stats(
+        lbf_grid_dir(repo_root)
+        / SRA2C_FAMILY
+        / "evaluation"
+        / f"manifest_eps_{epsilon_slug(epsilon)}.json",
+        {
+            "algorithm": SRA2C_FAMILY,
+            "sre_solver_workers": None
+            if sre_solver_workers is None
+            else int(sre_solver_workers),
+            "num_envs": int(num_envs),
+            "epsilon": float(epsilon),
+            "results": results,
+        },
+        drop_reward_histories=True,
+        drop_lbf_episode_details=True,
+        drop_episode_lengths=True,
     )
     return results

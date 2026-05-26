@@ -20,7 +20,8 @@ from torch import nn
 
 
 DEFAULT_TASK_CONFIG: dict[str, Any] = {
-    "map_size": 16,
+    "env_name": "battle_v4",
+    "map_size": 40,
     "max_cycles": 100,
     "minimap_mode": False,
     "extra_features": False,
@@ -107,12 +108,20 @@ def normalize_pettingzoo_parallel_api(env):
     return env
 
 
+def _task_name_from_env_name(env_name: str) -> str:
+    if env_name.endswith("_v4") or env_name.endswith("_v5") or env_name.endswith("_v6"):
+        env_name = env_name.rsplit("_", 1)[0]
+    return env_name.upper()
+
+
 def _make_compatible_magent_env(config: dict[str, Any], seed: int | None, device):
     from torchrl.envs import PettingZooWrapper
 
-    env_mod = importlib.import_module("magent2.environments.adversarial_pursuit_v4")
+    env_config = dict(config)
+    env_name = env_config.pop("env_name", DEFAULT_TASK_CONFIG["env_name"])
+    env_mod = importlib.import_module(f"magent2.environments.{env_name}")
     env = normalize_pettingzoo_parallel_api(
-        env_mod.parallel_env(**config, render_mode="rgb_array")
+        env_mod.parallel_env(**env_config, render_mode="rgb_array")
     )
     return PettingZooWrapper(
         env=env,
@@ -146,9 +155,12 @@ class CompatibleMAgentClass(_BenchmarlMAgentClass):
 
 
 def make_magent_task(task_config: dict[str, Any] | None = None):
-    """Create BenchMARL's built-in MAgent2 adversarial_pursuit task."""
+    """Create a BenchMARL-compatible MAgent2 task."""
     config = {**DEFAULT_TASK_CONFIG, **(task_config or {})}
-    return CompatibleMAgentClass(name="ADVERSARIAL_PURSUIT", config=config)
+    return CompatibleMAgentClass(
+        name=_task_name_from_env_name(str(config["env_name"])),
+        config=config,
+    )
 
 
 def make_magent2_parallel_env_factory(
