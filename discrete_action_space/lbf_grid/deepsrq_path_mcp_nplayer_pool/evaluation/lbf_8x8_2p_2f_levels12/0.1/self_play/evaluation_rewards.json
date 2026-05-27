@@ -1,270 +1,57 @@
 {
+  "episode_reward_summary": {
+    "episodes": 50,
+    "per_agent": [
+      {
+        "agent": "Agent 1\nDeep SRQ",
+        "mean": 1.47,
+        "std": 1.5601602481796542,
+        "min": 0.0,
+        "max": 6.0
+      },
+      {
+        "agent": "Agent 2\nDeep SRQ",
+        "mean": 2.69,
+        "std": 2.469595108514754,
+        "min": 0.0,
+        "max": 10.0
+      }
+    ],
+    "joint": {
+      "mean": 4.16,
+      "std": 3.437208169430533,
+      "min": 0.0,
+      "max": 15.0
+    }
+  },
+  "mean_agent_rewards": [
+    1.47,
+    2.69
+  ],
+  "mean_joint_reward": 4.16,
   "scenario_key": "lbf_8x8_2p_2f_levels12",
-  "scenario_name": "2 agents with levels 1 and 2, 8x8 grid, 2 foods, max food level 3, full sight, 50-step episodes",
+  "scenario_name": "2 agents with levels 1 and 2, 8x8 grid, 10 foods (3 level-3, 2 level-2, 5 level-1), full sight, 50-step episodes",
   "primary_label": "deepsrq_path_mcp_nplayer_pool",
   "opponent_label": null,
   "matchup_label": "deepsrq_path_mcp_nplayer_pool",
+  "pair_label": "Deep SRQ",
+  "plot_title": "Scenario 1, Deep SRQ vs Deep SRQ",
+  "matchup_note": "All agent slots use Deep SRQ.",
   "n_episodes": 50,
-  "slot_episode_counts": [
-    50
-  ],
-  "episode_rewards": [
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.5,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.25,
-      0.75
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.4
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.4
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.6666666666666666
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.6666666666666666
-    ],
-    [
-      0.0,
-      0.3333333333333333
-    ],
-    [
-      0.0,
-      0.25
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.4
-    ],
-    [
-      0.0,
-      0.5
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.5
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.5,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.6666666666666666
-    ],
-    [
-      0.0,
-      0.0
-    ]
-  ],
-  "joint_rewards": [
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.5,
-    0.0,
-    0.0,
-    0.0,
-    1.0,
-    0.0,
-    0.4,
-    0.0,
-    0.4,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.6666666666666666,
-    0.0,
-    0.0,
-    0.6666666666666666,
-    0.3333333333333333,
-    0.25,
-    0.0,
-    0.0,
-    0.4,
-    0.5,
-    0.0,
-    0.0,
-    0.0,
-    0.5,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.5,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.6666666666666666,
-    0.0
-  ],
+  "fixed_primary_agent": null,
   "agent_labels": [
-    "Agent 1",
-    "Agent 2"
+    "Agent 1\nDeep SRQ",
+    "Agent 2\nDeep SRQ"
+  ],
+  "agent_algorithm_counts": [
+    {
+      "agent": 1,
+      "Deep SRQ": 50
+    },
+    {
+      "agent": 2,
+      "Deep SRQ": 50
+    }
   ],
   "render_error": null,
   "artifact_dir": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/evaluation/lbf_8x8_2p_2f_levels12/0.1/self_play",

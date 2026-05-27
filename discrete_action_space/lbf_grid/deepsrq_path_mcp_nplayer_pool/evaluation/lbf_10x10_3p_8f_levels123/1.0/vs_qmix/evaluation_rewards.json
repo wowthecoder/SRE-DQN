@@ -1,0 +1,9 @@
+{
+  "status": "skipped",
+  "scenario_key": "lbf_10x10_3p_8f_levels123",
+  "primary_label": "deepsrq_path_mcp_nplayer_pool",
+  "opponent_label": "qmix",
+  "error_type": "FileNotFoundError",
+  "error_message": "No EPyMARL checkpoint found for qmix lbf_10x10_3p_8f_levels123 under /home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/baseline_runs/epymarl/models.",
+  "artifact_dir": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/evaluation/lbf_10x10_3p_8f_levels123/1.0/vs_qmix"
+}

@@ -1084,6 +1084,7 @@ def _evaluation_reward_matrix(eval_record: dict) -> tuple[list[str], list[np.nda
 def plot_evaluation_agent_reward_boxplot(eval_record: dict, *, title: str):
     """Plot one evaluation reward boxplot with one box per agent."""
     import matplotlib.pyplot as plt
+    from matplotlib.patches import Patch
 
     labels, series = _evaluation_reward_matrix(eval_record)
     series = [values for values in series if values.size]
@@ -1091,14 +1092,54 @@ def plot_evaluation_agent_reward_boxplot(eval_record: dict, *, title: str):
         print(f"[no evaluation reward series for {title}]")
         return None
 
-    fig, ax = plt.subplots(figsize=(max(7, 1.4 * len(series)), 4))
+    fig, ax = plt.subplots(figsize=(max(8, 2.2 * len(series)), 4.8))
+    colors = [
+        "#4C78A8",
+        "#F58518",
+        "#54A24B",
+        "#B279A2",
+        "#E45756",
+        "#72B7B2",
+    ]
     try:
-        ax.boxplot(series, tick_labels=labels[: len(series)], showmeans=True)
+        boxplot = ax.boxplot(
+            series,
+            tick_labels=labels[: len(series)],
+            showmeans=True,
+            patch_artist=True,
+        )
     except TypeError:  # matplotlib<3.9
-        ax.boxplot(series, labels=labels[: len(series)], showmeans=True)
+        boxplot = ax.boxplot(
+            series,
+            labels=labels[: len(series)],
+            showmeans=True,
+            patch_artist=True,
+        )
+    for idx, box in enumerate(boxplot.get("boxes", [])):
+        box.set_facecolor(colors[idx % len(colors)])
+        box.set_alpha(0.55)
+        box.set_edgecolor("#333333")
     ax.set_title(title)
     ax.set_ylabel("Evaluation episode reward")
     ax.grid(axis="y", alpha=0.25)
+    legend_labels = labels[: len(series)]
+    handles = [
+        Patch(
+            facecolor=colors[idx % len(colors)],
+            edgecolor="#333333",
+            alpha=0.55,
+            label=str(label).replace("\n", " | "),
+        )
+        for idx, label in enumerate(legend_labels)
+    ]
+    if handles:
+        ax.legend(
+            handles=handles,
+            title="Agent slot / policy mix",
+            loc="best",
+            fontsize=8,
+            title_fontsize=9,
+        )
     fig.tight_layout()
     return fig
 

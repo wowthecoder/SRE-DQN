@@ -151,7 +151,7 @@ class DuelingDoubleDqnSreAgentConfig:
     # Decimal precision used when keying state-level policy cache entries.
     sre_state_cache_round_digits: int = 4
     # Whether approximate cache reuse is allowed.
-    sre_approx_cache_enabled: bool = True
+    sre_approx_cache_enabled: bool = False
     # Exploitability tolerance for accepting cached policies.
     sre_cache_exploitability_tol: float = 1e-3
     # Exploitability tolerance passed to compatible SRE solvers.
@@ -161,7 +161,7 @@ class DuelingDoubleDqnSreAgentConfig:
     # Whether compatible SRE solvers may stop after a good candidate.
     sre_solver_early_exit: bool = True
     # Criterion used to choose among multiple SRE candidates.
-    sre_candidate_selection: str = "robust_exploitability"
+    sre_candidate_selection: str = "joint_nominal_welfare"
     # Whether approximate candidates are filtered by exploitability.
     sre_exploitability_filter_enabled: bool = False
     # Whether masked single-action players are fixed outside the PATH game.
@@ -897,12 +897,13 @@ class DuelingDoubleDqnSreAgent:
                     raise
 
     def _policies_from_sre_result(self, result, *, warm_policies=None):
-        del warm_policies
         if result is None:
             raise RuntimeError("SRE solver returned no result.")
 
         metadata = dict(getattr(result, "metadata", None) or {})
         if not result.policies or metadata.get("path_failed", False):
+            if self._policies_valid(warm_policies):
+                return self._copy_policies(warm_policies), True
             message = getattr(result, "message", "") or "Solver returned no policies."
             raise RuntimeError(f"SRE solver failed. {message} Metadata: {metadata}")
 
@@ -988,9 +989,24 @@ class DuelingDoubleDqnSreAgent:
         strategic_agent_ids,
         warm_policies=None,
     ):
-        del warm_policies
         metadata = {} if result is None else dict(getattr(result, "metadata", None) or {})
         if result is None or not result.policies or metadata.get("path_failed", False):
+            if self._policies_valid(warm_policies):
+                warm_strategic = self._strategic_policies_from_full(
+                    warm_policies,
+                    action_indices,
+                    strategic_agent_ids,
+                )
+                if warm_strategic is not None:
+                    return (
+                        self._expand_strategic_policies(
+                            warm_strategic,
+                            action_masks,
+                            action_indices,
+                            strategic_agent_ids,
+                        ),
+                        True,
+                    )
             message = (
                 "Strategic masked SRE solver returned no result."
                 if result is None
@@ -1856,6 +1872,15 @@ class DuelingDoubleDqnSreAgent:
         except TypeError:
             checkpoint = torch.load(path, map_location=map_location)
 
+        if not isinstance(checkpoint, dict):
+            raise ValueError(f"Deep SRQ checkpoint at {path} is not a checkpoint payload.")
+        config_payload = checkpoint.get("config")
+        if not isinstance(config_payload, dict):
+            raise ValueError(
+                f"Deep SRQ checkpoint at {path} is missing config metadata; "
+                "retrain or load a checkpoint written by save_checkpoint()."
+            )
+
         if (s := checkpoint.get("q_net")) is not None:
             self.q_net.load_state_dict(s)
         if (s := checkpoint.get("target_net")) is not None:
@@ -1864,7 +1889,7 @@ class DuelingDoubleDqnSreAgent:
             self.optimizer.load_state_dict(s)
 
         cfg = self.config
-        _restore_checkpoint_config(cfg, checkpoint["config"])
+        _restore_checkpoint_config(cfg, config_payload)
         self.q_tensor_shape = tuple([cfg.num_actions] * cfg.num_agents + [cfg.num_agents])
         self._update_calls = int(checkpoint.get("update_calls", self._update_calls))
 

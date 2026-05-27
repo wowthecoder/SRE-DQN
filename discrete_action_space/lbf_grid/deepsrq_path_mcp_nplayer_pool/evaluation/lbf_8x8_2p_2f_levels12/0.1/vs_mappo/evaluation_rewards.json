@@ -1,271 +1,57 @@
 {
+  "episode_reward_summary": {
+    "episodes": 50,
+    "per_agent": [
+      {
+        "agent": "Agent 1\nDeep SRQ",
+        "mean": 0.84,
+        "std": 1.2018319350058893,
+        "min": 0.0,
+        "max": 5.0
+      },
+      {
+        "agent": "Agent 2\nMAPPO",
+        "mean": 0.7,
+        "std": 0.938083151964686,
+        "min": 0.0,
+        "max": 4.0
+      }
+    ],
+    "joint": {
+      "mean": 1.54,
+      "std": 1.5389606882568507,
+      "min": 0.0,
+      "max": 7.0
+    }
+  },
+  "mean_agent_rewards": [
+    0.84,
+    0.7
+  ],
+  "mean_joint_reward": 1.54,
   "scenario_key": "lbf_8x8_2p_2f_levels12",
-  "scenario_name": "2 agents with levels 1 and 2, 8x8 grid, 2 foods, max food level 3, full sight, 50-step episodes",
+  "scenario_name": "2 agents with levels 1 and 2, 8x8 grid, 10 foods (3 level-3, 2 level-2, 5 level-1), full sight, 50-step episodes",
   "primary_label": "deepsrq_path_mcp_nplayer_pool",
   "opponent_label": "mappo",
   "matchup_label": "deepsrq_path_mcp_nplayer_pool_vs_mappo",
+  "pair_label": "Deep SRQ vs MAPPO",
+  "plot_title": "Scenario 1, Deep SRQ vs MAPPO",
+  "matchup_note": "Agent 1 uses Deep SRQ; Agents 2-2 use MAPPO.",
   "n_episodes": 50,
-  "slot_episode_counts": [
-    25,
-    25
-  ],
-  "episode_rewards": [
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.5,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.5
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ],
-    [
-      0.0,
-      0.0
-    ]
-  ],
-  "joint_rewards": [
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.5,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    0.5,
-    0.0,
-    0.0,
-    0.0
-  ],
+  "fixed_primary_agent": 1,
   "agent_labels": [
-    "Agent 1",
-    "Agent 2"
+    "Agent 1\nDeep SRQ",
+    "Agent 2\nMAPPO"
+  ],
+  "agent_algorithm_counts": [
+    {
+      "agent": 1,
+      "Deep SRQ": 50
+    },
+    {
+      "agent": 2,
+      "MAPPO": 50
+    }
   ],
   "render_error": null,
   "artifact_dir": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/evaluation/lbf_8x8_2p_2f_levels12/0.1/vs_mappo",

@@ -106,6 +106,66 @@ def test_path_c_solver_rejects_non_bimatrix_tensor(path_runtime_available):
         solver.close()
 
 
+def test_path_c_joint_welfare_selection_does_not_check_exploitability(monkeypatch):
+    from sre_solvers import path_c as path_c_module
+
+    q_tensor = np.array(
+        [
+            [[1.0, 1.0], [0.0, 0.0]],
+            [[0.0, 0.0], [5.0, 4.0]],
+        ],
+        dtype=np.float64,
+    )
+    solutions = [
+        {"p1": [1.0, 0.0], "p2": [1.0, 0.0]},
+        {"p1": [0.0, 1.0], "p2": [0.0, 1.0]},
+    ]
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("robust exploitability should not be checked")
+
+    monkeypatch.setattr(path_c_module, "robust_exploitability", fail_if_called)
+    policies, metadata = path_c_module._select_best_solution(
+        q_tensor,
+        solutions,
+        epsilon=0.5,
+        candidate_selection="expected_joint_payoff",
+    )
+
+    assert np.allclose(policies[0], [0.0, 1.0])
+    assert np.allclose(policies[1], [0.0, 1.0])
+    assert metadata["joint_nominal_welfare"] == pytest.approx(9.0)
+    assert "robust_exploitability" not in metadata
+
+
+def test_path_c_robust_exploitability_selection_records_scalar_policy_values():
+    from sre_solvers import path_c as path_c_module
+
+    q_tensor = np.array(
+        [
+            [[1.0, 1.0], [0.0, 0.0]],
+            [[0.0, 0.0], [5.0, 4.0]],
+        ],
+        dtype=np.float64,
+    )
+    solutions = [
+        {"p1": [0.5, 0.5], "p2": [0.5, 0.5]},
+        {"p1": [0.0, 1.0], "p2": [0.0, 1.0]},
+    ]
+
+    policies, metadata = path_c_module._select_best_solution(
+        q_tensor,
+        solutions,
+        epsilon=0.1,
+        candidate_selection="robust_exploitability",
+    )
+
+    assert policies is not None
+    assert len(metadata["robust_policy_values"]) == 2
+    assert all(np.isscalar(value) for value in metadata["robust_policy_values"])
+    assert all(isinstance(value, float) for value in metadata["robust_policy_values"])
+
+
 def test_lemke_solver_returns_valid_policies_when_installed():
     pytest.importorskip("lemkelcp")
     q_tensor = np.array(
@@ -273,18 +333,22 @@ def test_dueling_double_dqn_reuses_greedy_masked_warm_policy_on_path_failure():
         q_batch[0, 2, :, :, 0] = 10.0
         q_batch[0, :, 1, :, 1] = 5.0
         q_batch[0, :, :, 0, 2] = 3.0
-        with pytest.raises(RuntimeError, match="Strategic masked SRE solver failed"):
-            agent._solve_sre_batch_masked(
-                q_batch,
+        policies_batch = agent._solve_sre_batch_masked(
+            q_batch,
+            [
                 [
-                    [
-                        np.array([True, False, True]),
-                        np.array([True, True, False]),
-                        np.array([True, True, False]),
-                    ]
-                ],
-            )
+                    np.array([True, False, True]),
+                    np.array([True, True, False]),
+                    np.array([True, True, False]),
+                ]
+            ],
+        )
         assert solver.initial_policies_batch is not None
+        policies = policies_batch[0]
+        assert [policy.shape for policy in policies] == [(3,), (3,), (3,)]
+        assert policies[0][1] == pytest.approx(0.0)
+        assert policies[1][2] == pytest.approx(0.0)
+        assert policies[2][2] == pytest.approx(0.0)
     finally:
         agent.close()
 
@@ -538,7 +602,7 @@ def test_dueling_double_dqn_raises_on_rejected_sre_candidate():
         agent.close()
 
 
-def test_dueling_double_dqn_raises_when_path_returns_no_candidate():
+def test_dueling_double_dqn_reuses_warm_policy_when_path_returns_no_candidate():
     pytest.importorskip("torch")
     from dueling_double_dqn_sre import DuelingDoubleDqnSreAgent, DuelingDoubleDqnSreAgentConfig
 
@@ -568,11 +632,13 @@ def test_dueling_double_dqn_raises_when_path_returns_no_candidate():
             message="PATH MCP failed to return a candidate.",
             metadata={"path_failed": True, "robust_exploitability": 5e-2},
         )
-        with pytest.raises(RuntimeError, match="SRE solver failed"):
-            agent._policies_from_sre_result(
-                result,
-                warm_policies=warm_policies,
-            )
+        policies, cacheable = agent._policies_from_sre_result(
+            result,
+            warm_policies=warm_policies,
+        )
+        assert cacheable is True
+        assert np.allclose(policies[0], warm_policies[0])
+        assert np.allclose(policies[1], warm_policies[1])
     finally:
         agent.close()
 

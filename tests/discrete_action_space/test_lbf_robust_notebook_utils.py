@@ -42,12 +42,33 @@ def test_robust_artifact_paths_use_requested_layout(tmp_path):
     )
 
 
-def test_rotated_episode_counts_allocate_all_episodes():
-    from lbf_grid.robust_notebook_utils import rotated_episode_counts
+def test_evaluation_agent_labels_show_fixed_algorithms():
+    from lbf_grid.robust_notebook_utils import _evaluation_agent_labels
 
-    assert rotated_episode_counts(500, 3) == [167, 167, 166]
-    assert rotated_episode_counts(500, 2) == [250, 250]
-    assert sum(rotated_episode_counts(7, 3)) == 7
+    labels, counts, note = _evaluation_agent_labels(
+        primary_label="DeepSRQ",
+        opponent_label="IQL",
+        total_episodes=4,
+        num_agents=3,
+    )
+
+    assert labels == [
+        "Agent 1\nDeepSRQ",
+        "Agent 2\nIQL",
+        "Agent 3\nIQL",
+    ]
+    assert counts == [
+        {"agent": 1, "DeepSRQ": 4},
+        {"agent": 2, "IQL": 4},
+        {"agent": 3, "IQL": 4},
+    ]
+    assert "Agent 1 uses DeepSRQ" in note
+
+
+def test_deepsrq_evaluation_baselines_exclude_random():
+    from lbf_grid.robust_notebook_utils import BASELINE_ALGORITHMS
+
+    assert BASELINE_ALGORITHMS == ("iql", "ippo", "mappo", "maa2c")
 
 
 def test_deepsrq_full_resume_checkpoint_contains_replay(tmp_path):
@@ -81,6 +102,34 @@ def test_deepsrq_full_resume_checkpoint_contains_replay(tmp_path):
     agent.close()
 
 
+def test_deepsrq_load_checkpoint_rejects_payload_without_config(tmp_path):
+    torch = pytest.importorskip("torch")
+    from dueling_double_dqn_sre import DuelingDoubleDqnSreAgent, DuelingDoubleDqnSreAgentConfig
+
+    class FakeSolver:
+        name = "fake"
+
+        def close(self):
+            pass
+
+    agent = DuelingDoubleDqnSreAgent(
+        DuelingDoubleDqnSreAgentConfig(
+            obs_dim=4,
+            num_agents=2,
+            num_actions=2,
+            sre_solver=FakeSolver(),
+            use_gpu=False,
+        )
+    )
+    path = tmp_path / "old_deepsrq.pt"
+    torch.save({"q_net": agent.q_net.state_dict()}, path)
+
+    with pytest.raises(ValueError, match="missing config metadata"):
+        agent.load_checkpoint(path, map_location="cpu")
+
+    agent.close()
+
+
 def test_deepsrq_policy_adapter_batches_action_selection():
     from lbf_grid.robust_notebook_utils import DeepSrqPolicyAdapter
 
@@ -110,6 +159,298 @@ def test_deepsrq_policy_adapter_batches_action_selection():
     assert agent.seen_states == [[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]
     adapter.close()
     assert agent.closed is True
+
+
+@pytest.mark.parametrize(
+    ("available_checkpoints", "expected_checkpoint"),
+    [
+        (("shared_deepsrq_final.pt", "shared_deepsrq_best.pt"), "shared_deepsrq_final.pt"),
+        (("shared_deepsrq_best.pt",), "shared_deepsrq_best.pt"),
+    ],
+)
+def test_load_deepsrq_path_mcp_pool_policy_prefers_final_then_best(
+    tmp_path,
+    monkeypatch,
+    available_checkpoints,
+    expected_checkpoint,
+):
+    torch = pytest.importorskip("torch")
+    from lbf_grid import robust_notebook_utils as utils
+
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    (run_dir / "training_stats.json").write_text(
+        json.dumps(
+            {
+                "obs_dim": 4,
+                "num_agents": 2,
+                "num_actions": 3,
+                "seed": 123,
+                "solver_name": "fake_solver",
+                "hyperparameters": {
+                    "agent": {
+                        "sre_candidate_selection": "robust_exploitability",
+                        "sre_exploitability_filter_enabled": True,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    for filename in available_checkpoints:
+        torch.save(
+            {
+                "config": {
+                    "obs_dim": 4,
+                    "num_agents": 2,
+                    "num_actions": 3,
+                    "network_type": "joint_output",
+                    "q_hidden_dims": (128, 128),
+                },
+            },
+            run_dir / filename,
+        )
+
+    class FakeSolver:
+        name = "fake_solver"
+
+        def close(self):
+            pass
+
+    class FakeAgent:
+        instances = []
+
+        def __init__(self, config):
+            self.config = config
+            self.loaded_checkpoint = None
+            self.map_location = None
+            self.closed = False
+            self.instances.append(self)
+
+        def load_checkpoint(self, path, map_location=None):
+            self.loaded_checkpoint = Path(path)
+            self.map_location = map_location
+            self.config.sre_solver_name = "stale_checkpoint_solver"
+            self.config.sre_solver_workers = 1
+            self.config.sre_candidate_selection = "stale_checkpoint_selection"
+            self.config.sre_exploitability_filter_enabled = False
+
+        def close(self):
+            self.closed = True
+
+    monkeypatch.setattr(
+        utils,
+        "deepsrq_path_mcp_pool_training_dir",
+        lambda *args, **kwargs: run_dir,
+    )
+    monkeypatch.setattr(utils, "make_sre_solver", lambda *args, **kwargs: FakeSolver())
+    monkeypatch.setattr(utils, "DuelingDoubleDqnSreAgent", FakeAgent)
+
+    scenario = utils.LbfNotebookScenario(
+        key="scenario_a",
+        name="Scenario A",
+        gym_id="fake",
+        time_limit=1,
+        config={"players": 2},
+    )
+
+    adapter = utils.load_deepsrq_path_mcp_pool_policy(
+        scenario,
+        0.5,
+        repo_root=tmp_path,
+        use_gpu=False,
+    )
+
+    try:
+        assert adapter.agent.loaded_checkpoint == run_dir / expected_checkpoint
+        assert adapter.agent.map_location == "cpu"
+        assert adapter.agent.config.sre_solver_name == "path_c_pool"
+        assert adapter.agent.config.sre_solver_workers == 8
+        assert adapter.agent.config.sre_candidate_selection == "joint_nominal_welfare"
+        assert adapter.agent.config.sre_exploitability_filter_enabled is False
+        assert adapter.agent.config.epsilon_explore == 0.0
+        assert adapter.agent.config.epsilon_robust == 0.5
+    finally:
+        adapter.close()
+
+
+def test_load_deepsrq_path_mcp_pool_policy_skips_incompatible_final(
+    tmp_path,
+    monkeypatch,
+):
+    torch = pytest.importorskip("torch")
+    from lbf_grid import robust_notebook_utils as utils
+
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    (run_dir / "training_stats.json").write_text(
+        json.dumps(
+            {
+                "obs_dim": 36,
+                "num_agents": 2,
+                "num_actions": 6,
+                "seed": 123,
+                "solver_name": "fake_solver",
+                "hyperparameters": {
+                    "agent": {
+                        "network_type": "joint_output",
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    checkpoint_payload = {
+        "config": {
+            "obs_dim": 36,
+            "num_agents": 2,
+            "num_actions": 6,
+            "network_type": "joint_output",
+            "q_hidden_dims": (128, 128),
+        },
+    }
+    torch.save(checkpoint_payload, run_dir / "shared_deepsrq_final.pt")
+    torch.save(checkpoint_payload, run_dir / "shared_deepsrq_best.pt")
+
+    class FakeSolver:
+        name = "fake_solver"
+
+        def close(self):
+            pass
+
+    class FakeAgent:
+        instances = []
+
+        def __init__(self, config):
+            self.config = config
+            self.loaded_checkpoint = None
+            self.closed = False
+            self.instances.append(self)
+
+        def load_checkpoint(self, path, map_location=None):
+            del map_location
+            if Path(path).name == "shared_deepsrq_final.pt":
+                raise RuntimeError("size mismatch for feature.0.weight")
+            self.loaded_checkpoint = Path(path)
+
+        def close(self):
+            self.closed = True
+
+    monkeypatch.setattr(
+        utils,
+        "deepsrq_path_mcp_pool_training_dir",
+        lambda *args, **kwargs: run_dir,
+    )
+    monkeypatch.setattr(utils, "make_sre_solver", lambda *args, **kwargs: FakeSolver())
+    monkeypatch.setattr(utils, "DuelingDoubleDqnSreAgent", FakeAgent)
+
+    scenario = utils.LbfNotebookScenario(
+        key="scenario_a",
+        name="Scenario A",
+        gym_id="fake",
+        time_limit=1,
+        config={"players": 2},
+    )
+
+    adapter = utils.load_deepsrq_path_mcp_pool_policy(
+        scenario,
+        0.5,
+        repo_root=tmp_path,
+        use_gpu=False,
+    )
+
+    try:
+        assert adapter.agent.loaded_checkpoint == run_dir / "shared_deepsrq_best.pt"
+        assert FakeAgent.instances[0].closed is True
+        assert FakeAgent.instances[1] is adapter.agent
+        assert adapter.agent.closed is False
+    finally:
+        adapter.close()
+
+
+def test_load_deepsrq_path_mcp_pool_policy_uses_checkpoint_model_config(
+    tmp_path,
+    monkeypatch,
+):
+    torch = pytest.importorskip("torch")
+    from lbf_grid import robust_notebook_utils as utils
+
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    (run_dir / "training_stats.json").write_text(
+        json.dumps(
+            {
+                "obs_dim": 99,
+                "num_agents": 3,
+                "num_actions": 6,
+                "seed": 123,
+                "solver_name": "fake_solver",
+                "hyperparameters": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    torch.save(
+        {
+            "config": {
+                "obs_dim": 63,
+                "num_agents": 3,
+                "num_actions": 6,
+                "network_type": "joint_output",
+                "q_hidden_dims": (128, 128),
+            },
+        },
+        run_dir / "shared_deepsrq_best.pt",
+    )
+
+    class FakeSolver:
+        name = "fake_solver"
+
+        def close(self):
+            pass
+
+    class FakeAgent:
+        def __init__(self, config):
+            self.config = config
+            self.loaded_checkpoint = None
+
+        def load_checkpoint(self, path, map_location=None):
+            del map_location
+            self.loaded_checkpoint = Path(path)
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(
+        utils,
+        "deepsrq_path_mcp_pool_training_dir",
+        lambda *args, **kwargs: run_dir,
+    )
+    monkeypatch.setattr(utils, "make_sre_solver", lambda *args, **kwargs: FakeSolver())
+    monkeypatch.setattr(utils, "DuelingDoubleDqnSreAgent", FakeAgent)
+
+    scenario = utils.LbfNotebookScenario(
+        key="scenario_a",
+        name="Scenario A",
+        gym_id="fake",
+        time_limit=1,
+        config={"players": 3},
+    )
+
+    adapter = utils.load_deepsrq_path_mcp_pool_policy(
+        scenario,
+        0.1,
+        repo_root=tmp_path,
+        use_gpu=False,
+    )
+
+    try:
+        assert adapter.agent.loaded_checkpoint == run_dir / "shared_deepsrq_best.pt"
+        assert adapter.agent.config.obs_dim == 63
+        assert adapter.agent.config.num_agents == 3
+        assert adapter.agent.config.network_type == "joint_output"
+    finally:
+        adapter.close()
 
 
 def test_srac_policy_adapter_batches_actor_action_selection():

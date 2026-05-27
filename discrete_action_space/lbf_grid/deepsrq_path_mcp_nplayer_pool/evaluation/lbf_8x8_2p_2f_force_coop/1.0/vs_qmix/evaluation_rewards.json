@@ -1,0 +1,9 @@
+{
+  "status": "skipped",
+  "scenario_key": "lbf_8x8_2p_2f_force_coop",
+  "primary_label": "deepsrq_path_mcp_nplayer_pool",
+  "opponent_label": "qmix",
+  "error_type": "FileNotFoundError",
+  "error_message": "No EPyMARL checkpoint found for qmix lbf_8x8_2p_2f_force_coop under /home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/baseline_runs/epymarl/models.",
+  "artifact_dir": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/evaluation/lbf_8x8_2p_2f_force_coop/1.0/vs_qmix"
+}

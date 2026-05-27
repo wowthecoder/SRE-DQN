@@ -1,0 +1,61 @@
+{
+  "episode_reward_summary": {
+    "episodes": 50,
+    "per_agent": [
+      {
+        "agent": "Agent 1\nDeep SRQ",
+        "mean": 0.62,
+        "std": 0.7453858061433689,
+        "min": 0.0,
+        "max": 3.0
+      },
+      {
+        "agent": "Agent 2\nIPPO",
+        "mean": 0.42,
+        "std": 0.6029925372672534,
+        "min": 0.0,
+        "max": 2.0
+      }
+    ],
+    "joint": {
+      "mean": 1.04,
+      "std": 0.9789790600416334,
+      "min": 0.0,
+      "max": 3.0
+    }
+  },
+  "mean_agent_rewards": [
+    0.62,
+    0.42
+  ],
+  "mean_joint_reward": 1.04,
+  "scenario_key": "lbf_8x8_2p_2f_force_coop",
+  "scenario_name": "2 level-1 agents, 8x8 grid, 10 foods (5 level-1, 5 level-2), full sight, forced cooperation, 50-step episodes",
+  "primary_label": "deepsrq_path_mcp_nplayer_pool",
+  "opponent_label": "ippo",
+  "matchup_label": "deepsrq_path_mcp_nplayer_pool_vs_ippo",
+  "pair_label": "Deep SRQ vs IPPO",
+  "plot_title": "Scenario 2, Deep SRQ vs IPPO",
+  "matchup_note": "Agent 1 uses Deep SRQ; Agents 2-2 use IPPO.",
+  "n_episodes": 50,
+  "fixed_primary_agent": 1,
+  "agent_labels": [
+    "Agent 1\nDeep SRQ",
+    "Agent 2\nIPPO"
+  ],
+  "agent_algorithm_counts": [
+    {
+      "agent": 1,
+      "Deep SRQ": 50
+    },
+    {
+      "agent": 2,
+      "IPPO": 50
+    }
+  ],
+  "render_error": null,
+  "artifact_dir": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/evaluation/lbf_8x8_2p_2f_force_coop/0.5/vs_ippo",
+  "rewards_path": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/evaluation/lbf_8x8_2p_2f_force_coop/0.5/vs_ippo/evaluation_rewards.json",
+  "boxplot_path": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/evaluation/lbf_8x8_2p_2f_force_coop/0.5/vs_ippo/evaluation_boxplot.png",
+  "video_path": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/evaluation/lbf_8x8_2p_2f_force_coop/0.5/vs_ippo/sample_rollout.gif"
+}

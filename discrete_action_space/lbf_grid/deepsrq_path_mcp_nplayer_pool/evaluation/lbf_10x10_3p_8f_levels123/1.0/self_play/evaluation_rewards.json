@@ -1,0 +1,74 @@
+{
+  "episode_reward_summary": {
+    "episodes": 50,
+    "per_agent": [
+      {
+        "agent": "Agent 1\nDeep SRQ",
+        "mean": 0.43,
+        "std": 0.6403905058634145,
+        "min": 0.0,
+        "max": 2.0
+      },
+      {
+        "agent": "Agent 2\nDeep SRQ",
+        "mean": 0.45,
+        "std": 0.7632168761236874,
+        "min": 0.0,
+        "max": 2.0
+      },
+      {
+        "agent": "Agent 3\nDeep SRQ",
+        "mean": 1.4,
+        "std": 1.862793601019716,
+        "min": 0.0,
+        "max": 11.0
+      }
+    ],
+    "joint": {
+      "mean": 2.28,
+      "std": 2.3155129021450085,
+      "min": 0.0,
+      "max": 13.0
+    }
+  },
+  "mean_agent_rewards": [
+    0.43,
+    0.45,
+    1.4
+  ],
+  "mean_joint_reward": 2.28,
+  "scenario_key": "lbf_10x10_3p_8f_levels123",
+  "scenario_name": "3 agents with levels 1, 2, and 3, 10x10 grid, 18 foods (3 each for levels 1-6), full sight, 100-step episodes",
+  "primary_label": "deepsrq_path_mcp_nplayer_pool",
+  "opponent_label": null,
+  "matchup_label": "deepsrq_path_mcp_nplayer_pool",
+  "pair_label": "Deep SRQ",
+  "plot_title": "Scenario 3, Deep SRQ vs Deep SRQ",
+  "matchup_note": "All agent slots use Deep SRQ.",
+  "n_episodes": 50,
+  "fixed_primary_agent": null,
+  "agent_labels": [
+    "Agent 1\nDeep SRQ",
+    "Agent 2\nDeep SRQ",
+    "Agent 3\nDeep SRQ"
+  ],
+  "agent_algorithm_counts": [
+    {
+      "agent": 1,
+      "Deep SRQ": 50
+    },
+    {
+      "agent": 2,
+      "Deep SRQ": 50
+    },
+    {
+      "agent": 3,
+      "Deep SRQ": 50
+    }
+  ],
+  "render_error": null,
+  "artifact_dir": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/evaluation/lbf_10x10_3p_8f_levels123/1.0/self_play",
+  "rewards_path": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/evaluation/lbf_10x10_3p_8f_levels123/1.0/self_play/evaluation_rewards.json",
+  "boxplot_path": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/evaluation/lbf_10x10_3p_8f_levels123/1.0/self_play/evaluation_boxplot.png",
+  "video_path": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/evaluation/lbf_10x10_3p_8f_levels123/1.0/self_play/sample_rollout.gif"
+}

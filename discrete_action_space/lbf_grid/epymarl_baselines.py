@@ -15,6 +15,7 @@ from pathlib import Path
 import numpy as np
 
 from .epymarl_lbf_env import get_epymarl_lbf_scenario
+from .instrumented_env import aggregate_lbf_episode_metrics
 from .notebook_eval import plot_training_reward_curve, plot_training_reward_max_curve
 
 
@@ -38,6 +39,35 @@ def _json_safe(value):
     return value
 
 
+def _load_episode_metrics(metrics_dir: str | Path) -> list[dict]:
+    """Load notebook evaluation episode metrics written as JSONL files."""
+    metrics_dir = Path(metrics_dir)
+    if not metrics_dir.exists():
+        return []
+
+    records = []
+    for path in sorted(metrics_dir.glob("*.jsonl")):
+        with path.open(encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    payload = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(payload, dict):
+                    metrics = payload.get("episode_metrics", payload)
+                    if isinstance(metrics, dict):
+                        records.append(metrics)
+    return records
+
+
+def _episode_metric_totals(metrics: list[dict]) -> dict:
+    """Aggregate LBF per-episode metric payloads for notebook summaries."""
+    return aggregate_lbf_episode_metrics(metrics)
+
+
 def _format_epymarl_override_value(value) -> str:
     """Format a Python value for EPyMARL's ``with key=value`` CLI overrides."""
     if isinstance(value, bool):
@@ -50,6 +80,25 @@ def _format_epymarl_override_value(value) -> str:
 def _epymarl_model_token(scenario_key: str, seed: int, algorithm: str) -> str:
     """Return the deterministic EPyMARL model directory token."""
     return f"{scenario_key}/{int(seed)}/{str(algorithm).lower()}"
+
+
+def _checkpoint_step_dirs(root: str | Path) -> list[Path]:
+    root = Path(root)
+    if not root.exists():
+        return []
+    return sorted(
+        (
+            path
+            for path in root.iterdir()
+            if path.is_dir() and path.name.isdigit() and (path / "agent.th").exists()
+        ),
+        key=lambda path: (int(path.name), path.stat().st_mtime),
+    )
+
+
+def _latest_checkpoint_step(root: str | Path) -> Path | None:
+    step_dirs = _checkpoint_step_dirs(root)
+    return step_dirs[-1] if step_dirs else None
 
 
 def _normalize_config_overrides(config_overrides):
@@ -306,6 +355,20 @@ def build_epymarl_command(
         "    if old not in run_source:\n"
         "        raise RuntimeError('Could not patch EPyMARL unique_token assignment')\n"
         "    run_source = run_source.replace(old, new)\n"
+        "    interval_save = \"        if args.save_model and (\\n            runner.t_env - model_save_time >= args.save_model_interval\\n            or model_save_time == 0\\n        ):\"\n"
+        "    if interval_save not in run_source:\n"
+        "        raise RuntimeError('Could not patch EPyMARL interval checkpoint save')\n"
+        "    run_source = run_source.replace(interval_save, interval_save.replace('args.save_model', 'False and args.save_model'), 1)\n"
+        "    hook_anchor = \"    last_time = start_time\\n\\n    logger.console_logger.info(\\\"Beginning training for {} timesteps\\\".format(args.t_max))\"\n"
+        "    checkpoint_hook = \"\"\"    last_time = start_time\\n\\n    sredqn_model_root = os.path.join(args.local_results_path, \\\"models\\\", args.unique_token)\\n    sredqn_best_score = -float(\\\"inf\\\")\\n\\n    def sredqn_save_checkpoint(kind):\\n        if not args.save_model:\\n            return\\n        kind_root = os.path.join(sredqn_model_root, kind)\\n        if os.path.isdir(kind_root):\\n            shutil.rmtree(kind_root)\\n        step_dir = os.path.join(kind_root, str(runner.t_env))\\n        os.makedirs(step_dir, exist_ok=True)\\n        logger.console_logger.info(\\\"Saving {} model to {}\\\".format(kind, step_dir))\\n        learner.save_models(step_dir)\\n\\n    runner_log_original = runner._log\\n\\n    def sredqn_log_and_maybe_save_best(returns, stats, prefix):\\n        nonlocal sredqn_best_score\\n        if prefix == \\\"test_\\\" and returns and args.save_model:\\n            import numpy as _sredqn_np\\n            arr = _sredqn_np.asarray(returns, dtype=float)\\n            score = float(arr.mean()) if args.common_reward else float(arr.sum(axis=-1).mean())\\n            if score >= sredqn_best_score:\\n                sredqn_best_score = score\\n                sredqn_save_checkpoint(\\\"best\\\")\\n        return runner_log_original(returns, stats, prefix)\\n\\n    runner._log = sredqn_log_and_maybe_save_best\\n\\n    logger.console_logger.info(\\\"Beginning training for {} timesteps\\\".format(args.t_max))\"\"\"\n"
+        "    if hook_anchor not in run_source:\n"
+        "        raise RuntimeError('Could not install EPyMARL best-checkpoint hook')\n"
+        "    run_source = run_source.replace(hook_anchor, checkpoint_hook, 1)\n"
+        "    final_anchor = \"    runner.close_env()\\n    logger.console_logger.info(\\\"Finished Training\\\")\"\n"
+        "    final_hook = \"\"\"    sredqn_save_checkpoint(\\\"final\\\")\\n    if args.save_model and not os.path.isdir(os.path.join(sredqn_model_root, \\\"best\\\")):\\n        sredqn_save_checkpoint(\\\"best\\\")\\n\\n    runner.close_env()\\n    logger.console_logger.info(\\\"Finished Training\\\")\"\"\"\n"
+        "    if final_anchor not in run_source:\n"
+        "        raise RuntimeError('Could not install EPyMARL final-checkpoint hook')\n"
+        "    run_source = run_source.replace(final_anchor, final_hook, 1)\n"
         "    run_module = types.ModuleType('run')\n"
         "    run_module.__file__ = str(run_path)\n"
         "    sys.modules['run'] = run_module\n"
@@ -475,6 +538,8 @@ def run_epymarl_baseline(
         reward_curve_path,
         title=f"{str(algorithm).upper()} - {scenario.key}",
     )
+    final_checkpoint = _latest_checkpoint_step(model_root / "final")
+    best_checkpoint = _latest_checkpoint_step(model_root / "best")
 
     record = {
         "algorithm": algorithm,
@@ -492,6 +557,14 @@ def run_epymarl_baseline(
         if reward_max_curve_path is None
         else str(reward_max_curve_path),
         "model_root": str(model_root),
+        "checkpoint_paths": {
+            "final": None if final_checkpoint is None else str(final_checkpoint),
+            "best": None if best_checkpoint is None else str(best_checkpoint),
+        },
+        "checkpoint_roots": {
+            "final": str(model_root / "final"),
+            "best": str(model_root / "best"),
+        },
         "sacred_metrics_path": sacred_metrics_path,
     }
     if check and proc.returncode != 0:

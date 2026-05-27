@@ -52,7 +52,7 @@ from .state_action_encoding import canonical_lbf_state
 
 
 ROBUST_EPSILONS = (0.01, 0.1, 0.5, 1.0)
-BASELINE_ALGORITHMS = ("random", "iql", "mappo", "qmix")
+BASELINE_ALGORITHMS = ("iql", "ippo", "mappo", "maa2c")
 DEFAULT_EVAL_EPISODES = 500
 DEFAULT_EVAL_VIDEO_FPS = 4
 DEEPSRQ_PATH_MCP_NPLAYER_POOL_FAMILY = "deepsrq_path_mcp_nplayer_pool"
@@ -63,6 +63,17 @@ PATH_MCP_NPLAYER_POOL_SOLVER = "path_mcp_nplayer_pool"
 PATH_TVC_MCP_NPLAYER_POOL_SOLVER = "path_tvc_mcp_nplayer_pool"
 DEFAULT_PATH_POOL_NPLAYER_SOLVER = PATH_MCP_NPLAYER_POOL_SOLVER
 DEFAULT_PATH_MCP_NPLAYER_POOL_WORKERS = 8
+DEEPSRQ_PATH_MCP_POOL_HYPERPARAMETER_OVERRIDES = {
+    "agent": {
+        "sre_num_repeats": 5,
+        "target_equilibrium_update_steps": 4,
+        "sre_policy_cache_enabled": True,
+        "sre_policy_cache_size": 8192,
+        "sre_candidate_selection": "joint_nominal_welfare",
+        "sre_exploitability_filter_enabled": False,
+        "sre_approx_cache_enabled": False,
+    },
+}
 _DEFAULT_DEEP_SRQ_LBF_HP = deep_srq_lbf_hyperparams()
 
 
@@ -145,6 +156,28 @@ def scenario_num_agents(scenario: LbfNotebookScenario) -> int:
         return int(scenario.config["players"])
     _, num_agents, _, _ = probe_lbf(scenario.config, seed=BASE_SEED)
     return int(num_agents)
+
+
+def _scenario_display_label(scenario: LbfNotebookScenario) -> str:
+    scenario_keys = [item.key for item in robust_lbf_scenarios()]
+    try:
+        return f"Scenario {scenario_keys.index(scenario.key) + 1}"
+    except ValueError:
+        return str(scenario.key)
+
+
+def _algorithm_display_label(label: str | None) -> str:
+    label = str(label or "").strip()
+    display_names = {
+        DEEPSRQ_PATH_MCP_NPLAYER_POOL_FAMILY: "Deep SRQ",
+        SRAC_FAMILY: "SRAC",
+        SRA2C_FAMILY: "SR-A2C",
+        "iql": "IQL",
+        "ippo": "IPPO",
+        "mappo": "MAPPO",
+        "maa2c": "MAA2C",
+    }
+    return display_names.get(label.lower(), label)
 
 
 def deepsrq_path_pool_solver_for_scenario(
@@ -389,7 +422,11 @@ def train_deepsrq_path_mcp_pool_for_epsilon(
             nplayer_solver_name=nplayer_solver_name,
         )
         hp = _merge_hyperparameter_overrides(
-            hyperparameter_overrides,
+            (
+                DEEPSRQ_PATH_MCP_POOL_HYPERPARAMETER_OVERRIDES
+                if hyperparameter_overrides is None
+                else hyperparameter_overrides
+            ),
             {
                 "path_mcp_pool": {
                     "max_workers": int(sre_solver_workers),
@@ -860,13 +897,48 @@ def resolve_epymarl_checkpoint(
     models_root: str | Path | None = None,
 ) -> Path:
     models_root = Path(models_root or (_THIS_DIR / "baseline_runs" / "epymarl" / "models"))
-    pattern = f"{scenario_key}_{str(algorithm).lower()}_*"
-    candidates = [path for path in models_root.glob(pattern) if path.is_dir()]
+    algorithm = str(algorithm).lower()
+
+    def numeric_checkpoints(root: Path) -> list[Path]:
+        if not root.exists():
+            return []
+        return [
+            path
+            for path in root.iterdir()
+            if path.is_dir() and path.name.isdigit() and (path / "agent.th").exists()
+        ]
+
+    def latest_step(root: Path) -> Path | None:
+        checkpoints = numeric_checkpoints(root)
+        if not checkpoints:
+            return None
+        return max(checkpoints, key=lambda path: (int(path.name), path.stat().st_mtime))
+
+    canonical_roots = []
+    scenario_root = models_root / scenario_key
+    if scenario_root.exists():
+        for seed_root in scenario_root.iterdir():
+            algorithm_root = seed_root / algorithm
+            if algorithm_root.is_dir():
+                canonical_roots.append(algorithm_root)
+
+    for kind in ("final", "best"):
+        selected = [
+            step
+            for root in canonical_roots
+            if (step := latest_step(root / kind)) is not None
+        ]
+        if selected:
+            return max(selected, key=lambda path: path.stat().st_mtime)
+
     checkpoint_dirs = []
+    for root in canonical_roots:
+        checkpoint_dirs.extend(numeric_checkpoints(root))
+
+    pattern = f"{scenario_key}_{algorithm}_*"
+    candidates = [path for path in models_root.glob(pattern) if path.is_dir()]
     for candidate in candidates:
-        for step_dir in candidate.iterdir():
-            if step_dir.is_dir() and step_dir.name.isdigit() and (step_dir / "agent.th").exists():
-                checkpoint_dirs.append(step_dir)
+        checkpoint_dirs.extend(numeric_checkpoints(candidate))
     if not checkpoint_dirs:
         raise FileNotFoundError(
             f"No EPyMARL checkpoint found for {algorithm} {scenario_key} under {models_root}."
@@ -993,87 +1065,161 @@ def load_deepsrq_path_mcp_pool_policy(
     repo_root: str | Path | None = None,
     use_gpu: bool = True,
     sre_solver_workers: int | None = None,
+    hyperparameter_overrides: dict | None = None,
+    nplayer_solver_name: str = DEFAULT_PATH_POOL_NPLAYER_SOLVER,
 ) -> DeepSrqPolicyAdapter:
     run_dir = deepsrq_path_mcp_pool_training_dir(
         scenario.key,
         epsilon,
         repo_root=repo_root,
     )
-    stats_path = run_dir / "training_stats.json"
-    stats = json.loads(stats_path.read_text(encoding="utf-8"))
-    checkpoint = run_dir / "shared_deepsrq_best.pt"
-    if not checkpoint.exists():
-        checkpoint = run_dir / "shared_deepsrq_final.pt"
-    hp = dict(stats.get("hyperparameters", {}))
+    checkpoints = [
+        run_dir / "shared_deepsrq_final.pt",
+        run_dir / "shared_deepsrq_best.pt",
+    ]
+    checkpoints = [path for path in checkpoints if path.exists()]
+    if not checkpoints:
+        raise FileNotFoundError(
+            f"Deep SRQ checkpoint not found under {run_dir}. "
+            "Expected shared_deepsrq_final.pt or shared_deepsrq_best.pt."
+        )
     workers = int(
         sre_solver_workers
         if sre_solver_workers is not None
-        else _hp_value(
-            hp,
-            "path_mcp_pool",
-            "max_workers",
-            DEFAULT_PATH_MCP_NPLAYER_POOL_WORKERS,
-            "sre_solver_workers",
+        else DEFAULT_PATH_MCP_NPLAYER_POOL_WORKERS
+    )
+    current_hp = deep_srq_lbf_hyperparams(
+        _merge_hyperparameter_overrides(
+            (
+                DEEPSRQ_PATH_MCP_POOL_HYPERPARAMETER_OVERRIDES
+                if hyperparameter_overrides is None
+                else hyperparameter_overrides
+            ),
+            {
+                "path_mcp_pool": {
+                    "max_workers": workers,
+                }
+            },
         )
     )
-    solver_name = str(
-        stats.get("solver_name") or deepsrq_path_pool_solver_for_scenario(scenario)
+    solver_name = deepsrq_path_pool_solver_for_scenario(
+        scenario,
+        nplayer_solver_name=nplayer_solver_name,
     )
-    solver = make_sre_solver(
-        solver_name,
-        random_seed=int(stats.get("seed", BASE_SEED)),
-        max_workers=workers,
-    )
-    agent = DuelingDoubleDqnSreAgent(
-        DuelingDoubleDqnSreAgentConfig(
-            agent_id=0,
-            obs_dim=int(stats["obs_dim"]),
-            num_agents=int(stats["num_agents"]),
-            num_actions=int(stats["num_actions"]),
-            epsilon_robust=float(epsilon),
-            epsilon_explore=0.0,
-            lr=_agent_hp(hp, "lr", "learning_rate"),
-            gamma=_agent_hp(hp, "gamma"),
-            buffer_size=_agent_hp(hp, "buffer_size", "replay_buffer_capacity"),
-            learning_starts=_agent_hp(hp, "learning_starts"),
-            grad_clip_norm=_agent_hp(hp, "grad_clip_norm", "grad_clip_max_norm"),
-            sre_num_repeats=_agent_hp(hp, "sre_num_repeats"),
-            sre_include_pure_starts=hp.get(
-                "sre_include_pure_starts",
-                _agent_hp(hp, "sre_include_pure_starts"),
+    current_agent_hp = current_hp.agent
+    eval_config_overrides = {
+        "epsilon_robust": float(epsilon),
+        "epsilon_explore": 0.0,
+        "lr": current_agent_hp.lr,
+        "gamma": current_agent_hp.gamma,
+        "buffer_size": current_agent_hp.buffer_size,
+        "learning_starts": current_agent_hp.learning_starts,
+        "grad_clip_norm": current_agent_hp.grad_clip_norm,
+        "sre_num_repeats": current_agent_hp.sre_num_repeats,
+        "sre_include_pure_starts": current_agent_hp.sre_include_pure_starts,
+        "train_every": current_agent_hp.train_every,
+        "target_equilibrium_update_steps": current_agent_hp.target_equilibrium_update_steps,
+        "sre_policy_cache_enabled": current_agent_hp.sre_policy_cache_enabled,
+        "sre_policy_cache_size": current_agent_hp.sre_policy_cache_size,
+        "sre_policy_cache_round_digits": current_agent_hp.sre_policy_cache_round_digits,
+        "sre_state_cache_round_digits": current_agent_hp.sre_state_cache_round_digits,
+        "sre_approx_cache_enabled": current_agent_hp.sre_approx_cache_enabled,
+        "sre_cache_exploitability_tol": current_agent_hp.sre_cache_exploitability_tol,
+        "sre_solver_exploitability_tol": current_agent_hp.sre_solver_exploitability_tol,
+        "sre_approx_accept_tol": current_agent_hp.sre_approx_accept_tol,
+        "sre_solver_early_exit": current_agent_hp.sre_solver_early_exit,
+        "sre_candidate_selection": current_agent_hp.sre_candidate_selection,
+        "sre_exploitability_filter_enabled": (
+            current_agent_hp.sre_exploitability_filter_enabled
+        ),
+    }
+
+    def checkpoint_config(path: Path) -> dict:
+        try:
+            payload = torch.load(path, map_location="cpu", weights_only=False)
+        except TypeError:
+            payload = torch.load(path, map_location="cpu")
+        if not isinstance(payload, dict):
+            raise ValueError(f"Deep SRQ checkpoint at {path} is not a checkpoint payload.")
+        config = payload.get("config")
+        if not isinstance(config, dict):
+            raise ValueError(
+                f"Deep SRQ checkpoint at {path} is missing config metadata; "
+                "retrain or load a checkpoint written by save_checkpoint()."
+            )
+        return config
+
+    def make_agent(model_config: dict):
+        config_overrides = {
+            "agent_id": 0,
+            "obs_dim": int(model_config["obs_dim"]),
+            "num_agents": int(model_config["num_agents"]),
+            "num_actions": int(model_config["num_actions"]),
+            "network_type": (
+                model_config.get("network_type") or current_agent_hp.network_type
             ),
-            train_every=_agent_hp(hp, "train_every"),
-            network_type=_agent_hp(hp, "network_type"),
-            use_gpu=use_gpu,
-            sre_solver=solver,
-            sre_solver_name=solver_name,
-            target_equilibrium_update_steps=hp.get(
-                "target_equilibrium_update_steps",
-                _agent_hp(hp, "target_equilibrium_update_steps"),
+            "q_hidden_dims": tuple(
+                model_config.get(
+                    "q_hidden_dims",
+                    current_agent_hp.q_hidden_dims,
+                )
             ),
-            sre_policy_cache_enabled=hp.get(
-                "sre_policy_cache_enabled",
-                _agent_hp(hp, "sre_policy_cache_enabled"),
-            ),
-            sre_policy_cache_size=hp.get("sre_policy_cache_size", 4096),
-            sre_policy_cache_round_digits=hp.get("sre_policy_cache_round_digits", 6),
-            sre_state_cache_round_digits=hp.get("sre_state_cache_round_digits", 4),
-            sre_approx_cache_enabled=hp.get("sre_approx_cache_enabled", True),
-            sre_cache_exploitability_tol=hp.get("sre_cache_exploitability_tol", 1e-3),
-            sre_solver_exploitability_tol=hp.get("sre_solver_exploitability_tol", 1e-4),
-            sre_approx_accept_tol=hp.get("sre_approx_accept_tol", 1e-2),
-            sre_solver_early_exit=hp.get("sre_solver_early_exit", True),
-            sre_candidate_selection=hp.get(
-                "sre_candidate_selection", "robust_exploitability"
-            ),
-            sre_exploitability_filter_enabled=hp.get(
-                "sre_exploitability_filter_enabled", False
-            ),
+            "use_gpu": use_gpu,
+            "sre_solver_name": solver_name,
+            **eval_config_overrides,
+        }
+        solver = make_sre_solver(
+            solver_name,
+            random_seed=BASE_SEED,
+            max_workers=workers,
         )
-    )
-    agent.load_checkpoint(checkpoint, map_location=None if use_gpu else "cpu")
-    agent.config.epsilon_explore = 0.0
-    agent.config.epsilon_robust = float(epsilon)
+        return DuelingDoubleDqnSreAgent(
+            DuelingDoubleDqnSreAgentConfig(
+                **config_overrides,
+                sre_solver=solver,
+            )
+        ), config_overrides
+
+    load_errors = []
+    agent = None
+    selected_config_overrides = None
+    for checkpoint in checkpoints:
+        try:
+            model_config = checkpoint_config(checkpoint)
+        except (RuntimeError, ValueError) as exc:
+            load_errors.append(f"{checkpoint.name}: {exc}")
+            continue
+        candidate_agent, config_overrides = make_agent(model_config)
+        try:
+            candidate_agent.load_checkpoint(
+                checkpoint,
+                map_location=None if use_gpu else "cpu",
+            )
+        except (KeyError, RuntimeError, ValueError) as exc:
+            load_errors.append(f"{checkpoint.name}: {exc}")
+            try:
+                candidate_agent.close()
+            except Exception:
+                pass
+            continue
+        agent = candidate_agent
+        selected_config_overrides = config_overrides
+        if checkpoint.name != "shared_deepsrq_final.pt":
+            print(
+                f"Deep SRQ eval loaded {checkpoint.name} for {scenario.key} "
+                f"epsilon={epsilon:g}; final checkpoint was unavailable or incompatible."
+            )
+        break
+    if agent is None:
+        joined = "\n".join(f"- {message}" for message in load_errors)
+        raise RuntimeError(
+            f"No compatible Deep SRQ checkpoint found under {run_dir}.\n{joined}"
+        )
+    # Older checkpoints can restore stale config fields; keep evaluation aligned
+    # with the current notebook training hyperparameters and solver selected above.
+    for key, value in selected_config_overrides.items():
+        setattr(agent.config, key, value)
+    agent.config.sre_solver_workers = workers
     return DeepSrqPolicyAdapter(agent)
 
 
@@ -1111,10 +1257,40 @@ def _policy_actions_batch(policy, contexts):
     return [_policy_actions(policy, **context) for context in contexts]
 
 
-def rotated_episode_counts(total_episodes: int, num_agents: int) -> list[int]:
-    base = int(total_episodes) // int(num_agents)
-    remainder = int(total_episodes) % int(num_agents)
-    return [base + (1 if idx < remainder else 0) for idx in range(int(num_agents))]
+def _evaluation_agent_labels(
+    *,
+    primary_label: str,
+    opponent_label: str | None,
+    total_episodes: int,
+    num_agents: int,
+) -> tuple[list[str], list[dict], str]:
+    if opponent_label is None:
+        return (
+            [f"Agent {idx + 1}\n{primary_label}" for idx in range(num_agents)],
+            [
+                {
+                    "agent": int(idx + 1),
+                    primary_label: int(total_episodes),
+                }
+                for idx in range(num_agents)
+            ],
+            f"All agent slots use {primary_label}.",
+        )
+
+    labels = []
+    counts = []
+    for idx in range(num_agents):
+        algorithm = primary_label if idx == 0 else str(opponent_label)
+        labels.append(f"Agent {idx + 1}\n{algorithm}")
+        counts.append({"agent": int(idx + 1), algorithm: int(total_episodes)})
+    return (
+        labels,
+        counts,
+        (
+            f"Agent 1 uses {primary_label}; Agents 2-{num_agents} use "
+            f"{opponent_label}."
+        ),
+    )
 
 
 def evaluate_policy_matchup(
@@ -1134,73 +1310,80 @@ def evaluate_policy_matchup(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     _, num_agents, _, _ = probe_lbf(scenario.config, seed=seed)
-    slot_counts = [int(n_episodes)] if opponent_policy is None else rotated_episode_counts(n_episodes, num_agents)
     all_episode_rewards = []
     all_joint_rewards = []
     first_frames = []
     render_error = None
+    primary_display = _algorithm_display_label(primary_label)
+    opponent_display = _algorithm_display_label(
+        primary_label if opponent_policy is None else opponent_label
+    )
+    pair_label = (
+        primary_display
+        if opponent_policy is None
+        else f"{primary_display} vs {opponent_display}"
+    )
+    plot_title = f"{_scenario_display_label(scenario)}, {primary_display} vs {opponent_display}"
+    agent_labels, agent_algorithm_counts, matchup_note = _evaluation_agent_labels(
+        primary_label=primary_display,
+        opponent_label=None if opponent_label is None else opponent_display,
+        total_episodes=n_episodes,
+        num_agents=num_agents,
+    )
 
-    for focal_slot, count in enumerate(slot_counts):
-        if count <= 0:
-            continue
-        matchup_label = primary_label if opponent_policy is None else f"{primary_label} vs {opponent_label}"
-        progress_label = f"{scenario.key} | {matchup_label}"
-        if opponent_policy is not None:
-            progress_label = f"{progress_label} | focal slot {focal_slot + 1}/{num_agents}"
+    def policy_fn(**kwargs):
+        primary_actions = _policy_actions(primary_policy, **kwargs)
+        if opponent_policy is None:
+            return primary_actions
+        opponent_actions = _policy_actions(opponent_policy, **kwargs)
+        actions = list(opponent_actions)
+        actions[0] = int(primary_actions[0])
+        return actions
 
-        def policy_fn(**kwargs):
-            primary_actions = _policy_actions(primary_policy, **kwargs)
-            if opponent_policy is None:
-                return primary_actions
-            opponent_actions = _policy_actions(opponent_policy, **kwargs)
+    def policy_batch_fn(contexts):
+        primary_actions_batch = _policy_actions_batch(primary_policy, contexts)
+        if opponent_policy is None:
+            return primary_actions_batch
+        opponent_actions_batch = _policy_actions_batch(opponent_policy, contexts)
+        actions_batch = []
+        for primary_actions, opponent_actions in zip(
+            primary_actions_batch,
+            opponent_actions_batch,
+        ):
             actions = list(opponent_actions)
-            actions[focal_slot] = int(primary_actions[focal_slot])
-            return actions
+            actions[0] = int(primary_actions[0])
+            actions_batch.append(actions)
+        return actions_batch
 
-        def policy_batch_fn(contexts):
-            primary_actions_batch = _policy_actions_batch(primary_policy, contexts)
-            if opponent_policy is None:
-                return primary_actions_batch
-            opponent_actions_batch = _policy_actions_batch(opponent_policy, contexts)
-            actions_batch = []
-            for primary_actions, opponent_actions in zip(
-                primary_actions_batch,
-                opponent_actions_batch,
-            ):
-                actions = list(opponent_actions)
-                actions[focal_slot] = int(primary_actions[focal_slot])
-                actions_batch.append(actions)
-            return actions_batch
-
-        rollout_kwargs = {
-            "make_env": lambda capture_frames=True: LBFParallelEnv(
-                **scenario.config,
-                render_mode="rgb_array" if capture_frames else None,
-            ),
-            "seed": seed + 1000 * focal_slot,
-            "n_episodes": count,
-            "max_steps": scenario.time_limit,
-            "progress_label": progress_label,
-            "show_progress": show_progress,
-            "capture_first_episode_frames": not first_frames,
-        }
-        if int(num_envs) > 1:
-            rollouts = sample_lbf_rollouts_vectorized(
-                policy_batch_fn=policy_batch_fn,
-                policy_fn=policy_fn,
-                num_envs=int(num_envs),
-                **rollout_kwargs,
-            )
-        else:
-            rollouts = sample_lbf_rollouts(
-                policy_fn=policy_fn,
-                **rollout_kwargs,
-            )
-        all_episode_rewards.extend(rollouts["episode_rewards"])
-        all_joint_rewards.extend(rollouts["joint_rewards"])
-        if not first_frames and rollouts.get("frames"):
-            first_frames = rollouts["frames"]
-        render_error = render_error or rollouts.get("render_error")
+    rollout_kwargs = {
+        "make_env": lambda capture_frames=True: LBFParallelEnv(
+            **scenario.config,
+            render_mode="rgb_array" if capture_frames else None,
+        ),
+        "seed": seed,
+        "n_episodes": int(n_episodes),
+        "max_steps": scenario.time_limit,
+        "progress_label": f"{scenario.key} | {pair_label}",
+        "show_progress": show_progress,
+        "capture_first_episode_frames": not first_frames,
+    }
+    if int(num_envs) > 1:
+        rollouts = sample_lbf_rollouts_vectorized(
+            policy_batch_fn=policy_batch_fn,
+            policy_fn=policy_fn,
+            num_envs=int(num_envs),
+            **rollout_kwargs,
+        )
+    else:
+        rollouts = sample_lbf_rollouts(
+            policy_fn=policy_fn,
+            **rollout_kwargs,
+        )
+    all_episode_rewards.extend(rollouts["episode_rewards"])
+    all_joint_rewards.extend(rollouts["joint_rewards"])
+    if rollouts.get("frames"):
+        first_frames = rollouts["frames"]
+    render_error = render_error or rollouts.get("render_error")
 
     record = {
         "scenario_key": scenario.key,
@@ -1208,11 +1391,15 @@ def evaluate_policy_matchup(
         "primary_label": primary_label,
         "opponent_label": opponent_label,
         "matchup_label": primary_label if opponent_policy is None else f"{primary_label}_vs_{opponent_label}",
+        "pair_label": pair_label,
+        "plot_title": plot_title,
+        "matchup_note": matchup_note,
         "n_episodes": int(n_episodes),
-        "slot_episode_counts": slot_counts,
+        "fixed_primary_agent": 1 if opponent_policy is not None else None,
         "episode_rewards": all_episode_rewards,
         "joint_rewards": all_joint_rewards,
-        "agent_labels": [f"Agent {idx + 1}" for idx in range(num_agents)],
+        "agent_labels": agent_labels,
+        "agent_algorithm_counts": agent_algorithm_counts,
         "render_error": render_error,
         "artifact_dir": str(output_dir),
     }
@@ -1229,7 +1416,7 @@ def evaluate_policy_matchup(
 
     fig = plot_evaluation_agent_reward_boxplot(
         record,
-        title=f"{record['matchup_label']} {scenario.key} evaluation rewards",
+        title=plot_title,
     )
     if fig is not None:
         boxplot_path = output_dir / "evaluation_boxplot.png"
@@ -1278,6 +1465,8 @@ def evaluate_deepsrq_path_mcp_pool_suite_for_epsilon(
     use_gpu: bool = True,
     sre_solver_workers: int = DEFAULT_PATH_MCP_NPLAYER_POOL_WORKERS,
     num_envs: int = 1,
+    hyperparameter_overrides: dict | None = None,
+    nplayer_solver_name: str = DEFAULT_PATH_POOL_NPLAYER_SOLVER,
 ) -> dict[str, dict]:
     scenarios = scenarios or robust_lbf_scenarios()
     results = {}
@@ -1294,6 +1483,8 @@ def evaluate_deepsrq_path_mcp_pool_suite_for_epsilon(
             repo_root=repo_root,
             use_gpu=use_gpu,
             sre_solver_workers=sre_solver_workers,
+            hyperparameter_overrides=hyperparameter_overrides,
+            nplayer_solver_name=nplayer_solver_name,
         )
         try:
             scenario_results = {
@@ -1355,6 +1546,40 @@ def evaluate_deepsrq_path_mcp_pool_suite_for_epsilon(
         drop_episode_lengths=True,
     )
     return results
+
+
+def display_evaluation_boxplots(results: dict) -> None:
+    """Display saved evaluation boxplots from a nested suite result."""
+    try:
+        from IPython.display import Image, Markdown, display
+    except Exception:
+        for scenario_key, scenario_results in dict(results or {}).items():
+            for matchup_key, record in dict(scenario_results or {}).items():
+                boxplot_path = dict(record or {}).get("boxplot_path")
+                status = dict(record or {}).get("status")
+                if boxplot_path:
+                    print(f"{scenario_key} / {matchup_key}: {boxplot_path}")
+                elif status == "skipped":
+                    print(
+                        f"{scenario_key} / {matchup_key}: skipped - "
+                        f"{dict(record or {}).get('error_message')}"
+                    )
+        return
+
+    for scenario_key, scenario_results in dict(results or {}).items():
+        for matchup_key, record in dict(scenario_results or {}).items():
+            record = dict(record or {})
+            boxplot_path = record.get("boxplot_path")
+            if boxplot_path:
+                display(Image(filename=str(boxplot_path)))
+                continue
+            if record.get("status") == "skipped":
+                display(
+                    Markdown(
+                        f"**{scenario_key} / {matchup_key}: skipped**  \n"
+                        f"{record.get('error_message')}"
+                    )
+                )
 
 
 def evaluate_srac_suite_for_epsilon(

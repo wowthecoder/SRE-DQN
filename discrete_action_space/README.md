@@ -114,6 +114,154 @@ of the target-network game under that SRE policy. Robustness changes the policy
 profile selected by the stage-game solver; it is not an extra penalty in the
 default Bellman value.
 
+## SR-AC Pseudocode
+
+`SracAgent` keeps the same SRE stage-game boundary as Deep SRQ, but separates
+acting from value learning. Each actor maps one agent's local observation to an
+action distribution, while the query critic maps `(global_state, joint_action)`
+to one Q value per agent. To call the SRE solver, the critic is evaluated on
+every legal joint action and reshaped into the normal-form Q tensor expected by
+PATH.
+
+```text
+Inputs:
+  local actors pi_phi_i(o_i) -> Delta(A_i)
+  query critic Q_theta(s, a_1, ..., a_N) -> [N]
+  target query critic Q_target with same input/output contract
+  SRE stage-game solver
+  replay buffer D
+
+Initialise:
+  actors, critic, and target critic
+  Q_target <- Q_theta
+  D <- empty replay buffer
+
+For each environment step:
+  for each agent i:
+    with probability epsilon_explore:
+      sample a_i uniformly from legal actions
+    otherwise:
+      sample a_i from pi_phi_i(local_obs_i)
+
+  step the environment with joint action a
+  store (state, local_obs, a, rewards, next_state, next_local_obs,
+         done, masks, next_masks) in D
+
+Every train_every updates after learning_starts:
+  sample a minibatch from D
+  current_q <- Q_theta(state, sampled_joint_action)
+
+  For each nonterminal next state:
+    enumerate legal next joint actions
+    q_next <- Q_target(next_state, every legal joint action)
+    reshape q_next -> [A1_legal, ..., AN_legal, N]
+    pi_next <- SRE(q_next, epsilon_robust)
+    v_next <- E_{a ~ pi_next}[q_next(a)]
+
+  critic_target <- rewards + gamma * v_next
+  update critic by MSE(current_q, critic_target)
+
+  Every actor_update_every critic steps:
+    For each sampled current state:
+      enumerate legal current joint actions
+      q_current <- Q_theta(state, every legal joint action)
+      reshape q_current -> [A1_legal, ..., AN_legal, N]
+      pi_sre <- SRE(q_current, epsilon_robust)
+
+    update each actor with cross-entropy imitation of its SRE marginal pi_sre_i
+
+  periodically hard-update or soft-update Q_target from Q_theta
+```
+
+SR-AC therefore uses PATH as a teacher for the actors and as the bootstrap
+operator for the critic. The behavior policy at environment time is the learned
+actor policy, not a direct sample from a freshly solved SRE game.
+
+## SR-A2C Pseudocode
+
+`Sra2cAgent` extends SR-AC with a latest-window sampler, a separate state-value
+critic, and an advantage actor loss. The query critic still builds the
+normal-form Q tensor used by the SRE solver.
+
+```text
+Inputs:
+  local actors pi_phi_i(o_i) -> Delta(A_i)
+  query critic Q_theta(s, a_1, ..., a_N) -> [N]
+  target query critic Q_target
+  value critic V_psi(s) -> [N]
+  SRE stage-game solver
+  latest-window rollout buffer D
+
+For each environment step:
+  sample each agent action from epsilon-greedy local actor policies
+  store the transition in D
+
+Every train_every updates after learning_starts:
+  take the latest batch from D
+
+  Critic bootstrap:
+    current_q <- Q_theta(state, sampled_joint_action)
+    for each nonterminal next state:
+      enumerate legal next joint actions
+      q_next <- Q_target(next_state, every legal joint action)
+      reshape q_next -> [A1_legal, ..., AN_legal, N]
+      pi_next <- SRE(q_next, epsilon_robust)
+      v_next <- E_{a ~ pi_next}[q_next(a)]
+    q_target <- rewards + gamma * v_next
+    update Q_theta by MSE(current_q, q_target)
+
+  Value target:
+    for each current state:
+      enumerate legal current joint actions
+      q_current_game <- Q_theta(state, every legal joint action)
+      pi_current <- SRE(q_current_game, epsilon_robust)
+      sre_value <- E_{a ~ pi_current}[q_current_game(a)]
+    update V_psi by MSE(V_psi(state), sre_value)
+
+  Actor update:
+    advantage <- Q_theta(state, sampled_joint_action) - V_psi(state)
+    optionally normalize advantages over the valid rollout rows
+    policy_loss <- -log pi_phi_i(sampled_action_i | local_obs_i) * advantage_i
+    entropy_bonus <- entropy(pi_phi_i(. | local_obs_i))
+    imitation_loss <- cross_entropy(pi_current_i, pi_phi_i)
+    update actors using policy_loss - entropy_coef * entropy_bonus
+      + sre_imitation_coef * imitation_loss
+
+  periodically hard-update or soft-update Q_target from Q_theta
+```
+
+SR-A2C still asks the SRE solver for equilibrium marginals, but the actor update
+is mainly advantage-weighted policy gradient. The SRE imitation term is an
+additional stabilizer rather than the whole actor objective.
+
+## Q Tensor to PATH
+
+All three deep discrete algorithms eventually hand the SRE solver a finite
+normal-form payoff tensor:
+
+```text
+q_tensor[a_1, ..., a_N, i] = estimated payoff/Q value for player i
+                             at joint action (a_1, ..., a_N)
+```
+
+For Deep SRQ, the network emits this tensor directly as
+`Q_theta(s) -> [A1, ..., AN, N]`. For SR-AC and SR-A2C, the query critic is
+called once per legal joint action, producing `[num_joint_actions, N]`, and
+the result is reshaped to `[A1_legal, ..., AN_legal, N]`. When action masks are
+active, the solver sees only the legal subgame; returned legal-action policies
+are expanded back to the full action space by the caller.
+
+The solver factory chooses the PATH formulation from the tensor arity:
+
+- two agents: `(A1, A2, 2)` goes to the bimatrix LCP path;
+- more than two agents: `(A1, ..., AN, N)` goes to the N-player MCP path.
+
+The Python solver returns an `SreSolveResult` containing one mixed policy per
+agent plus diagnostics such as robust exploitability, nominal values, robust
+values, candidate count, and PATH status. The learning code then contracts the
+same Q tensor with the returned product policy to compute Bellman targets or
+actor/value targets.
+
 ## DuelingDoubleDqnSreAgent Function Map
 
 The class is long because it mixes four responsibilities: neural DQN training,
@@ -262,10 +410,50 @@ two payoff matrices:
 - `U2 = q_tensor[:, :, 1]`.
 
 `build_robust_bimatrix_lcp(...)` constructs the SRE LCP variables and matrix.
-The policy variables are the first player's probabilities followed by the
-second player's probabilities; additional blocks encode the SRE dual variables
-and epigraph constraints. The helper converts the dense matrix into CSC arrays
-for PATH.
+The payoff matrices are shifted upward when needed so the LP-style robust
+best-response construction is numerically nonnegative; the original unshifted
+payoffs are kept for candidate scoring.
+
+For `K1 = |A1|` and `K2 = |A2|`, the primal blocks are:
+
+- player 1: `[p1, xi1, lambda1]` with lengths `[K1, K2, 1]`;
+- player 2: `[p2, xi2, lambda2]` with lengths `[K2, K1, 1]`.
+
+Here `p_i` is the mixed policy, `xi_i` is the epigraph value indexed by the
+opponent action, and `lambda_i` is the Wasserstein/transport-budget dual. The
+helper builds 0/1 total-variation distance matrices `D1`, `D2`, marginalization
+matrices over the transport coupling, and the robust best-response constraint
+matrices `A1`, `A2`. It also adds the simplex equalities as paired linear rows.
+
+The final LCP has the standard PATH form:
+
+```text
+0 <= z  ⟂  M z + q >= 0
+```
+
+with variable order:
+
+```text
+z = [player_1_primal, player_2_primal,
+     player_1_dual_for_A1_rows, player_2_dual_for_A2_rows]
+```
+
+The dense `M` is built from the KKT stationarity/complementarity blocks:
+
+```text
+M = [[0,       c_corr1, -A1^T, 0    ],
+     [c_corr2, 0,        0,    -A2^T],
+     [A1,      0,        0,     0    ],
+     [0,       A2,       0,     0    ]]
+q = [-c1, -c2, -b1, -b2]
+```
+
+where `c1` and `c2` contain the `-epsilon` objective coefficient for each
+`lambda_i`, and `c_corr1` / `c_corr2` couple each player's policy variables to
+the other player's robust-response dual variables. The helper converts `M` into
+PATH's sparse CSC arrays `col_start`, `col_len`, `row`, and `data`; `solve_lcp`
+then passes those arrays, `q`, and nonnegative bounds to the C wrapper. PATH
+evaluates `F(z) = Mz + q` with a constant Jacobian.
 
 The solver tries pure starts when enabled and then random starts. For each
 successful PATH status, it reads the policy variables from PATH's returned
@@ -284,11 +472,41 @@ each player it builds a block of variables:
 - `eta`: transport-plan dual variables over opponent profile pairs;
 - `kappa`: simplex multiplier.
 
+Before PATH is called, each player payoff slice is transformed into a matrix:
+
+```text
+payoffs_by_player[i][a_i, a_-i_profile]
+  = q_tensor[a_1, ..., a_i, ..., a_N, i]
+```
+
+The opponent profiles are enumerated explicitly with
+`itertools.product(*A_{-i})`. This is the bridge from the neural or critic-built
+Q tensor to the finite SRE KKT system.
+
 The nonlinear term is the opponent distribution
 `prod_{j != i} p_j(a_j)`. The solver computes both this term and its gradient
 inside the MCP callbacks. The sparse Jacobian pattern is cached by action shape,
 while the values that depend on the current Q tensor and current iterate `z` are
 filled on each PATH callback.
+
+PATH sees the MCP as bounded variables plus callbacks for `F(z)` and `J(z)`.
+For each player, the callback fills:
+
+- policy stationarity:
+  `F[p_i] = -kappa_i - payoffs_i @ sum_eta_columns`;
+- transport-budget stationarity:
+  `F[lambda_i] = epsilon - sum(eta_i * distance_i)`;
+- epigraph marginal constraints:
+  `F[xi_i] = -prod_{j != i} p_j(a_j) + row_sum(eta_i)`;
+- transport complementarity rows:
+  `F[eta_i] = -xi_i + E_{p_i}[Q_i(. , a_-i_hat)]
+              + lambda_i * distance_i`;
+- simplex equation:
+  `F[kappa_i] = 1 - sum(p_i)`.
+
+The lower bounds make `prob`, `lambda`, and `eta` nonnegative; `xi` and `kappa`
+are free. Since `prod_{j != i} p_j(a_j)` is multilinear for `N > 2`, these
+callbacks define an MCP rather than a single constant LCP matrix.
 
 Each PATH candidate is converted back to policies from the `prob` blocks. The
 solver then recomputes robust exploitability and robust policy values in Python.
