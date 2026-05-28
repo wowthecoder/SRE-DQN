@@ -16,7 +16,7 @@ from .base import (
     _normalize_policy,
     validate_bimatrix_q_tensor,
 )
-from .nplayer_common import robust_exploitability, robust_policy_values
+from .nplayer_common import robust_policy_values
 
 
 DEFAULT_PATHWRAP_PATH = Path(__file__).resolve().with_name("pathwrap.so")
@@ -39,34 +39,11 @@ class ProcessPoolPathCBimatrixSreSolverConfig:
             raise ValueError("max_workers must be positive for process-pool SRE.")
 
 
-def _normalize_candidate_selection(candidate_selection):
-    selection = str(candidate_selection or "joint_nominal_welfare").lower()
-    aliases = {
-        "joint_welfare": "joint_nominal_welfare",
-        "joint_nominal_welfare": "joint_nominal_welfare",
-        "nominal_welfare": "joint_nominal_welfare",
-        "expected_joint_payoff": "joint_nominal_welfare",
-        "expected_joint_reward": "joint_nominal_welfare",
-        "robust_exploitability": "robust_exploitability",
-        "exploitability": "robust_exploitability",
-        "lowest_exploitability": "robust_exploitability",
-    }
-    normalized = aliases.get(selection)
-    if normalized is None:
-        raise ValueError(
-            "candidate_selection must be 'joint_nominal_welfare' or "
-            f"'robust_exploitability', got {candidate_selection!r}."
-        )
-    return normalized
-
-
 def _select_best_solution(
     q_tensor,
     solutions,
     epsilon=0.0,
-    candidate_selection="joint_nominal_welfare",
 ):
-    candidate_selection = _normalize_candidate_selection(candidate_selection)
     u1 = q_tensor[:, :, 0]
     u2 = q_tensor[:, :, 1]
     best_key = None
@@ -88,30 +65,18 @@ def _select_best_solution(
             "nominal_values": [r1, r2],
             "joint_nominal_welfare": float(joint_nominal_welfare),
         }
-        if candidate_selection == "robust_exploitability":
-            gap, player_gaps, _robust_action_values = robust_exploitability(
-                q_tensor,
-                [p1, p2],
-                epsilon,
-            )
-            policy_values = robust_policy_values(q_tensor, [p1, p2], epsilon)
-            metadata.update(
-                {
-                    "robust_exploitability": float(gap),
-                    "player_robust_gaps": [float(value) for value in player_gaps],
-                    "robust_policy_values": [
-                        float(value) for value in policy_values
-                    ],
-                }
-            )
-            key = (float(gap), -float(joint_nominal_welfare))
-        else:
-            key = (-float(joint_nominal_welfare),)
+        key = (-float(joint_nominal_welfare),)
 
         if best_key is None or key < best_key:
             best_key = key
             best = [p1, p2]
             best_metadata = metadata
+
+    if best is not None:
+        policy_values = robust_policy_values(q_tensor, best, epsilon)
+        best_metadata["robust_policy_values"] = [
+            float(value) for value in policy_values
+        ]
 
     return best, best_metadata or {}
 
@@ -166,13 +131,11 @@ class PathCBimatrixSreSolver(SreStageGameSolver):
         q_tensor,
         epsilon,
         *,
-        num_repeats=20,
+        num_random_starts=20,
+        num_pure_starts=None,
         round_digits=4,
-        include_pure_starts=True,
-        candidate_selection="joint_nominal_welfare",
     ):
         q_tensor = validate_bimatrix_q_tensor(q_tensor)
-        candidate_selection = _normalize_candidate_selection(candidate_selection)
         u1 = q_tensor[:, :, 0]
         u2 = q_tensor[:, :, 1]
         try:
@@ -181,10 +144,10 @@ class PathCBimatrixSreSolver(SreStageGameSolver):
                     u1,
                     u2,
                     [epsilon, epsilon],
-                    num_repeats,
+                    num_random_starts,
                     self.path_solver,
                     round_digits=round_digits,
-                    include_pure_starts=include_pure_starts,
+                    num_pure_starts=num_pure_starts,
                 )
             )
         except Exception as exc:
@@ -202,7 +165,6 @@ class PathCBimatrixSreSolver(SreStageGameSolver):
             q_tensor,
             solutions,
             epsilon,
-            candidate_selection,
         )
         if policies is None:
             return SreSolveResult(
@@ -223,9 +185,8 @@ class PathCBimatrixSreSolver(SreStageGameSolver):
             success=True,
             metadata={
                 "solver": self.name,
-                "num_repeats": int(num_repeats),
-                "include_pure_starts": bool(include_pure_starts),
-                "candidate_selection": candidate_selection,
+                "num_random_starts": int(num_random_starts),
+                "num_pure_starts": None if num_pure_starts is None else int(num_pure_starts),
                 "candidate_count": int(len(solutions)),
                 **selection_metadata,
             },
@@ -250,19 +211,17 @@ def _path_pool_solve_task(payload):
     (
         q_tensor,
         epsilon,
-        num_repeats,
+        num_random_starts,
+        num_pure_starts,
         round_digits,
-        include_pure_starts,
-        candidate_selection,
     ) = payload
     start = time.perf_counter()
     result = _POOL_SOLVER.solve(
         q_tensor,
         epsilon,
-        num_repeats=num_repeats,
+        num_random_starts=num_random_starts,
+        num_pure_starts=num_pure_starts,
         round_digits=round_digits,
-        include_pure_starts=include_pure_starts,
-        candidate_selection=candidate_selection,
     )
     elapsed = time.perf_counter() - start
     result.metadata = dict(result.metadata)
@@ -305,18 +264,16 @@ class ProcessPoolPathCBimatrixSreSolver(SreStageGameSolver):
         q_tensor,
         epsilon,
         *,
-        num_repeats=20,
+        num_random_starts=20,
+        num_pure_starts=None,
         round_digits=4,
-        include_pure_starts=True,
-        candidate_selection="joint_nominal_welfare",
     ):
         return self.solve_batch(
             [q_tensor],
             epsilon,
-            num_repeats=num_repeats,
+            num_random_starts=num_random_starts,
+            num_pure_starts=num_pure_starts,
             round_digits=round_digits,
-            include_pure_starts=include_pure_starts,
-            candidate_selection=candidate_selection,
         )[0]
 
     def solve_batch(
@@ -324,24 +281,21 @@ class ProcessPoolPathCBimatrixSreSolver(SreStageGameSolver):
         q_tensors,
         epsilon,
         *,
-        num_repeats=20,
+        num_random_starts=20,
+        num_pure_starts=None,
         round_digits=4,
-        include_pure_starts=True,
-        candidate_selection="joint_nominal_welfare",
     ):
         q_tensors = [validate_bimatrix_q_tensor(q_tensor) for q_tensor in q_tensors]
         if not q_tensors:
             return []
-        candidate_selection = _normalize_candidate_selection(candidate_selection)
 
         payloads = [
             (
                 q_tensor,
                 float(epsilon),
-                int(num_repeats),
+                int(num_random_starts),
+                None if num_pure_starts is None else int(num_pure_starts),
                 round_digits,
-                bool(include_pure_starts),
-                candidate_selection,
             )
             for q_tensor in q_tensors
         ]

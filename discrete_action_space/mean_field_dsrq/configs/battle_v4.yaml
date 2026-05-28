@@ -1,4 +1,4 @@
-# MF-DSRQ config for MAgent2 battle_v4
+# PATH mean-field DSRQ config for MAgent2 battle_v4
 env_name: battle_v4
 env_backend: magent2
 map_size: 40
@@ -9,34 +9,41 @@ type_prefixes:
   red: "red_"
   blue: "blue_"
 
-# Neighbor action space equals own action space (symmetric env).
-# Omitting n_nbr_actions_override uses n_own per type by default.
+# Neighbor action space equals own action space. The PATH-backed
+# representative bimatrix game currently requires this symmetry.
 
-# TV robustness
-epsilon_tv_start: 0.10
-epsilon_tv_end: 0.02
-epsilon_tv_decay_frac: 1.0   # decay over full training
+# SRE robustness
+epsilon_robust_start: 0.10
+epsilon_robust_end: 0.02
+epsilon_robust_decay_frac: 1.0
 
-# Boltzmann temperature
-beta_start: 1.0
-beta_end: 5.0
-beta_anneal_frac: 0.5        # anneal over first 50% of training
-
-# Exploration
+# Exploration schedule follows the mfrl-master Battle training script:
+# 1.0 -> 0.2 over the first 80%, then 0.2 -> 0.1.
 epsilon_explore_start: 1.0
-epsilon_explore_end: 0.05
-epsilon_explore_decay_frac: 0.2
+epsilon_explore_mid: 0.2
+epsilon_explore_mid_fraction: 0.8
+epsilon_explore_end: 0.1
 
-# RL
+# Reference MFQ hyperparameters
 gamma: 0.95
 lr: 1.0e-4
-batch_size: 256
-buffer_capacity: 1000000
+batch_size: 64
+buffer_capacity: 80000
 learning_starts: 5000
-train_every: 4
+train_every: 5
 target_tau: 0.005
 grad_clip: 10.0
 ema_momentum: 0.5
+
+# PATH bimatrix SRE solver
+sre_solver_name: path_c_pool
+sre_solver_workers: 8
+sre_num_random_starts: 5
+sre_num_pure_starts: 5
+sre_policy_cache_enabled: true
+sre_policy_cache_size: 4096
+sre_policy_cache_round_digits: 6
+sre_uniform_fallback_on_failure: true
 
 # Training budget
 total_steps: 1000000

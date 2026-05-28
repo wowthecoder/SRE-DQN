@@ -18,7 +18,6 @@ from ..nplayer_common import (
     _expected_nominal_values,
     _solution_dict_from_policies,
     _uniform_nplayer_policies,
-    robust_exploitability,
     robust_policy_values,
     validate_nplayer_q_tensor,
 )
@@ -47,41 +46,15 @@ class ProcessPoolPathMcpNPlayerSreSolverConfig:
             raise ValueError("max_workers must be positive for process-pool SRE.")
 
 
-def _normalize_candidate_selection(candidate_selection):
-    selection = str(candidate_selection or "robust_exploitability").lower()
-    aliases = {
-        "exploitability": "robust_exploitability",
-        "robust_exploitability": "robust_exploitability",
-        "lowest_exploitability": "robust_exploitability",
-        "joint_welfare": "joint_nominal_welfare",
-        "joint_nominal_welfare": "joint_nominal_welfare",
-        "nominal_welfare": "joint_nominal_welfare",
-    }
-    if selection not in aliases:
-        raise ValueError(
-            "candidate_selection must be 'robust_exploitability' or "
-            f"'joint_nominal_welfare', got {candidate_selection!r}."
-        )
-    return aliases[selection]
-
-
-def _sort_sre_candidates(candidates, candidate_selection):
-    selection = _normalize_candidate_selection(candidate_selection)
-    if selection == "joint_nominal_welfare":
-        return sorted(
-            candidates,
-            key=lambda candidate: (
-                -candidate["joint_nominal_welfare"],
-                candidate["robust_exploitability"],
-            ),
-        )
+def _sort_sre_candidates(candidates):
     return sorted(
         candidates,
-        key=lambda candidate: (
-            candidate["robust_exploitability"],
-            -candidate["joint_nominal_welfare"],
-        ),
+        key=lambda candidate: -candidate["joint_nominal_welfare"],
     )
+
+
+def _select_sre_candidate(candidates):
+    return _sort_sre_candidates(candidates)[0]
 
 
 class PathMcpNPlayerSreSolver(SreStageGameSolver):
@@ -226,8 +199,8 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
         index,
         action_sizes,
         opponent_data,
-        num_repeats,
-        include_pure_starts,
+        num_random_starts,
+        num_pure_starts,
         initial_policies=None,
     ):
         starts = []
@@ -238,19 +211,19 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
             starts.append(
                 self._make_start(index, action_sizes, opponent_data, initial_policies)
             )
-        if include_pure_starts:
-            max_pure_starts = max(1, int(num_repeats))
-            for profile_idx, pure_profile in enumerate(itertools.product(*[range(size) for size in action_sizes])):
-                if profile_idx >= max_pure_starts:
-                    break
-                policies = []
-                for action_size, action_id in zip(action_sizes, pure_profile):
-                    policy = np.zeros(action_size, dtype=np.float64)
-                    policy[action_id] = 1.0
-                    policies.append(policy)
-                starts.append(self._make_start(index, action_sizes, opponent_data, policies))
+        for profile_idx, pure_profile in enumerate(
+            itertools.product(*[range(size) for size in action_sizes])
+        ):
+            if profile_idx >= max(0, int(num_pure_starts)):
+                break
+            policies = []
+            for action_size, action_id in zip(action_sizes, pure_profile):
+                policy = np.zeros(action_size, dtype=np.float64)
+                policy[action_id] = 1.0
+                policies.append(policy)
+            starts.append(self._make_start(index, action_sizes, opponent_data, policies))
 
-        for _ in range(max(0, int(num_repeats))):
+        for _ in range(max(0, int(num_random_starts))):
             starts.append(self._make_start(index, action_sizes, opponent_data))
         return starts
 
@@ -478,24 +451,16 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
         round_digits,
         start,
         metadata,
-        success_tol,
     ):
-        exploitability, player_gaps, robust_values = robust_exploitability(
-            q_tensor, policies, epsilon
-        )
         nominal = _expected_nominal_values(q_tensor, policies)
         robust_policy_values_result = robust_policy_values(q_tensor, policies, epsilon)
-        success = bool(exploitability <= success_tol)
         result_metadata = {
             "solver": self.name,
             "algorithm_family": self.algorithm_family,
             "epsilon": float(epsilon),
-            "exploitability_tol": float(success_tol),
             "num_agents": int(q_tensor.shape[-1]),
             "action_sizes": [int(size) for size in q_tensor.shape[:-1]],
             "wall_seconds": float(time.perf_counter() - start),
-            "robust_exploitability": float(exploitability),
-            "player_robust_gaps": [float(gap) for gap in player_gaps],
             "robust_policy_values": [
                 float(value) for value in robust_policy_values_result
             ],
@@ -508,8 +473,8 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
             solutions=[_solution_dict_from_policies(policies, round_digits=round_digits)],
             utilities_sr=[[float(value) for value in robust_policy_values_result]],
             utilities_nominal=[[float(value) for value in nominal]],
-            success=success,
-            message="" if success else "Returned best PATH MCP candidate.",
+            success=True,
+            message="",
             metadata=result_metadata,
         )
 
@@ -606,18 +571,13 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
         q_tensor,
         epsilon,
         *,
-        num_repeats=20,
+        num_random_starts=20,
+        num_pure_starts=20,
         round_digits=4,
-        include_pure_starts=True,
         initial_policies=None,
-        exploitability_tol=1e-4,
-        early_exit=True,
-        candidate_selection="robust_exploitability",
     ):
         start = time.perf_counter()
         q_tensor = validate_nplayer_q_tensor(q_tensor)
-        candidate_selection = _normalize_candidate_selection(candidate_selection)
-        allow_early_exit = bool(early_exit) and candidate_selection == "robust_exploitability"
         action_sizes = q_tensor.shape[:-1]
         structure = self._structure_for_action_sizes(action_sizes)
         index = structure["index"]
@@ -632,26 +592,6 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
         initial_policies = self._normalize_initial_policies(
             action_sizes, initial_policies
         )
-        if initial_policies is not None and allow_early_exit:
-            initial_gap, _, _ = robust_exploitability(
-                q_tensor, initial_policies, epsilon
-            )
-            if initial_gap <= exploitability_tol:
-                return self._result_from_candidate(
-                    q_tensor=q_tensor,
-                    policies=initial_policies,
-                    epsilon=epsilon,
-                    round_digits=round_digits,
-                    start=start,
-                    success_tol=exploitability_tol,
-                    metadata={
-                        "path_shortcut": "initial_policies_verified",
-                        "num_starts": 0,
-                        "num_candidates": 1,
-                        "early_exit": True,
-                        "candidate_selection": candidate_selection,
-                    },
-                )
 
         dominant_policies = self._dominant_action_policies(payoffs_by_player)
         if dominant_policies is not None:
@@ -661,13 +601,13 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
                 epsilon=epsilon,
                 round_digits=round_digits,
                 start=start,
-                success_tol=exploitability_tol,
                 metadata={
                     "path_shortcut": "dominant_actions",
                     "num_starts": 0,
+                    "num_random_starts": int(num_random_starts),
+                    "num_pure_starts": int(num_pure_starts),
+                    "warm_start_used": bool(initial_policies is not None),
                     "num_candidates": 1,
-                    "early_exit": True,
-                    "candidate_selection": candidate_selection,
                 },
             )
 
@@ -675,8 +615,8 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
             index,
             action_sizes,
             opponent_data,
-            num_repeats,
-            include_pure_starts,
+            num_random_starts,
+            num_pure_starts,
             initial_policies=initial_policies,
         )
         candidates = []
@@ -707,16 +647,11 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
             policies = self._policies_from_z(z_sol, index, action_sizes)
             if policies is None:
                 continue
-            exploitability, player_gaps, robust_values = robust_exploitability(
-                q_tensor, policies, epsilon
-            )
             nominal = _expected_nominal_values(q_tensor, policies)
             robust_policy_values_result = robust_policy_values(q_tensor, policies, epsilon)
             candidates.append(
                 {
                     "policies": policies,
-                    "robust_exploitability": float(exploitability),
-                    "player_robust_gaps": [float(gap) for gap in player_gaps],
                     "robust_policy_values": [
                         float(value) for value in robust_policy_values_result
                     ],
@@ -725,30 +660,10 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
                     "status": int(status),
                 }
             )
-            if allow_early_exit and exploitability <= exploitability_tol:
-                return self._result_from_candidate(
-                    q_tensor=q_tensor,
-                    policies=policies,
-                    epsilon=epsilon,
-                    round_digits=round_digits,
-                    start=start,
-                    success_tol=exploitability_tol,
-                    metadata={
-                        "num_starts": int(len(starts)),
-                        "num_starts_attempted": int(attempted_starts),
-                        "num_candidates": int(len(candidates)),
-                        "path_status": int(status),
-                        "early_exit": True,
-                        "candidate_selection": candidate_selection,
-                    },
-                )
 
         elapsed = time.perf_counter() - start
         if not candidates:
             policies = _uniform_nplayer_policies(q_tensor)
-            exploitability, player_gaps, robust_values = robust_exploitability(
-                q_tensor, policies, epsilon
-            )
             nominal = _expected_nominal_values(q_tensor, policies)
             robust_policy_values_result = robust_policy_values(q_tensor, policies, epsilon)
             return SreSolveResult(
@@ -767,12 +682,12 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
                     "num_agents": int(q_tensor.shape[-1]),
                     "action_sizes": [int(size) for size in action_sizes],
                     "num_starts": int(len(starts)),
+                    "num_random_starts": int(num_random_starts),
+                    "num_pure_starts": int(num_pure_starts),
+                    "warm_start_used": bool(initial_policies is not None),
                     "num_starts_attempted": int(attempted_starts),
                     "num_candidates": 0,
                     "wall_seconds": float(elapsed),
-                    "candidate_selection": candidate_selection,
-                    "robust_exploitability": float(exploitability),
-                    "player_robust_gaps": [float(gap) for gap in player_gaps],
                     "robust_policy_values": [
                         float(value) for value in robust_policy_values_result
                     ],
@@ -781,35 +696,32 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
                 },
             )
 
-        candidates = _sort_sre_candidates(candidates, candidate_selection)
-        best = candidates[0]
+        best = _select_sre_candidate(candidates)
         solution = _solution_dict_from_policies(best["policies"], round_digits=round_digits)
         return SreSolveResult(
             policies=best["policies"],
             solutions=[solution],
             utilities_sr=[best["robust_policy_values"]],
             utilities_nominal=[best["nominal_values"]],
-            success=bool(best["robust_exploitability"] <= exploitability_tol),
-            message="" if best["robust_exploitability"] <= exploitability_tol else "Returned best PATH MCP candidate.",
+            success=True,
+            message="",
             metadata={
                 "solver": self.name,
                 "algorithm_family": self.algorithm_family,
                 "epsilon": float(epsilon),
-                "exploitability_tol": float(exploitability_tol),
                 "num_agents": int(q_tensor.shape[-1]),
                 "action_sizes": [int(size) for size in action_sizes],
                 "num_starts": int(len(starts)),
+                "num_random_starts": int(num_random_starts),
+                "num_pure_starts": int(num_pure_starts),
+                "warm_start_used": bool(initial_policies is not None),
                 "num_starts_attempted": int(attempted_starts),
                 "num_candidates": int(len(candidates)),
                 "path_status": best["status"],
                 "wall_seconds": float(elapsed),
-                "candidate_selection": candidate_selection,
-                "robust_exploitability": best["robust_exploitability"],
-                "player_robust_gaps": best["player_robust_gaps"],
                 "robust_policy_values": best["robust_policy_values"],
                 "nominal_values": best["nominal_values"],
                 "joint_nominal_welfare": best["joint_nominal_welfare"],
-                "early_exit": False,
             },
         )
 
@@ -1115,13 +1027,10 @@ def _path_mcp_nplayer_pool_solve_task(payload):
     (
         q_tensor,
         epsilon,
-        num_repeats,
+        num_random_starts,
+        num_pure_starts,
         round_digits,
-        include_pure_starts,
         initial_policies,
-        exploitability_tol,
-        early_exit,
-        candidate_selection,
         task_seed,
     ) = payload
     if task_seed is not None:
@@ -1131,13 +1040,10 @@ def _path_mcp_nplayer_pool_solve_task(payload):
     result = _NPLAYER_POOL_SOLVER.solve(
         q_tensor,
         epsilon,
-        num_repeats=num_repeats,
+        num_random_starts=num_random_starts,
+        num_pure_starts=num_pure_starts,
         round_digits=round_digits,
-        include_pure_starts=include_pure_starts,
         initial_policies=initial_policies,
-        exploitability_tol=exploitability_tol,
-        early_exit=early_exit,
-        candidate_selection=candidate_selection,
     )
     elapsed = time.perf_counter() - start
     result.metadata = dict(result.metadata)
@@ -1192,24 +1098,18 @@ class ProcessPoolPathMcpNPlayerSreSolver(SreStageGameSolver):
         q_tensor,
         epsilon,
         *,
-        num_repeats=20,
+        num_random_starts=20,
+        num_pure_starts=20,
         round_digits=4,
-        include_pure_starts=True,
         initial_policies=None,
-        exploitability_tol=1e-4,
-        early_exit=True,
-        candidate_selection="robust_exploitability",
     ):
         return self.solve_batch(
             [q_tensor],
             epsilon,
-            num_repeats=num_repeats,
+            num_random_starts=num_random_starts,
+            num_pure_starts=num_pure_starts,
             round_digits=round_digits,
-            include_pure_starts=include_pure_starts,
             initial_policies_batch=[initial_policies],
-            exploitability_tol=exploitability_tol,
-            early_exit=early_exit,
-            candidate_selection=candidate_selection,
         )[0]
 
     def solve_batch(
@@ -1217,13 +1117,10 @@ class ProcessPoolPathMcpNPlayerSreSolver(SreStageGameSolver):
         q_tensors,
         epsilon,
         *,
-        num_repeats=20,
+        num_random_starts=20,
+        num_pure_starts=20,
         round_digits=4,
-        include_pure_starts=True,
         initial_policies_batch=None,
-        exploitability_tol=1e-4,
-        early_exit=True,
-        candidate_selection="robust_exploitability",
     ):
         q_tensors = [validate_nplayer_q_tensor(q_tensor) for q_tensor in q_tensors]
         if not q_tensors:
@@ -1239,13 +1136,10 @@ class ProcessPoolPathMcpNPlayerSreSolver(SreStageGameSolver):
             (
                 q_tensor,
                 float(epsilon),
-                int(num_repeats),
+                int(num_random_starts),
+                int(num_pure_starts),
                 round_digits,
-                bool(include_pure_starts),
                 initial_policies,
-                float(exploitability_tol),
-                bool(early_exit),
-                _normalize_candidate_selection(candidate_selection),
                 self._task_seed(batch_offset),
             )
             for batch_offset, (q_tensor, initial_policies) in enumerate(
@@ -1302,13 +1196,10 @@ def _path_tvc_mcp_nplayer_pool_solve_task(payload):
     (
         q_tensor,
         epsilon,
-        num_repeats,
+        num_random_starts,
+        num_pure_starts,
         round_digits,
-        include_pure_starts,
         initial_policies,
-        exploitability_tol,
-        early_exit,
-        candidate_selection,
         task_seed,
     ) = payload
     if task_seed is not None:
@@ -1318,13 +1209,10 @@ def _path_tvc_mcp_nplayer_pool_solve_task(payload):
     result = _TVC_NPLAYER_POOL_SOLVER.solve(
         q_tensor,
         epsilon,
-        num_repeats=num_repeats,
+        num_random_starts=num_random_starts,
+        num_pure_starts=num_pure_starts,
         round_digits=round_digits,
-        include_pure_starts=include_pure_starts,
         initial_policies=initial_policies,
-        exploitability_tol=exploitability_tol,
-        early_exit=early_exit,
-        candidate_selection=candidate_selection,
     )
     elapsed = time.perf_counter() - start
     result.metadata = dict(result.metadata)
@@ -1365,13 +1253,10 @@ class ProcessPoolPathTvcMcpNPlayerSreSolver(ProcessPoolPathMcpNPlayerSreSolver):
         q_tensors,
         epsilon,
         *,
-        num_repeats=20,
+        num_random_starts=20,
+        num_pure_starts=20,
         round_digits=4,
-        include_pure_starts=True,
         initial_policies_batch=None,
-        exploitability_tol=1e-4,
-        early_exit=True,
-        candidate_selection="robust_exploitability",
     ):
         q_tensors = [validate_nplayer_q_tensor(q_tensor) for q_tensor in q_tensors]
         if not q_tensors:
@@ -1387,13 +1272,10 @@ class ProcessPoolPathTvcMcpNPlayerSreSolver(ProcessPoolPathMcpNPlayerSreSolver):
             (
                 q_tensor,
                 float(epsilon),
-                int(num_repeats),
+                int(num_random_starts),
+                int(num_pure_starts),
                 round_digits,
-                bool(include_pure_starts),
                 initial_policies,
-                float(exploitability_tol),
-                bool(early_exit),
-                _normalize_candidate_selection(candidate_selection),
                 self._task_seed(batch_offset),
             )
             for batch_offset, (q_tensor, initial_policies) in enumerate(

@@ -19,6 +19,7 @@ strategically-robust-game-theory/
 sre-sandbox/
 Nash-DQN/
 nfg_transformer_ref/
+mfrl-master/
 
 AGENTs.md
 CLAUDE.md
@@ -31,3 +32,4 @@ relevant_papers/
 *.ckpt
 *.pt
 *.th
+*.pyc

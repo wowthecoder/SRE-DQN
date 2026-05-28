@@ -54,7 +54,7 @@ def assert_is_nash(
         ), "Player 2 support actions are not payoff-indifferent."
 
 
-def run_nash_solver(path_solver, U1, U2, num_repeats=12, seed=0, round_digits=None):
+def run_nash_solver(path_solver, U1, U2, num_random_starts=12, seed=0, round_digits=None):
     state = np.random.get_state()
     np.random.seed(seed)
     try:
@@ -62,7 +62,7 @@ def run_nash_solver(path_solver, U1, U2, num_repeats=12, seed=0, round_digits=No
             U1=np.asarray(U1, dtype=np.float64),
             U2=np.asarray(U2, dtype=np.float64),
             epsilon_values=[0.0, 0.0],
-            num_repeats=num_repeats,
+            num_random_starts=num_repeats,
             path_solver=path_solver,
             round_digits=round_digits,
         )

@@ -256,8 +256,7 @@ def test_deep_srq_accepts_sred_gradient_solver_for_three_agents():
             learning_starts=99,
             use_gpu=False,
             sre_solver=solver,
-            sre_num_repeats=8,
-            sre_solver_exploitability_tol=1e-6,
+            sre_num_random_starts=8,
         )
     )
     try:

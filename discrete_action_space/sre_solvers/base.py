@@ -38,9 +38,9 @@ class SreStageGameSolver(ABC):
         q_tensor,
         epsilon,
         *,
-        num_repeats=20,
+        num_random_starts=20,
+        num_pure_starts=20,
         round_digits=4,
-        include_pure_starts=True,
     ):
         raise NotImplementedError
 
@@ -49,17 +49,17 @@ class SreStageGameSolver(ABC):
         q_tensors,
         epsilon,
         *,
-        num_repeats=20,
+        num_random_starts=20,
+        num_pure_starts=20,
         round_digits=4,
-        include_pure_starts=True,
     ):
         return [
             self.solve(
                 q_tensor,
                 epsilon,
-                num_repeats=num_repeats,
+                num_random_starts=num_random_starts,
+                num_pure_starts=num_pure_starts,
                 round_digits=round_digits,
-                include_pure_starts=include_pure_starts,
             )
             for q_tensor in q_tensors
         ]

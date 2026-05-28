@@ -24,7 +24,7 @@ _DEFAULT_RUNS_DIR = _THIS_DIR / "runs"
 if str(_DISCRETE_DIR) not in sys.path:
     sys.path.insert(0, str(_DISCRETE_DIR))
 
-from mean_field_dsrq.mf_dsrq_agent import MFDsrqAgent
+from mean_field_dsrq.path_mean_field_dsrq import MFDsrqAgent
 from mean_field_dsrq.magent_env_wrapper import VectorizedMAgentWrapper
 from mean_field_dsrq.benchmarl_magent2 import make_magent2_parallel_env_factory
 
@@ -48,6 +48,17 @@ def _load_config(path: str) -> dict:
 
 def _linear_schedule(start, end, fraction):
     return start + (end - start) * min(max(fraction, 0.0), 1.0)
+
+
+def _reference_explore_schedule(cfg: dict, fraction: float) -> float:
+    """Reference MFRL battle schedule: 1.0 -> 0.2 over 80%, then 0.2 -> 0.1."""
+    start = float(cfg.get("epsilon_explore_start", 1.0))
+    mid = float(cfg.get("epsilon_explore_mid", 0.2))
+    end = float(cfg.get("epsilon_explore_end", 0.1))
+    mid_frac = max(1e-6, min(float(cfg.get("epsilon_explore_mid_fraction", 0.8)), 1.0))
+    if fraction <= mid_frac:
+        return _linear_schedule(start, mid, fraction / mid_frac)
+    return _linear_schedule(mid, end, (fraction - mid_frac) / max(1.0 - mid_frac, 1e-6))
 
 
 def _make_progress_bar(total_steps: int, cfg: dict):
@@ -104,30 +115,33 @@ def train(cfg: dict):
             obs_channels=C, obs_height=H, obs_width=W,
             n_own_actions=n_own_t,
             n_nbr_actions=n_nbr_t,
-            epsilon_tv=cfg.get("epsilon_tv_start", 0.10),
-            beta=cfg.get("beta_start", 1.0),
+            epsilon_robust=cfg.get("epsilon_robust_start", 0.10),
             gamma=cfg.get("gamma", 0.95),
             lr=cfg.get("lr", 1e-4),
-            batch_size=cfg.get("batch_size", 256),
-            buffer_capacity=cfg.get("buffer_capacity", 1_000_000),
+            batch_size=cfg.get("batch_size", 64),
+            buffer_capacity=cfg.get("buffer_capacity", 80_000),
             learning_starts=cfg.get("learning_starts", 5_000),
-            train_every=cfg.get("train_every", 4),
+            train_every=cfg.get("train_every", 5),
             target_tau=cfg.get("target_tau", 0.005),
             grad_clip=cfg.get("grad_clip", 10.0),
             epsilon_explore=cfg.get("epsilon_explore_start", 1.0),
+            pathwrap_path=cfg.get("pathwrap_path", _DISCRETE_DIR / "sre_solvers" / "pathwrap.so"),
+            sre_solver_name=cfg.get("sre_solver_name", "path_c_pool"),
+            sre_solver_workers=cfg.get("sre_solver_workers", 8),
+            sre_solver_start_method=cfg.get("sre_solver_start_method"),
+            sre_num_random_starts=cfg.get("sre_num_random_starts", 5),
+            sre_num_pure_starts=cfg.get("sre_num_pure_starts", 5),
+            sre_policy_cache_enabled=cfg.get("sre_policy_cache_enabled", True),
+            sre_policy_cache_size=cfg.get("sre_policy_cache_size", 4096),
+            sre_policy_cache_round_digits=cfg.get("sre_policy_cache_round_digits", 6),
+            sre_uniform_fallback_on_failure=cfg.get("sre_uniform_fallback_on_failure", True),
             device=device,
         )
 
     total_steps = cfg.get("total_steps", 1_000_000)
-    eps_tv_start = cfg.get("epsilon_tv_start", 0.10)
-    eps_tv_end = cfg.get("epsilon_tv_end", 0.02)
-    eps_tv_decay_frac = cfg.get("epsilon_tv_decay_frac", 1.0)
-    beta_start = cfg.get("beta_start", 1.0)
-    beta_end = cfg.get("beta_end", 5.0)
-    beta_anneal_frac = cfg.get("beta_anneal_frac", 0.5)
-    eps_explore_start = cfg.get("epsilon_explore_start", 1.0)
-    eps_explore_end = cfg.get("epsilon_explore_end", 0.05)
-    eps_explore_decay_frac = cfg.get("epsilon_explore_decay_frac", 0.2)
+    eps_robust_start = cfg.get("epsilon_robust_start", 0.10)
+    eps_robust_end = cfg.get("epsilon_robust_end", 0.02)
+    eps_robust_decay_frac = cfg.get("epsilon_robust_decay_frac", 1.0)
 
     run_dir = Path(cfg.get("output_dir", _DEFAULT_RUNS_DIR)) / cfg["env_name"] / f"mf_dsrq_seed{seed}"
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -160,13 +174,14 @@ def train(cfg: dict):
             frac = global_step / max(total_steps, 1)
 
             # Anneal hyperparameters.
-            eps_tv = _linear_schedule(eps_tv_start, eps_tv_end, frac / max(eps_tv_decay_frac, 1e-6))
-            beta = _linear_schedule(beta_start, beta_end, frac / max(beta_anneal_frac, 1e-6))
-            eps_explore_frac = frac / max(eps_explore_decay_frac, 1e-6)
-            eps_explore = _linear_schedule(eps_explore_start, eps_explore_end, eps_explore_frac)
+            eps_robust = _linear_schedule(
+                eps_robust_start,
+                eps_robust_end,
+                frac / max(eps_robust_decay_frac, 1e-6),
+            )
+            eps_explore = _reference_explore_schedule(cfg, frac)
             for agent in agents.values():
-                agent.epsilon_tv = eps_tv
-                agent.beta = beta
+                agent.epsilon_robust = eps_robust
                 agent.epsilon_explore = eps_explore
 
             # Collect actions for all alive agents in all envs.
@@ -215,7 +230,7 @@ def train(cfg: dict):
                         np.full(agent.n_nbr_actions, 1.0 / agent.n_nbr_actions, dtype=np.float32),
                     )
                     m_a_next = mean_a_tp1.get(aid, m_a.copy())
-                    valid = not done
+                    valid = True
 
                     agent.push(obs, action, reward, next_obs_arr, m_a, m_a_next, done, valid)
                     ep_reward_accum[env_idx][type_name] += reward
@@ -251,13 +266,12 @@ def train(cfg: dict):
                 progress_metrics = {
                     "episodes": completed_episodes,
                     "sps": f"{sps:.0f}",
-                    "eps_tv": f"{eps_tv:.3f}",
-                    "beta": f"{beta:.2f}",
+                    "eps_sre": f"{eps_robust:.3f}",
                     "eps_exp": f"{eps_explore:.3f}",
                 }
                 log_str = (
-                    f"step={global_step:,}  eps_tv={eps_tv:.3f}  "
-                    f"beta={beta:.2f}  eps_explore={eps_explore:.3f}  "
+                    f"step={global_step:,}  eps_sre={eps_robust:.3f}  "
+                    f"eps_explore={eps_explore:.3f}  "
                     f"grad_steps={gradient_steps}  episodes={completed_episodes}  "
                     f"sps={sps:.0f}"
                 )
@@ -265,6 +279,9 @@ def train(cfg: dict):
                     if agent._last_loss is not None:
                         progress_metrics[f"loss_{type_name}"] = f"{agent._last_loss:.4f}"
                         log_str += f"  loss_{type_name}={agent._last_loss:.4f}"
+                    if agent.sre_failure_fallbacks:
+                        progress_metrics[f"sre_fb_{type_name}"] = str(agent.sre_failure_fallbacks)
+                        log_str += f"  sre_fb_{type_name}={agent.sre_failure_fallbacks}"
                     all_ep_r = episode_rewards[0].get(type_name, [])
                     if all_ep_r:
                         mean_ep_reward = np.mean(all_ep_r[-20:])
@@ -276,8 +293,7 @@ def train(cfg: dict):
                     print(log_str)
 
                 if writer is not None:
-                    writer.add_scalar("train/eps_tv", eps_tv, global_step)
-                    writer.add_scalar("train/beta", beta, global_step)
+                    writer.add_scalar("train/epsilon_robust", eps_robust, global_step)
                     writer.add_scalar("train/eps_explore", eps_explore, global_step)
                     writer.add_scalar("train/episodes", completed_episodes, global_step)
                     for type_name, agent in agents.items():
@@ -304,6 +320,8 @@ def train(cfg: dict):
         agent.save_checkpoint(run_dir / f"ckpt_{type_name}_final.pt")
     if writer is not None:
         writer.close()
+    for agent in agents.values():
+        agent.close()
 
     print(f"\nTraining complete. {global_step:,} steps, {completed_episodes} episodes.")
     print(f"Checkpoints saved to {run_dir}")
@@ -327,9 +345,10 @@ def main():
     parser.add_argument("--config", required=True, help="Path to YAML config file")
     for key in [
         "total_steps", "num_envs", "map_size", "max_cycles", "seed",
-        "epsilon_tv_start", "epsilon_tv_end", "beta_start", "beta_end",
+        "epsilon_robust_start", "epsilon_robust_end",
         "lr", "batch_size", "buffer_capacity", "learning_starts",
-        "output_dir", "log_interval",
+        "output_dir", "log_interval", "sre_solver_name", "sre_solver_workers",
+        "sre_num_random_starts", "sre_num_pure_starts",
     ]:
         parser.add_argument(f"--{key}", type=str, default=None)
     args = parser.parse_args()

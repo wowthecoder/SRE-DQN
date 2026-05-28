@@ -18,7 +18,6 @@ if str(_THIS_DIR) not in sys.path:
 from sre_solvers import (
     PathCBimatrixSreSolver,
     PathMcpNPlayerSreSolver,
-    robust_exploitability,
 )
 
 
@@ -106,12 +105,12 @@ class DuelingDoubleDqnSreAgentConfig:
     # Whether to use CUDA when it is available.
     use_gpu: bool = True
     # N-player solvers are called inside the DQN training loop; keep the
-    # default approximate budget small. Set these back to 20/True for
-    # exhaustive offline solver comparisons.
-    # Number of random solver restarts for SRE stage games.
-    sre_num_repeats: int = 5
-    # Whether solver starts should include pure-strategy profiles.
-    sre_include_pure_starts: bool = False
+    # default start budget small. Increase these for exhaustive offline solver
+    # comparisons.
+    # Number of random mixed-policy starts for SRE stage games.
+    sre_num_random_starts: int = 5
+    # Number of pure joint-action profile starts for SRE stage games.
+    sre_num_pure_starts: int = 0
     # Number of environment updates between gradient updates.
     train_every: int = 1
     # Optional injected SRE solver instance.
@@ -150,20 +149,6 @@ class DuelingDoubleDqnSreAgentConfig:
     sre_policy_cache_round_digits: int = 6
     # Decimal precision used when keying state-level policy cache entries.
     sre_state_cache_round_digits: int = 4
-    # Whether approximate cache reuse is allowed.
-    sre_approx_cache_enabled: bool = False
-    # Exploitability tolerance for accepting cached policies.
-    sre_cache_exploitability_tol: float = 1e-3
-    # Exploitability tolerance passed to compatible SRE solvers.
-    sre_solver_exploitability_tol: float = 1e-4
-    # Exploitability tolerance for accepting approximate solver candidates.
-    sre_approx_accept_tol: float = 1e-2
-    # Whether compatible SRE solvers may stop after a good candidate.
-    sre_solver_early_exit: bool = True
-    # Criterion used to choose among multiple SRE candidates.
-    sre_candidate_selection: str = "joint_nominal_welfare"
-    # Whether approximate candidates are filtered by exploitability.
-    sre_exploitability_filter_enabled: bool = False
     # Whether masked single-action players are fixed outside the PATH game.
     sre_remove_fixed_players: bool = True
 
@@ -336,7 +321,8 @@ class DuelingDoubleDqnSreAgent:
 
         self.initial_epsilon_robust = float(config.epsilon_robust)
         self.initial_epsilon_explore = float(config.epsilon_explore)
-        self.config.sre_include_pure_starts = bool(config.sre_include_pure_starts)
+        self.config.sre_num_random_starts = max(0, int(config.sre_num_random_starts))
+        self.config.sre_num_pure_starts = max(0, int(config.sre_num_pure_starts))
         self.config.train_every = max(1, int(config.train_every))
         self._update_calls = 0
 
@@ -374,7 +360,6 @@ class DuelingDoubleDqnSreAgent:
         self._sre_state_policy_keys = {}
         self._last_sre_cache_key = None
         self.sre_cache_exact_hits = 0
-        self.sre_cache_approx_hits = 0
         self.sre_cache_misses = 0
         self.sre_cache_evictions = 0
         self.sre_candidate_return_count = 0
@@ -436,19 +421,16 @@ class DuelingDoubleDqnSreAgent:
 
     def get_sre_cache_summary(self):
         exact_hits = int(self.sre_cache_exact_hits)
-        approx_hits = int(self.sre_cache_approx_hits)
         misses = int(self.sre_cache_misses)
-        requests = exact_hits + approx_hits + misses
-        path_avoided = exact_hits + approx_hits
+        requests = exact_hits + misses
+        path_avoided = exact_hits
         return {
             "enabled": bool(self._sre_policy_cache_active()),
             "config_enabled": bool(self.config.sre_policy_cache_enabled),
-            "approx_enabled": bool(self.config.sre_approx_cache_enabled),
             "entries": int(len(self._sre_policy_cache)),
             "max_entries": int(self.config.sre_policy_cache_size),
             "requests": int(requests),
             "exact_hits": exact_hits,
-            "approx_hits": approx_hits,
             "misses": misses,
             "hit_rate": None if requests == 0 else float(path_avoided / requests),
             "path_solves_avoided": int(path_avoided),
@@ -456,11 +438,6 @@ class DuelingDoubleDqnSreAgent:
             "candidate_returned": int(self.sre_candidate_return_count),
             "cache_round_digits": int(self.config.sre_policy_cache_round_digits),
             "state_round_digits": int(self.config.sre_state_cache_round_digits),
-            "approx_exploitability_tol": float(self.config.sre_cache_exploitability_tol),
-            "solver_exploitability_tol": float(self.config.sre_solver_exploitability_tol),
-            "solver_approx_accept_tol": float(self.config.sre_approx_accept_tol),
-            "candidate_selection": str(self.config.sre_candidate_selection),
-            "exploitability_filter_enabled": bool(self.config.sre_exploitability_filter_enabled),
             "target_equilibrium_update_steps": int(self.config.target_equilibrium_update_steps),
         }
 
@@ -706,8 +683,8 @@ class DuelingDoubleDqnSreAgent:
             "masked",
             solver_name,
             round(float(self.config.epsilon_robust), 6),
-            int(self.config.sre_num_repeats),
-            bool(self.config.sre_include_pure_starts),
+            int(self.config.sre_num_random_starts),
+            int(self.config.sre_num_pure_starts),
             bool(self.config.sre_remove_fixed_players),
             tuple(int(agent_id) for agent_id in stage["strategic_agent_ids"]),
             action_indices_key,
@@ -787,7 +764,7 @@ class DuelingDoubleDqnSreAgent:
                 seen.add(candidate)
         return ordered
 
-    def _lookup_sre_policy_cache(self, q_tensor, cache_key, state_key=None, *, allow_reuse=True):
+    def _lookup_sre_policy_cache(self, cache_key, state_key=None, *, allow_reuse=True):
         if not self._sre_policy_cache_active():
             return None, None
 
@@ -803,35 +780,11 @@ class DuelingDoubleDqnSreAgent:
             return None, policies
 
         warm_policies = None
-        best_gap = None
         for candidate_key in self._cache_candidate_keys(cache_key, state_key):
             candidate = self._sre_policy_cache[candidate_key]
             candidate_policies = self._copy_policies(candidate["policies"])
             if warm_policies is None:
                 warm_policies = candidate_policies
-            if allow_reuse and self.config.sre_approx_cache_enabled:
-                gap, _, _ = robust_exploitability(
-                    q_tensor,
-                    candidate_policies,
-                    self.config.epsilon_robust,
-                )
-                if best_gap is None or gap < best_gap:
-                    best_gap = gap
-                    warm_policies = candidate_policies
-                if gap <= float(self.config.sre_cache_exploitability_tol):
-                    candidate["uses"] = int(candidate.get("uses", 0)) + 1
-                    self._sre_policy_cache.move_to_end(candidate_key)
-                    self.sre_cache_approx_hits += 1
-                    self._store_sre_policy_cache(
-                        cache_key,
-                        candidate_policies,
-                        state_key=state_key,
-                        metadata={
-                            "source": "verified_cached_policy",
-                            "robust_exploitability": float(gap),
-                        },
-                    )
-                    return self._copy_policies(candidate_policies), self._copy_policies(candidate_policies)
 
         self.sre_cache_misses += 1
         return None, warm_policies
@@ -839,11 +792,8 @@ class DuelingDoubleDqnSreAgent:
     def _call_sre_solver(self, q_tensor, *, initial_policies=None):
         kwargs = {
             "epsilon": self.config.epsilon_robust,
-            "num_repeats": self.config.sre_num_repeats,
-            "include_pure_starts": self.config.sre_include_pure_starts,
-            "exploitability_tol": self.config.sre_solver_exploitability_tol,
-            "early_exit": self.config.sre_solver_early_exit,
-            "candidate_selection": self.config.sre_candidate_selection,
+            "num_random_starts": self.config.sre_num_random_starts,
+            "num_pure_starts": self.config.sre_num_pure_starts,
         }
         if initial_policies is not None:
             kwargs["initial_policies"] = initial_policies
@@ -855,10 +805,8 @@ class DuelingDoubleDqnSreAgent:
                 removed = False
                 for key in (
                     "initial_policies",
-                    "exploitability_tol",
-                    "early_exit",
-                    "include_pure_starts",
-                    "candidate_selection",
+                    "num_random_starts",
+                    "num_pure_starts",
                 ):
                     if key in kwargs and key in message:
                         kwargs.pop(key, None)
@@ -869,11 +817,8 @@ class DuelingDoubleDqnSreAgent:
     def _call_sre_solver_batch(self, q_tensors, *, initial_policies_batch=None):
         kwargs = {
             "epsilon": self.config.epsilon_robust,
-            "num_repeats": self.config.sre_num_repeats,
-            "include_pure_starts": self.config.sre_include_pure_starts,
-            "exploitability_tol": self.config.sre_solver_exploitability_tol,
-            "early_exit": self.config.sre_solver_early_exit,
-            "candidate_selection": self.config.sre_candidate_selection,
+            "num_random_starts": self.config.sre_num_random_starts,
+            "num_pure_starts": self.config.sre_num_pure_starts,
         }
         if initial_policies_batch is not None:
             kwargs["initial_policies_batch"] = initial_policies_batch
@@ -885,10 +830,8 @@ class DuelingDoubleDqnSreAgent:
                 removed = False
                 for key in (
                     "initial_policies_batch",
-                    "exploitability_tol",
-                    "early_exit",
-                    "include_pure_starts",
-                    "candidate_selection",
+                    "num_random_starts",
+                    "num_pure_starts",
                 ):
                     if key in kwargs and key in message:
                         kwargs.pop(key, None)
@@ -925,17 +868,7 @@ class DuelingDoubleDqnSreAgent:
         if bool(getattr(self.sre_solver, "trust_approximate_policies", False)):
             return policies, True
 
-        if not self.config.sre_exploitability_filter_enabled:
-            return policies, True
-
-        gap = metadata.get("robust_exploitability")
-        if gap is not None and float(gap) <= float(self.config.sre_approx_accept_tol):
-            return policies, True
-
-        raise RuntimeError(
-            "Rejected approximate SRE candidate because robust exploitability "
-            f"{gap!r} exceeded tolerance {self.config.sre_approx_accept_tol}.",
-        )
+        return policies, True
 
     def _expanded_policies_from_masked_sre_result(
         self,
@@ -968,17 +901,7 @@ class DuelingDoubleDqnSreAgent:
         if bool(getattr(self.sre_solver, "trust_approximate_policies", False)):
             return policies
 
-        if not self.config.sre_exploitability_filter_enabled:
-            return policies
-
-        gap = metadata.get("robust_exploitability")
-        if gap is not None and float(gap) <= float(self.config.sre_approx_accept_tol):
-            return policies
-
-        raise RuntimeError(
-            "Rejected approximate masked SRE candidate because robust exploitability "
-            f"{gap!r} exceeded tolerance {self.config.sre_approx_accept_tol}."
-        )
+        return policies
 
     def _expanded_policies_from_strategic_sre_result(
         self,
@@ -1031,17 +954,7 @@ class DuelingDoubleDqnSreAgent:
         if bool(getattr(self.sre_solver, "trust_approximate_policies", False)):
             return policies, True
 
-        if not self.config.sre_exploitability_filter_enabled:
-            return policies, True
-
-        gap = metadata.get("robust_exploitability")
-        if gap is not None and float(gap) <= float(self.config.sre_approx_accept_tol):
-            return policies, True
-
-        raise RuntimeError(
-            "Rejected approximate strategic masked SRE candidate because robust "
-            f"exploitability {gap!r} exceeded tolerance {self.config.sre_approx_accept_tol}."
-        )
+        return policies, True
 
     def _solve_sre(self, q_tensor, state_key=None):
         q_tensor = np.asarray(q_tensor, dtype=np.float32)
@@ -1058,7 +971,7 @@ class DuelingDoubleDqnSreAgent:
 
         cache_key = self._sre_batch_key(q_tensor)
         cached_policies, warm_policies = self._lookup_sre_policy_cache(
-            q_tensor, cache_key, state_key=state_key
+            cache_key, state_key=state_key
         )
         if cached_policies is not None:
             return cached_policies
@@ -1235,39 +1148,6 @@ class DuelingDoubleDqnSreAgent:
                         candidate_full = self._copy_policies(candidate["policies"])
                         if warm_full is None:
                             warm_full = candidate_full
-                        if allow_cache_reuse and self.config.sre_approx_cache_enabled:
-                            warm_strategic = self._strategic_policies_from_full(
-                                candidate_full,
-                                stage["action_indices"],
-                                stage["strategic_agent_ids"],
-                            )
-                            if warm_strategic is None:
-                                continue
-                            gap, _, _ = robust_exploitability(
-                                stage["solver_q"],
-                                warm_strategic,
-                                self.config.epsilon_robust,
-                            )
-                            if gap <= float(self.config.sre_cache_exploitability_tol):
-                                cached_full = self._expand_strategic_policies(
-                                    warm_strategic,
-                                    masks,
-                                    stage["action_indices"],
-                                    stage["strategic_agent_ids"],
-                                )
-                                candidate["uses"] = int(candidate.get("uses", 0)) + 1
-                                self._sre_policy_cache.move_to_end(candidate_key)
-                                self.sre_cache_approx_hits += 1
-                                self._store_sre_policy_cache(
-                                    cache_key,
-                                    cached_full,
-                                    state_key=state_key,
-                                    metadata={
-                                        "source": "verified_masked_cached_policy",
-                                        "robust_exploitability": float(gap),
-                                    },
-                                )
-                                break
 
             if cached_full is not None:
                 policies_batch[batch_index] = cached_full
@@ -1433,7 +1313,6 @@ class DuelingDoubleDqnSreAgent:
                 zip(unique_q_tensors, unique_keys, unique_state_keys)
             ):
                 cached_policies, warm_policies = self._lookup_sre_policy_cache(
-                    q_tensor,
                     batch_key,
                     state_key=state_key,
                     allow_reuse=allow_cache_reuse,

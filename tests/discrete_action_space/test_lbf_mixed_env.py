@@ -6,7 +6,7 @@ pytest.importorskip("lbforaging")
 from lbf_grid.pz_wrapper import make_pz_env
 from lbf_grid.deep_srq_lbf import _print_lbf_evaluation_metrics
 from lbf_grid.epymarl_lbf_env import EPYMARL_LBF_SCENARIOS, ExactLevelForagingEnv
-from lbf_grid.notebook_eval import sample_lbf_rollouts, sample_lbf_rollouts_vectorized
+from lbf_grid.notebook_eval import sample_lbf_rollouts_vectorized
 from lbf_grid.robust_notebook_utils import scenario_to_lbf_config
 
 
@@ -330,26 +330,6 @@ def test_successful_collection_records_food_per_participating_agent():
         assert metrics["invalid_loads_total"] == 0
     finally:
         env.close()
-
-
-def test_single_rollout_records_lbf_episode_metrics():
-    rollouts = sample_lbf_rollouts(
-        make_env=_make_invalid_load_metric_env,
-        policy_fn=lambda **_: [5, 0],
-        seed=0,
-        n_episodes=1,
-        max_steps=1,
-        show_progress=False,
-        capture_first_episode_frames=False,
-    )
-
-    metric = rollouts["episode_metrics"][0]
-    assert rollouts["episode_lengths"] == [1]
-    assert metric["initial_agent_positions"][0]["row"] == 3
-    assert metric["initial_foods"] == [{"row": 3, "col": 3, "level": 3}]
-    assert metric["episode_length"] == 1
-    assert metric["invalid_loads_total"] == 1
-    assert rollouts["metric_totals"]["invalid_loads_total"] == 1
 
 
 def test_vectorized_rollout_records_lbf_episode_metrics():

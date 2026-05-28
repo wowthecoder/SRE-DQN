@@ -21,7 +21,7 @@ _DISCRETE_DIR = _THIS_DIR.parent
 if str(_DISCRETE_DIR) not in sys.path:
     sys.path.insert(0, str(_DISCRETE_DIR))
 
-from mean_field_dsrq.mf_dsrq_agent import MFDsrqAgent
+from mean_field_dsrq.path_mean_field_dsrq import MFDsrqAgent
 from mean_field_dsrq.magent_env_wrapper import MAgentMFWrapper
 from mean_field_dsrq.train_mf_dsrq import _load_config, _make_env_factory, n_nbr_t_default
 
@@ -56,6 +56,25 @@ def evaluate(
             type_id=list(type_prefixes.keys()).index(type_name),
             obs_channels=C, obs_height=H, obs_width=W,
             n_own_actions=n_own_t, n_nbr_actions=n_nbr_t,
+            epsilon_robust=cfg.get("epsilon_robust_end", cfg.get("epsilon_robust_start", 0.1)),
+            gamma=cfg.get("gamma", 0.95),
+            lr=cfg.get("lr", 1e-4),
+            batch_size=cfg.get("batch_size", 64),
+            buffer_capacity=cfg.get("buffer_capacity", 80_000),
+            learning_starts=cfg.get("learning_starts", 5_000),
+            train_every=cfg.get("train_every", 5),
+            target_tau=cfg.get("target_tau", 0.005),
+            grad_clip=cfg.get("grad_clip", 10.0),
+            pathwrap_path=cfg.get("pathwrap_path", _DISCRETE_DIR / "sre_solvers" / "pathwrap.so"),
+            sre_solver_name=cfg.get("sre_solver_name", "path_c_pool"),
+            sre_solver_workers=cfg.get("sre_solver_workers", 8),
+            sre_solver_start_method=cfg.get("sre_solver_start_method"),
+            sre_num_random_starts=cfg.get("sre_num_random_starts", 5),
+            sre_num_pure_starts=cfg.get("sre_num_pure_starts", 5),
+            sre_policy_cache_enabled=cfg.get("sre_policy_cache_enabled", True),
+            sre_policy_cache_size=cfg.get("sre_policy_cache_size", 4096),
+            sre_policy_cache_round_digits=cfg.get("sre_policy_cache_round_digits", 6),
+            sre_uniform_fallback_on_failure=cfg.get("sre_uniform_fallback_on_failure", True),
             device=device,
         )
         ckpt_path = Path(checkpoint_dir) / f"ckpt_{type_name}_final.pt"
@@ -118,6 +137,8 @@ def evaluate(
             for t in type_prefixes
         ))
 
+    for agent in agents.values():
+        agent.close()
     return results
 
 

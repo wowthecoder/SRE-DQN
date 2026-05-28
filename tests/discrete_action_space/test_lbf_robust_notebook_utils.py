@@ -161,6 +161,37 @@ def test_deepsrq_policy_adapter_batches_action_selection():
     assert agent.closed is True
 
 
+def test_lbf_policy_actions_forward_action_masks():
+    from lbf_grid.robust_notebook_utils import _policy_actions
+
+    class FakePolicy:
+        def __init__(self):
+            self.seen_action_masks = None
+
+        def act_all(self, **kwargs):
+            self.seen_action_masks = kwargs.get("action_masks")
+            return [0, 1]
+
+    masks = [
+        np.array([True, False]),
+        np.array([False, True]),
+    ]
+    policy = FakePolicy()
+
+    actions = _policy_actions(
+        policy,
+        state=np.zeros(2, dtype=np.float32),
+        obs_dict={},
+        agent_order=["agent_0", "agent_1"],
+        env=None,
+        step=0,
+        action_masks=masks,
+    )
+
+    assert actions == [0, 1]
+    assert policy.seen_action_masks is masks
+
+
 @pytest.mark.parametrize(
     ("available_checkpoints", "expected_checkpoint"),
     [
@@ -187,12 +218,7 @@ def test_load_deepsrq_path_mcp_pool_policy_prefers_final_then_best(
                 "num_actions": 3,
                 "seed": 123,
                 "solver_name": "fake_solver",
-                "hyperparameters": {
-                    "agent": {
-                        "sre_candidate_selection": "robust_exploitability",
-                        "sre_exploitability_filter_enabled": True,
-                    },
-                },
+                "hyperparameters": {"agent": {}},
             }
         ),
         encoding="utf-8",
@@ -232,8 +258,6 @@ def test_load_deepsrq_path_mcp_pool_policy_prefers_final_then_best(
             self.map_location = map_location
             self.config.sre_solver_name = "stale_checkpoint_solver"
             self.config.sre_solver_workers = 1
-            self.config.sre_candidate_selection = "stale_checkpoint_selection"
-            self.config.sre_exploitability_filter_enabled = False
 
         def close(self):
             self.closed = True
@@ -266,8 +290,6 @@ def test_load_deepsrq_path_mcp_pool_policy_prefers_final_then_best(
         assert adapter.agent.map_location == "cpu"
         assert adapter.agent.config.sre_solver_name == "path_c_pool"
         assert adapter.agent.config.sre_solver_workers == 8
-        assert adapter.agent.config.sre_candidate_selection == "joint_nominal_welfare"
-        assert adapter.agent.config.sre_exploitability_filter_enabled is False
         assert adapter.agent.config.epsilon_explore == 0.0
         assert adapter.agent.config.epsilon_robust == 0.5
     finally:

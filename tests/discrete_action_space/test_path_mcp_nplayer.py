@@ -145,7 +145,7 @@ def test_path_mcp_nplayer_returns_valid_candidate_on_pure_dominant_game(path_run
         random_seed=5,
     )
     try:
-        result = solver.solve(q_tensor, epsilon=0.0, num_repeats=8, round_digits=None)
+        result = solver.solve(q_tensor, epsilon=0.0, num_random_starts=8, round_digits=None)
     finally:
         solver.close()
 
@@ -167,7 +167,7 @@ def test_path_tvc_mcp_nplayer_returns_valid_candidate_on_pure_dominant_game(path
         random_seed=5,
     )
     try:
-        result = solver.solve(q_tensor, epsilon=0.0, num_repeats=2, round_digits=None)
+        result = solver.solve(q_tensor, epsilon=0.0, num_random_starts=2, round_digits=None)
     finally:
         solver.close()
 
@@ -188,7 +188,7 @@ def test_path_mcp_nplayer_pool_batches_pure_dominant_game():
         results = solver.solve_batch(
             [q_tensor, q_tensor],
             epsilon=0.0,
-            num_repeats=2,
+            num_random_starts=2,
             round_digits=None,
         )
         summary = solver.get_solve_time_summary()
@@ -223,8 +223,8 @@ def test_path_mcp_nplayer_matches_path_c_on_unique_mixed_bimatrix(path_runtime_a
         random_seed=4,
     )
     try:
-        path_result = path_solver.solve(q_tensor, epsilon=0.0, num_repeats=3, round_digits=None)
-        mcp_result = mcp_solver.solve(q_tensor, epsilon=0.0, num_repeats=10, round_digits=None)
+        path_result = path_solver.solve(q_tensor, epsilon=0.0, num_random_starts=3, round_digits=None)
+        mcp_result = mcp_solver.solve(q_tensor, epsilon=0.0, num_random_starts=10, round_digits=None)
     finally:
         path_solver.close()
         mcp_solver.close()
@@ -251,8 +251,8 @@ def test_path_tvc_mcp_nplayer_matches_path_c_on_unique_mixed_bimatrix(path_runti
         random_seed=4,
     )
     try:
-        path_result = path_solver.solve(q_tensor, epsilon=0.0, num_repeats=3, round_digits=None)
-        tvc_result = tvc_solver.solve(q_tensor, epsilon=0.0, num_repeats=10, round_digits=None)
+        path_result = path_solver.solve(q_tensor, epsilon=0.0, num_random_starts=3, round_digits=None)
+        tvc_result = tvc_solver.solve(q_tensor, epsilon=0.0, num_random_starts=10, round_digits=None)
     finally:
         path_solver.close()
         tvc_solver.close()
@@ -271,8 +271,8 @@ def test_dueling_double_dqn_supports_three_agents_with_fake_solver():
     class FakeSolver:
         name = "fake_nplayer"
 
-        def solve(self, q_tensor, epsilon, *, num_repeats=20, round_digits=4, include_pure_starts=True):
-            del epsilon, num_repeats, round_digits, include_pure_starts
+        def solve(self, q_tensor, epsilon, *, num_random_starts=20, round_digits=4, num_pure_starts=0):
+            del epsilon, num_random_starts, round_digits, num_pure_starts
             assert q_tensor.shape == (2, 2, 2, 3)
             return SreSolveResult(
                 policies=[
