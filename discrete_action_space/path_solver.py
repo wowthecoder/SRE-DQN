@@ -4,6 +4,30 @@ import time
 import numpy as np
 
 
+def sample_pure_profiles(action_sizes, num_pure_starts, rng):
+    action_sizes = tuple(int(size) for size in action_sizes)
+    if any(size <= 0 for size in action_sizes):
+        raise ValueError("Action sizes must be positive.")
+
+    total_profiles = int(np.prod(action_sizes, dtype=np.int64))
+    if num_pure_starts is None:
+        selected = np.arange(total_profiles, dtype=np.int64)
+    else:
+        limit = max(0, int(num_pure_starts))
+        if limit >= total_profiles:
+            selected = np.arange(total_profiles, dtype=np.int64)
+        elif limit == 0:
+            selected = np.asarray([], dtype=np.int64)
+        else:
+            selected = rng.choice(total_profiles, size=limit, replace=False)
+
+    for flat_index in selected:
+        yield tuple(
+            int(action_id)
+            for action_id in np.unravel_index(int(flat_index), action_sizes)
+        )
+
+
 class PathSolverWrapper:
     def __init__(self, lib_path="pathwrap.so"):
         lib_path = os.fspath(lib_path)
@@ -84,14 +108,10 @@ class PathSolverWrapper:
         if count == 0:
             return {
                 "count": 0,
-                "mean_seconds": None,
-                "min_seconds": None,
-                "max_seconds": None,
-                "std_seconds": None,
-                "mean_microseconds": None,
-                "min_microseconds": None,
-                "max_microseconds": None,
-                "std_microseconds": None,
+                "mean_milliseconds": None,
+                "min_milliseconds": None,
+                "max_milliseconds": None,
+                "std_milliseconds": None,
             }
 
         mean = self.solve_time_sum / count
@@ -99,14 +119,10 @@ class PathSolverWrapper:
         std = float(np.sqrt(variance))
         return {
             "count": int(count),
-            "mean_seconds": float(mean),
-            "min_seconds": float(self.solve_time_min),
-            "max_seconds": float(self.solve_time_max),
-            "std_seconds": std,
-            "mean_microseconds": float(mean * 1_000_000.0),
-            "min_microseconds": float(self.solve_time_min * 1_000_000.0),
-            "max_microseconds": float(self.solve_time_max * 1_000_000.0),
-            "std_microseconds": float(std * 1_000_000.0),
+            "mean_milliseconds": float(mean * 1_000.0),
+            "min_milliseconds": float(self.solve_time_min * 1_000.0),
+            "max_milliseconds": float(self.solve_time_max * 1_000.0),
+            "std_milliseconds": float(std * 1_000.0),
         }
 
     def solve_mcp(self, n, nnz, z, f, lb, ub, func_eval, jac_eval):
@@ -346,12 +362,14 @@ def solve_strategically_robust_bimatrix_game_path_lcp(
     U1,
     U2,
     epsilon_values,
-    num_repeats,
+    num_random_starts,
     path_solver,
     verbose=False,
     round_digits=4,
-    include_pure_starts=True,
+    num_pure_starts=None,
+    rng=None,
 ):
+    rng = np.random.default_rng() if rng is None else rng
     if np.isscalar(epsilon_values):
         epsilon = float(epsilon_values)
     else:
@@ -424,15 +442,13 @@ def solve_strategically_robust_bimatrix_game_path_lcp(
         if status in (1, 2):
             store_solution(z_sol)
 
-    if include_pure_starts:
-        for i in range(K1):
-            for j in range(K2):
-                z = np.zeros(n_vars, dtype=np.float64)
-                z[i] = 1.0
-                z[n1 + j] = 1.0
-                solve_from_start(z)
+    for i, j in sample_pure_profiles((K1, K2), num_pure_starts, rng):
+        z = np.zeros(n_vars, dtype=np.float64)
+        z[i] = 1.0
+        z[n1 + j] = 1.0
+        solve_from_start(z)
 
-    for _ in range(num_repeats):
-        solve_from_start(np.random.rand(n_vars).astype(np.float64))
+    for _ in range(max(0, int(num_random_starts))):
+        solve_from_start(rng.random(n_vars).astype(np.float64))
 
     return solutions_p, utilities_sr, utilities_nominal

@@ -12,6 +12,7 @@ from path_solver import (
 from .base import (
     SreSolveResult,
     SreStageGameSolver,
+    _duration_summary_from_seconds,
     _empty_duration_summary,
     _normalize_policy,
     validate_bimatrix_q_tensor,
@@ -25,6 +26,7 @@ DEFAULT_PATHWRAP_PATH = Path(__file__).resolve().with_name("pathwrap.so")
 @dataclass(frozen=True)
 class PathCBimatrixSreSolverConfig:
     pathwrap_path: object = DEFAULT_PATHWRAP_PATH
+    random_seed: int | None = None
 
 
 @dataclass(frozen=True)
@@ -32,6 +34,7 @@ class ProcessPoolPathCBimatrixSreSolverConfig:
     pathwrap_path: object = DEFAULT_PATHWRAP_PATH
     max_workers: int = 4
     start_method: str | None = None
+    random_seed: int | None = None
 
     def __post_init__(self):
         object.__setattr__(self, "max_workers", int(self.max_workers))
@@ -125,6 +128,7 @@ class PathCBimatrixSreSolver(SreStageGameSolver):
             config = replace(config, **overrides)
         self.config = config
         self.path_solver = PathSolverWrapper(self.config.pathwrap_path)
+        self.rng = np.random.default_rng(self.config.random_seed)
 
     def solve(
         self,
@@ -148,6 +152,7 @@ class PathCBimatrixSreSolver(SreStageGameSolver):
                     self.path_solver,
                     round_digits=round_digits,
                     num_pure_starts=num_pure_starts,
+                    rng=self.rng,
                 )
             )
         except Exception as exc:
@@ -202,9 +207,12 @@ class PathCBimatrixSreSolver(SreStageGameSolver):
 _POOL_SOLVER = None
 
 
-def _path_pool_initializer(pathwrap_path):
+def _path_pool_initializer(pathwrap_path, random_seed):
     global _POOL_SOLVER
-    _POOL_SOLVER = PathCBimatrixSreSolver(pathwrap_path=pathwrap_path)
+    _POOL_SOLVER = PathCBimatrixSreSolver(
+        pathwrap_path=pathwrap_path,
+        random_seed=random_seed,
+    )
 
 
 def _path_pool_solve_task(payload):
@@ -214,7 +222,10 @@ def _path_pool_solve_task(payload):
         num_random_starts,
         num_pure_starts,
         round_digits,
+        task_seed,
     ) = payload
+    if task_seed is not None:
+        _POOL_SOLVER.rng = np.random.default_rng(task_seed)
     start = time.perf_counter()
     result = _POOL_SOLVER.solve(
         q_tensor,
@@ -238,6 +249,7 @@ class ProcessPoolPathCBimatrixSreSolver(SreStageGameSolver):
         elif overrides:
             config = replace(config, **overrides)
         self.config = config
+        self._task_counter = 0
         self.solve_time_count = 0
         self.solve_time_sum = 0.0
         self.solve_time_sumsq = 0.0
@@ -247,7 +259,7 @@ class ProcessPoolPathCBimatrixSreSolver(SreStageGameSolver):
         self._pool = ctx.Pool(
             processes=self.config.max_workers,
             initializer=_path_pool_initializer,
-            initargs=(self.config.pathwrap_path,),
+            initargs=(self.config.pathwrap_path, self.config.random_seed),
         )
 
     def _record_solve_time(self, duration):
@@ -258,6 +270,11 @@ class ProcessPoolPathCBimatrixSreSolver(SreStageGameSolver):
             self.solve_time_min = duration
         if self.solve_time_max is None or duration > self.solve_time_max:
             self.solve_time_max = duration
+
+    def _task_seed(self, batch_offset):
+        if self.config.random_seed is None:
+            return None
+        return int(self.config.random_seed) + int(self._task_counter) + int(batch_offset)
 
     def solve(
         self,
@@ -296,9 +313,11 @@ class ProcessPoolPathCBimatrixSreSolver(SreStageGameSolver):
                 int(num_random_starts),
                 None if num_pure_starts is None else int(num_pure_starts),
                 round_digits,
+                self._task_seed(batch_offset),
             )
-            for q_tensor in q_tensors
+            for batch_offset, q_tensor in enumerate(q_tensors)
         ]
+        self._task_counter += len(payloads)
         results = self._pool.map(_path_pool_solve_task, payloads)
         for result in results:
             duration = float(result.metadata.get("worker_sre_wall_seconds", 0.0))
@@ -315,17 +334,13 @@ class ProcessPoolPathCBimatrixSreSolver(SreStageGameSolver):
         mean = self.solve_time_sum / count
         variance = max(self.solve_time_sumsq / count - mean * mean, 0.0)
         std = float(np.sqrt(variance))
-        return {
-            "count": int(count),
-            "mean_seconds": float(mean),
-            "min_seconds": float(self.solve_time_min),
-            "max_seconds": float(self.solve_time_max),
-            "std_seconds": std,
-            "mean_microseconds": float(mean * 1_000_000.0),
-            "min_microseconds": float(self.solve_time_min * 1_000_000.0),
-            "max_microseconds": float(self.solve_time_max * 1_000_000.0),
-            "std_microseconds": float(std * 1_000_000.0),
-        }
+        return _duration_summary_from_seconds(
+            count,
+            mean,
+            self.solve_time_min,
+            self.solve_time_max,
+            std,
+        )
 
     def close(self):
         pool = getattr(self, "_pool", None)

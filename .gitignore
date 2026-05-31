@@ -20,6 +20,7 @@ sre-sandbox/
 Nash-DQN/
 nfg_transformer_ref/
 mfrl-master/
+mfrl_pytorch-master/
 
 AGENTs.md
 CLAUDE.md
@@ -28,6 +29,7 @@ relevant_papers/
 
 **/training_stats.txt
 **/training_stats.json
+**/training_rewards.json
 *.pth
 *.ckpt
 *.pt

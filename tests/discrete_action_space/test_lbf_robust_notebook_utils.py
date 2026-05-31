@@ -71,6 +71,19 @@ def test_deepsrq_evaluation_baselines_exclude_random():
     assert BASELINE_ALGORITHMS == ("iql", "ippo", "mappo", "maa2c")
 
 
+def test_recent_mean_joint_reward_uses_interval_window():
+    from lbf_grid.deep_srq_lbf import _recent_mean_joint_reward
+
+    rewards_history = [
+        [1.0, 3.0, 5.0, 7.0],
+        [2.0, 4.0, 6.0, 8.0],
+    ]
+
+    assert _recent_mean_joint_reward(rewards_history, 2) == pytest.approx(13.0)
+    assert _recent_mean_joint_reward(rewards_history, 100) == pytest.approx(9.0)
+    assert _recent_mean_joint_reward([[], []], 2) is None
+
+
 def test_deepsrq_full_resume_checkpoint_contains_replay(tmp_path):
     torch = pytest.importorskip("torch")
     from dueling_double_dqn_sre import DuelingDoubleDqnSreAgent, DuelingDoubleDqnSreAgentConfig

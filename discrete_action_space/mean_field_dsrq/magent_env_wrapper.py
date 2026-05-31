@@ -35,7 +35,7 @@ class MAgentMFWrapper:
         self,
         env_factory,
         type_prefixes: dict,
-        ema_momentum: float = 0.5,
+        ema_momentum: float = 1.0,
         obs_dtype=np.float32,
     ):
         self.env_factory = env_factory
@@ -121,7 +121,7 @@ class MAgentMFWrapper:
         Returns:
             obs_dict:       {agent_id: (C,H,W) obs for next step}
             rewards:        {agent_id: float}
-            dones:          {agent_id: bool}  True if this agent is now dead
+            dones:          {agent_id: bool}  True if terminal for replay
             mean_a_t:       {agent_id: ā before this step} (for replay buffer)
             mean_a_tp1:     {agent_id: ā after this step}  (for target)
             info:           {}
@@ -144,11 +144,15 @@ class MAgentMFWrapper:
                 f"Expected env.step() to return 4 or 5 values, got {len(step_result)}"
             )
 
+        active_agent_ids = list(self._alive)
+        terminations = {aid: bool(terms_raw.get(aid, False)) for aid in active_agent_ids}
+        truncations = {aid: bool(truncs_raw.get(aid, False)) for aid in active_agent_ids}
         dones = {
             aid: (terms_raw.get(aid, False) or truncs_raw.get(aid, False))
-            for aid in list(self._alive)
+            for aid in active_agent_ids
         }
-        newly_dead = {aid for aid, d in dones.items() if d}
+        newly_dead = {aid for aid, d in terminations.items() if d}
+        episode_done = (not self.env.agents) or (bool(active_agent_ids) and all(dones.values()))
 
         # Update EMAs with empirical one-hot actions from this step.
         for type_name, prefix in self.type_prefixes.items():
@@ -174,12 +178,13 @@ class MAgentMFWrapper:
         # mean_a_tp1 — after EMA update.
         mean_a_tp1 = {aid: self._mean_a[aid].copy() for aid in self._alive if aid in self._mean_a}
 
-        # Remove dead agents.
+        # Remove actual deaths. Time-limit truncation ends the episode but does
+        # not count as every surviving agent being killed.
         for aid in newly_dead:
             self._alive.discard(aid)
 
         # New agents that appeared this step.
-        new_agents = set(self.env.agents) - self._alive - newly_dead
+        new_agents = set() if episode_done else set(self.env.agents) - self._alive - newly_dead
         for aid in new_agents:
             type_name = self.agent_type(aid)
             if type_name is not None:
@@ -189,8 +194,15 @@ class MAgentMFWrapper:
 
         obs_dict = self._convert_obs(obs_raw)
         rewards = {aid: float(rewards_raw.get(aid, 0.0)) for aid in actions}
+        info = {
+            "episode_done": bool(episode_done),
+            "terminations": terminations,
+            "truncations": truncations,
+            "terminated_agents": sorted(newly_dead),
+            "truncated_agents": sorted(aid for aid, d in truncations.items() if d),
+        }
 
-        return obs_dict, rewards, dones, mean_a_t, mean_a_tp1, {}
+        return obs_dict, rewards, dones, mean_a_t, mean_a_tp1, info
 
     # ------------------------------------------------------------------ #
     # Helpers                                                              #
@@ -222,7 +234,7 @@ class VectorizedMAgentWrapper:
     sort into per-type batches and push to the replay buffer.
     """
 
-    def __init__(self, env_factory, type_prefixes: dict, num_envs: int, ema_momentum: float = 0.5):
+    def __init__(self, env_factory, type_prefixes: dict, num_envs: int, ema_momentum: float = 1.0):
         self.num_envs = num_envs
         self.envs = [
             MAgentMFWrapper(env_factory, type_prefixes, ema_momentum)

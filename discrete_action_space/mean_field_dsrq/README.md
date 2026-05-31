@@ -1,8 +1,10 @@
-# PATH Mean-Field Deep Strategically Robust Q-Learning
+# Mean-Field Strategically Robust Q-Learning
 
 This package trains a mean-field Deep SRQ agent on MAgent2 `battle_v4`.
 It keeps the scalable mean-field approximation from Yang et al. 2018, but
-uses the project PATH bimatrix LCP solver for the local SRE operator.
+the default implementation does not use the project PATH bimatrix solver.
+Instead, it solves a small local robust best-response LP over the neighbour
+mean-action distribution.
 
 ## Core Idea
 
@@ -13,18 +15,25 @@ Q(o_i, a_i, mean_action_i)
 ```
 
 where `o_i` is the local MAgent2 spatial observation and `mean_action_i` is the
-mean action distribution of the agent's population. At action-selection and
-target time, the agent builds a representative two-player game:
+mean action distribution of the agent's population. The default solver-free
+critic uses a pairwise payoff head:
 
 ```text
-U1[a_i, a_m] = Q(o_i, a_i, one_hot(a_m))
-U2           = U1.T
+M(o_i)[a_i, b]
+Q(o_i, a_i, mean_action_i) = sum_b mean_action_i[b] * M(o_i)[a_i, b]
 ```
 
-`U1` and `U2` are passed to the same PATH-backed bimatrix SRE solver used by the
-2-player Deep SRQ experiments. The focal agent samples from player 1's SRE
-policy, and the Bellman target evaluates player 1's expected value under the
-solved policy profile.
+At action-selection and target time, the focal agent computes:
+
+```text
+max_pi min_nu pi^T M(o_i) nu
+subject to W_TV(nu, mean_action_i) <= epsilon
+```
+
+This is a local mean-field SRE surrogate: robustness is over the population
+histogram, not over a full joint opponent policy. The older PATH-backed
+representative bimatrix baseline remains available with `algorithm:
+path_mf_dsrq`.
 
 ## Architecture
 
@@ -37,14 +46,10 @@ obs branch:
   Flatten
   Dense(256, ReLU)
 
-mean-action branch:
-  Dense(64, ReLU)
-  Dense(32, ReLU)
-
-combined:
+solver-free head:
   Dense(128, ReLU)
   Dense(64, ReLU)
-  Dense(num_actions)
+  Dense(num_actions * num_mean_actions)
 ```
 
 The original reference code also has a feature-vector branch. The current
@@ -55,13 +60,14 @@ implementation omits that branch.
 
 | File | Description |
 |---|---|
-| `path_mean_field_dsrq.py` | Standalone network, replay buffer, PATH SRE solves, training, and checkpoints |
+| `solver_free_mean_field_dsrq.py` | Solver-free MF-SRQ network, replay buffer, robust LP operator, training, and checkpoints |
+| `path_mean_field_dsrq.py` | Legacy PATH-backed representative bimatrix baseline |
 | `magent_env_wrapper.py` | PettingZoo/MAgent2 wrapper with per-population mean-action tracking |
 | `train_mf_dsrq.py` | CLI and notebook training entrypoint |
 | `eval_mf_dsrq.py` | Checkpoint-backed evaluation and noise sweeps |
 | `benchmarl_magent2.py` | BenchMARL baseline helpers |
 | `notebook_utils.py` | Notebook-facing train/eval helpers |
-| `configs/battle_v4.yaml` | Battle hyperparameters and PATH settings |
+| `configs/battle_v4.yaml` | Battle hyperparameters and solver-free robust LP settings |
 
 ## Defaults
 
@@ -79,11 +85,10 @@ applicable:
 | `buffer_capacity` | 80,000 |
 | `train_every` | 5 |
 | `epsilon_explore` | `1.0 -> 0.2 -> 0.1` |
-| `sre_solver_name` | `path_c_pool` |
-| `sre_solver_workers` | 8 |
-| `sre_num_random_starts` | 5 |
-| `sre_num_pure_starts` | 5 |
-| `sre_uniform_fallback_on_failure` | `true` |
+| `algorithm` | `mf_srq_lp` |
+| `robust_distance` | `tv` |
+| `robust_lp_fallback` | `greedy_tv` |
+| `ema_momentum` | 1.0 |
 
 ## Quick Start
 
@@ -92,20 +97,15 @@ source venv/bin/activate
 
 python -m discrete_action_space.mean_field_dsrq.train_mf_dsrq \
     --config discrete_action_space/mean_field_dsrq/configs/battle_v4.yaml \
-    --total_steps 50000 --num_envs 4 --map_size 18 --max_cycles 100
+    --total_steps 50000 --num_envs 4 --map_size 18 --max_cycles 400
 
-pytest tests/discrete_action_space/test_path_mean_field_dsrq.py -v
+pytest tests/discrete_action_space/test_solver_free_mean_field_dsrq.py -v
 pytest tests/discrete_action_space/test_magent2_notebooks.py -v
 ```
 
 ## Scope
 
-This implementation is intentionally Battle-only. It requires symmetric own and
-mean-neighbour action spaces so the representative game can be solved as a
-square bimatrix SRE. Asymmetric environments should use a different adapter
-rather than this simplified PATH mean-field algorithm.
-
-If PATH returns no valid candidate on an early random network, the trainer uses
-a uniform policy fallback and logs the cumulative `sre_fb_*` count. This keeps
-smoke runs and early exploration from crashing while still making solver
-failures visible.
+The default implementation is intentionally a local mean-field SRE surrogate,
+not full N-player SRE. It is robust to perturbations of each agent's neighbour
+action histogram. If the LP fails on an early random network, the trainer uses a
+pure greedy TV fallback and logs the cumulative `lp_fb_*` count.

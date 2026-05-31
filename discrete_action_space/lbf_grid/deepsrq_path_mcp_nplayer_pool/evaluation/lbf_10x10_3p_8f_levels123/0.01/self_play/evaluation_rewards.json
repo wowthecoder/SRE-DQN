@@ -1,42 +1,42 @@
 {
   "episode_reward_summary": {
-    "episodes": 50,
+    "episodes": 100,
     "per_agent": [
       {
         "agent": "Agent 1\nDeep SRQ",
-        "mean": 0.12,
-        "std": 0.3249615361854384,
+        "mean": 0.285,
+        "std": 0.5256186830773807,
         "min": 0.0,
-        "max": 1.0
+        "max": 2.5
       },
       {
         "agent": "Agent 2\nDeep SRQ",
-        "mean": 0.22,
-        "std": 0.54,
+        "mean": 0.615,
+        "std": 1.1019414685000288,
         "min": 0.0,
-        "max": 2.0
+        "max": 5.5
       },
       {
         "agent": "Agent 3\nDeep SRQ",
-        "mean": 0.7,
-        "std": 1.2206555615733703,
+        "mean": 1.81,
+        "std": 2.137498538011196,
         "min": 0.0,
-        "max": 5.0
+        "max": 9.0
       }
     ],
     "joint": {
-      "mean": 1.04,
-      "std": 1.4961283367412037,
+      "mean": 2.71,
+      "std": 2.413690120955878,
       "min": 0.0,
-      "max": 6.0
+      "max": 10.0
     }
   },
   "mean_agent_rewards": [
-    0.12,
-    0.22,
-    0.7
+    0.285,
+    0.615,
+    1.81
   ],
-  "mean_joint_reward": 1.04,
+  "mean_joint_reward": 2.71,
   "scenario_key": "lbf_10x10_3p_8f_levels123",
   "scenario_name": "3 agents with levels 1, 2, and 3, 10x10 grid, 18 foods (3 each for levels 1-6), full sight, 100-step episodes",
   "primary_label": "deepsrq_path_mcp_nplayer_pool",
@@ -45,7 +45,7 @@
   "pair_label": "Deep SRQ",
   "plot_title": "Scenario 3, Deep SRQ vs Deep SRQ",
   "matchup_note": "All agent slots use Deep SRQ.",
-  "n_episodes": 50,
+  "n_episodes": 100,
   "fixed_primary_agent": null,
   "agent_labels": [
     "Agent 1\nDeep SRQ",
@@ -55,17 +55,19 @@
   "agent_algorithm_counts": [
     {
       "agent": 1,
-      "Deep SRQ": 50
+      "Deep SRQ": 100
     },
     {
       "agent": 2,
-      "Deep SRQ": 50
+      "Deep SRQ": 100
     },
     {
       "agent": 3,
-      "Deep SRQ": 50
+      "Deep SRQ": 100
     }
   ],
+  "video_episode_index": 38,
+  "video_joint_reward": 10.0,
   "render_error": null,
   "artifact_dir": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/evaluation/lbf_10x10_3p_8f_levels123/0.01/self_play",
   "rewards_path": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/evaluation/lbf_10x10_3p_8f_levels123/0.01/self_play/evaluation_rewards.json",

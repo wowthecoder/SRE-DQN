@@ -22,10 +22,11 @@ from torch import nn
 DEFAULT_TASK_CONFIG: dict[str, Any] = {
     "env_name": "battle_v4",
     "map_size": 40,
-    "max_cycles": 100,
-    "minimap_mode": False,
+    "max_cycles": 400,
+    "minimap_mode": True,
     "extra_features": False,
 }
+DEFAULT_USE_MASK = True
 
 ALGORITHM_NAMES = ("mappo", "ippo", "qmix", "vdn", "iql")
 RUNS_DIR = Path(__file__).resolve().parent / "runs"
@@ -114,11 +115,18 @@ def _task_name_from_env_name(env_name: str) -> str:
     return env_name.upper()
 
 
-def _make_compatible_magent_env(config: dict[str, Any], seed: int | None, device):
+def _make_compatible_magent_env(
+    config: dict[str, Any],
+    seed: int | None,
+    device,
+    *,
+    use_mask: bool = DEFAULT_USE_MASK,
+):
     from torchrl.envs import PettingZooWrapper
 
     env_config = dict(config)
     env_name = env_config.pop("env_name", DEFAULT_TASK_CONFIG["env_name"])
+    env_config.pop("use_mask", None)
     env_mod = importlib.import_module(f"magent2.environments.{env_name}")
     env = normalize_pettingzoo_parallel_api(
         env_mod.parallel_env(**env_config, render_mode="rgb_array")
@@ -128,7 +136,7 @@ def _make_compatible_magent_env(config: dict[str, Any], seed: int | None, device
         return_state=True,
         seed=seed,
         done_on_any=False,
-        use_mask=False,
+        use_mask=use_mask,
         device=device,
     )
 
@@ -142,6 +150,10 @@ except Exception:  # pragma: no cover - BenchMARL import errors surface elsewher
 class CompatibleMAgentClass(_BenchmarlMAgentClass):
     """Pickleable BenchMARL MAgent task with API-normalized MAgent2 envs."""
 
+    def __init__(self, name: str, config: dict[str, Any], *, use_mask: bool = DEFAULT_USE_MASK):
+        super().__init__(name=name, config=config)
+        self.use_mask = bool(use_mask)
+
     def get_env_fun(
         self,
         num_envs: int,
@@ -151,15 +163,22 @@ class CompatibleMAgentClass(_BenchmarlMAgentClass):
     ):
         del num_envs, continuous_actions
         config = dict(self.config)
-        return lambda: _make_compatible_magent_env(config, seed, device)
+        use_mask = self.use_mask
+        return lambda: _make_compatible_magent_env(config, seed, device, use_mask=use_mask)
 
 
-def make_magent_task(task_config: dict[str, Any] | None = None):
+def make_magent_task(
+    task_config: dict[str, Any] | None = None,
+    *,
+    use_mask: bool = DEFAULT_USE_MASK,
+):
     """Create a BenchMARL-compatible MAgent2 task."""
     config = {**DEFAULT_TASK_CONFIG, **(task_config or {})}
+    use_mask = bool(config.pop("use_mask", use_mask))
     return CompatibleMAgentClass(
         name=_task_name_from_env_name(str(config["env_name"])),
         config=config,
+        use_mask=use_mask,
     )
 
 
@@ -331,6 +350,7 @@ def make_benchmarl_experiment(
     algorithm_name: str,
     *,
     task_config: dict[str, Any] | None = None,
+    use_mask: bool = DEFAULT_USE_MASK,
     seed: int = 0,
     total_frames: int = 20_000,
     frames_per_batch: int = 1_000,
@@ -358,7 +378,7 @@ def make_benchmarl_experiment(
         parallel_collection=parallel_collection,
     )
     return Experiment(
-        task=make_magent_task(task_config),
+        task=make_magent_task(task_config, use_mask=use_mask),
         algorithm_config=algorithm_config,
         model_config=make_cnn_model_config(),
         seed=int(seed),
@@ -370,6 +390,7 @@ def run_benchmarl_algorithm(
     algorithm_name: str,
     *,
     task_config: dict[str, Any] | None = None,
+    use_mask: bool = DEFAULT_USE_MASK,
     seed: int = 0,
     total_frames: int = 20_000,
     frames_per_batch: int = 1_000,
@@ -384,6 +405,7 @@ def run_benchmarl_algorithm(
     experiment = make_benchmarl_experiment(
         algorithm_name,
         task_config=task_config,
+        use_mask=use_mask,
         seed=seed,
         total_frames=total_frames,
         frames_per_batch=frames_per_batch,

@@ -12,25 +12,17 @@ def summarize_durations(durations):
     if durations.size == 0:
         return {
             "count": 0,
-            "mean_seconds": None,
-            "min_seconds": None,
-            "max_seconds": None,
-            "std_seconds": None,
-            "mean_microseconds": None,
-            "min_microseconds": None,
-            "max_microseconds": None,
-            "std_microseconds": None,
+            "mean_milliseconds": None,
+            "min_milliseconds": None,
+            "max_milliseconds": None,
+            "std_milliseconds": None,
         }
     return {
         "count": int(durations.size),
-        "mean_seconds": float(np.mean(durations)),
-        "min_seconds": float(np.min(durations)),
-        "max_seconds": float(np.max(durations)),
-        "std_seconds": float(np.std(durations)),
-        "mean_microseconds": float(np.mean(durations) * 1_000_000.0),
-        "min_microseconds": float(np.min(durations) * 1_000_000.0),
-        "max_microseconds": float(np.max(durations) * 1_000_000.0),
-        "std_microseconds": float(np.std(durations) * 1_000_000.0),
+        "mean_milliseconds": float(np.mean(durations) * 1_000.0),
+        "min_milliseconds": float(np.min(durations) * 1_000.0),
+        "max_milliseconds": float(np.max(durations) * 1_000.0),
+        "std_milliseconds": float(np.std(durations) * 1_000.0),
     }
 
 
@@ -47,27 +39,36 @@ def combine_duration_summaries(summaries):
         summary_count = int(summary.get("count", 0) or 0)
         if summary_count == 0:
             continue
-        mean = float(summary["mean_seconds"])
-        std = float(summary["std_seconds"])
+        mean = _duration_summary_value_seconds(summary, "mean")
+        std = _duration_summary_value_seconds(summary, "std")
         weighted_sum += mean * summary_count
         weighted_sumsq += (std * std + mean * mean) * summary_count
-        mins.append(float(summary["min_seconds"]))
-        maxes.append(float(summary["max_seconds"]))
+        mins.append(_duration_summary_value_seconds(summary, "min"))
+        maxes.append(_duration_summary_value_seconds(summary, "max"))
 
     mean = weighted_sum / count
     variance = max(weighted_sumsq / count - mean * mean, 0.0)
     std = float(np.sqrt(variance))
     return {
         "count": int(count),
-        "mean_seconds": float(mean),
-        "min_seconds": float(min(mins)),
-        "max_seconds": float(max(maxes)),
-        "std_seconds": std,
-        "mean_microseconds": float(mean * 1_000_000.0),
-        "min_microseconds": float(min(mins) * 1_000_000.0),
-        "max_microseconds": float(max(maxes) * 1_000_000.0),
-        "std_microseconds": float(std * 1_000_000.0),
+        "mean_milliseconds": float(mean * 1_000.0),
+        "min_milliseconds": float(min(mins) * 1_000.0),
+        "max_milliseconds": float(max(maxes) * 1_000.0),
+        "std_milliseconds": float(std * 1_000.0),
     }
+
+
+def _duration_summary_value_seconds(summary, kind):
+    milliseconds_key = f"{kind}_milliseconds"
+    if milliseconds_key in summary:
+        return float(summary[milliseconds_key]) / 1_000.0
+    seconds_key = f"{kind}_seconds"
+    if seconds_key in summary:
+        return float(summary[seconds_key])
+    microseconds_key = f"{kind}_microseconds"
+    if microseconds_key in summary:
+        return float(summary[microseconds_key]) / 1_000_000.0
+    raise KeyError(f"Duration summary missing {kind} duration field.")
 
 
 def collect_timing_stats(
@@ -109,7 +110,6 @@ def collect_timing_stats(
                 "algorithm": getattr(agent_wrapper, "algorithm", type(agent).__name__),
                 "sre_solve_time": agent_sre_solve_summary,
                 "backend_solve_time": agent_backend_solve_summary,
-                "path_solve_time": agent_backend_solve_summary,
                 "sre_policy_cache": agent_sre_cache_summary,
                 "update_time": summarize_durations(agent_update_times),
             }
@@ -123,7 +123,6 @@ def collect_timing_stats(
         "episode_time": summarize_durations(episode_durations),
         "sre_solve_time": combine_duration_summaries(sre_solve_summaries),
         "backend_solve_time": combine_duration_summaries(backend_solve_summaries),
-        "path_solve_time": combine_duration_summaries(backend_solve_summaries),
         "agents": update_times_by_agent,
     }
     cache_summaries = [
@@ -437,12 +436,16 @@ def plot_training_stats(stats, out_path=None):
 def _fmt_duration(summary):
     if not summary or not summary.get("count"):
         return "count=0"
+    mean_ms = _duration_summary_value_seconds(summary, "mean") * 1_000.0
+    min_ms = _duration_summary_value_seconds(summary, "min") * 1_000.0
+    max_ms = _duration_summary_value_seconds(summary, "max") * 1_000.0
+    std_ms = _duration_summary_value_seconds(summary, "std") * 1_000.0
     return (
         f"count={summary['count']}, "
-        f"mean={summary['mean_seconds']:.6f}s ({summary['mean_microseconds']:.2f} us), "
-        f"min={summary['min_seconds']:.6f}s, "
-        f"max={summary['max_seconds']:.6f}s, "
-        f"std={summary['std_seconds']:.6f}s"
+        f"mean={mean_ms:.3f} ms, "
+        f"min={min_ms:.3f} ms, "
+        f"max={max_ms:.3f} ms, "
+        f"std={std_ms:.3f} ms"
     )
 
 

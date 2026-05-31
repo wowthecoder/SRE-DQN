@@ -1,0 +1,1876 @@
+{
+  "algorithm": "deepsrq_path_mcp_nplayer_pool",
+  "solver_selection": {
+    "2_player": "path_c_pool",
+    "n_player": "path_mcp_nplayer_pool"
+  },
+  "sre_solver_workers": 16,
+  "num_envs": 32,
+  "eval_num_envs": 8,
+  "skip_existing": true,
+  "epsilon": 0.1,
+  "results": {
+    "lbf_8x8_2p_2f_levels12": {
+      "reward_summary": {
+        "episodes": 5000,
+        "per_agent": [
+          {
+            "agent": "Agent 1 (DeepSRQ)",
+            "mean": 2.5326,
+            "std": 1.8330131587089056,
+            "min": 0.0,
+            "max": 9.5
+          },
+          {
+            "agent": "Agent 2 (DeepSRQ)",
+            "mean": 4.409,
+            "std": 2.5837025757621563,
+            "min": 0.0,
+            "max": 13.0
+          }
+        ],
+        "joint": {
+          "mean": 6.9416,
+          "std": 3.7372970767655063,
+          "min": 0.0,
+          "max": 18.0
+        }
+      },
+      "environment": "lbf_grid",
+      "scenario_key": "lbf_8x8_2p_2f_levels12",
+      "scenario_name": "2 agents with levels 1 and 2, 8x8 grid, 10 foods (3 level-3, 2 level-2, 5 level-1), full sight, 50-step episodes",
+      "pairing": [
+        "DeepSRQ",
+        "DeepSRQ"
+      ],
+      "pair_label": "DeepSRQ self-play",
+      "pair_slug": "path_c_pool_eps0.1_constant",
+      "training_mode": "vectorized",
+      "num_envs": 32,
+      "eval_num_envs": 8,
+      "completed_episodes": 5000,
+      "vectorized_collection_steps": 7846,
+      "n_episodes": 5000,
+      "seed": 2035,
+      "solver_name": "path_c_pool",
+      "epsilon_robust_initial": 0.1,
+      "epsilon_schedule": "constant",
+      "hyperparameters": {
+        "agent": {
+          "agent_id": 0,
+          "obs_dim": 4,
+          "num_agents": 2,
+          "num_actions": 4,
+          "pathwrap_path": "pathwrap.so",
+          "epsilon_robust": 1.0,
+          "epsilon_explore": 1.0,
+          "lr": 0.0003,
+          "gamma": 0.99,
+          "decay_rate": 0.999,
+          "buffer_size": 20000,
+          "batch_size": 32,
+          "learning_starts": 500,
+          "grad_clip_norm": 10.0,
+          "use_gpu": true,
+          "sre_num_random_starts": 5,
+          "sre_num_pure_starts": 10,
+          "train_every": 4,
+          "network_type": "joint_output",
+          "target_tau": null,
+          "target_update_steps": 250,
+          "target_equilibrium_update_steps": 4,
+          "action_epsilon_start": 1.0,
+          "action_epsilon_end": 0.05,
+          "action_epsilon_decay_fraction": 0.6,
+          "sre_solver_name": "path_c_pool",
+          "sre_solver_workers": 8,
+          "sre_solver_start_method": null,
+          "q_hidden_dims": [
+            128,
+            128
+          ],
+          "epsilon_robust_initial": 1.0,
+          "epsilon_schedule": "constant",
+          "sre_policy_cache_enabled": true,
+          "sre_policy_cache_size": 4096,
+          "sre_policy_cache_round_digits": 6,
+          "sre_state_cache_round_digits": 4,
+          "sre_remove_fixed_players": true
+        },
+        "path_mcp": {
+          "pathwrap_path": "/home/wowthecoder/SRE-DQN/discrete_action_space/sre_solvers/pathwrap.so",
+          "random_seed": null
+        },
+        "path_mcp_pool": {
+          "pathwrap_path": "/home/wowthecoder/SRE-DQN/discrete_action_space/sre_solvers/pathwrap.so",
+          "max_workers": 16,
+          "start_method": null,
+          "random_seed": null
+        },
+        "logit_qre": {
+          "precision_max": 100.0,
+          "precision_growth": 1.5,
+          "max_homotopy_steps": 64,
+          "corrector_max_iters": 100,
+          "qre_tol": 1e-06,
+          "exploitability_tol": 0.0001,
+          "damping": 0.5,
+          "min_prob": 1e-12,
+          "random_seed": null,
+          "device": "cuda",
+          "pure_start_logit": 20.0
+        },
+        "nfg_transformer": {
+          "checkpoint_path": null,
+          "device": "cuda",
+          "num_players": null,
+          "num_actions": null,
+          "fallback_enabled": false,
+          "fallback_solver": null,
+          "pathwrap_path": null,
+          "accept_exploitability_tol": null,
+          "compute_exploitability_diagnostics": true
+        }
+      },
+      "lbf_config": {
+        "players": 2,
+        "field_size": [
+          8,
+          8
+        ],
+        "sight": 8,
+        "max_food": 10,
+        "max_episode_steps": 50,
+        "player_levels": [
+          1,
+          2
+        ],
+        "min_food_level": 1,
+        "max_food_level": 3,
+        "normalize_reward": false,
+        "empty_load_penalty": 0.0,
+        "food_levels": [
+          3,
+          3,
+          3,
+          2,
+          2,
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "force_coop": false,
+        "penalty": 0.0,
+        "simple_food_rewards": true
+      },
+      "num_agents": 2,
+      "num_actions": 6,
+      "obs_dim": 36,
+      "agent_device": "cuda",
+      "sre_solver_device": "n/a",
+      "total_environment_steps": 249879,
+      "gradient_steps": 62349,
+      "best_loss": 0.004680921323597431,
+      "latest_loss": 0.02411428466439247,
+      "periodic_eval": [
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.2166666666666666,
+            1.6833333333333333
+          ],
+          "mean_joint_reward": 2.9,
+          "episode": 100,
+          "global_step": 6400,
+          "gradient_step": 1480,
+          "train_mean_joint_reward": 3.61,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            0.8833333333333333,
+            2.1166666666666667
+          ],
+          "mean_joint_reward": 3.0,
+          "episode": 200,
+          "global_step": 11200,
+          "gradient_step": 2680,
+          "train_mean_joint_reward": 4.08,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.0,
+            1.4666666666666666
+          ],
+          "mean_joint_reward": 2.466666666666667,
+          "episode": 300,
+          "global_step": 16000,
+          "gradient_step": 3880,
+          "train_mean_joint_reward": 4.23,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.3833333333333333,
+            2.216666666666667
+          ],
+          "mean_joint_reward": 3.6,
+          "episode": 400,
+          "global_step": 20800,
+          "gradient_step": 5080,
+          "train_mean_joint_reward": 4.56,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.15,
+            1.9833333333333334
+          ],
+          "mean_joint_reward": 3.1333333333333333,
+          "episode": 500,
+          "global_step": 25600,
+          "gradient_step": 6280,
+          "train_mean_joint_reward": 4.71,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.4166666666666667,
+            2.283333333333333
+          ],
+          "mean_joint_reward": 3.7,
+          "episode": 600,
+          "global_step": 30400,
+          "gradient_step": 7480,
+          "train_mean_joint_reward": 5.07,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.7,
+            2.933333333333333
+          ],
+          "mean_joint_reward": 4.633333333333334,
+          "episode": 700,
+          "global_step": 35200,
+          "gradient_step": 8680,
+          "train_mean_joint_reward": 4.93,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            0.9,
+            1.4333333333333333
+          ],
+          "mean_joint_reward": 2.3333333333333335,
+          "episode": 800,
+          "global_step": 40000,
+          "gradient_step": 9880,
+          "train_mean_joint_reward": 5.31,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.15,
+            1.9833333333333334
+          ],
+          "mean_joint_reward": 3.1333333333333333,
+          "episode": 900,
+          "global_step": 46400,
+          "gradient_step": 11480,
+          "train_mean_joint_reward": 5.79,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.1333333333333333,
+            2.033333333333333
+          ],
+          "mean_joint_reward": 3.1666666666666665,
+          "episode": 1000,
+          "global_step": 51200,
+          "gradient_step": 12680,
+          "train_mean_joint_reward": 5.77,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            0.8666666666666667,
+            2.0
+          ],
+          "mean_joint_reward": 2.8666666666666667,
+          "episode": 1100,
+          "global_step": 56000,
+          "gradient_step": 13880,
+          "train_mean_joint_reward": 6.13,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.1,
+            2.2
+          ],
+          "mean_joint_reward": 3.3,
+          "episode": 1200,
+          "global_step": 60800,
+          "gradient_step": 15080,
+          "train_mean_joint_reward": 6.3,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.6833333333333333,
+            2.4833333333333334
+          ],
+          "mean_joint_reward": 4.166666666666667,
+          "episode": 1300,
+          "global_step": 65600,
+          "gradient_step": 16280,
+          "train_mean_joint_reward": 6.14,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            0.8166666666666667,
+            1.7833333333333334
+          ],
+          "mean_joint_reward": 2.6,
+          "episode": 1400,
+          "global_step": 70400,
+          "gradient_step": 17480,
+          "train_mean_joint_reward": 7.21,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.0166666666666666,
+            2.45
+          ],
+          "mean_joint_reward": 3.466666666666667,
+          "episode": 1500,
+          "global_step": 75200,
+          "gradient_step": 18680,
+          "train_mean_joint_reward": 7.13,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            0.9333333333333333,
+            1.6333333333333333
+          ],
+          "mean_joint_reward": 2.566666666666667,
+          "episode": 1600,
+          "global_step": 80000,
+          "gradient_step": 19880,
+          "train_mean_joint_reward": 7.08,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.6,
+            2.6333333333333333
+          ],
+          "mean_joint_reward": 4.233333333333333,
+          "episode": 1700,
+          "global_step": 86400,
+          "gradient_step": 21480,
+          "train_mean_joint_reward": 7.55,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            0.9333333333333333,
+            1.5333333333333334
+          ],
+          "mean_joint_reward": 2.466666666666667,
+          "episode": 1800,
+          "global_step": 91200,
+          "gradient_step": 22680,
+          "train_mean_joint_reward": 8.09,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            0.95,
+            2.75
+          ],
+          "mean_joint_reward": 3.7,
+          "episode": 1900,
+          "global_step": 96000,
+          "gradient_step": 23880,
+          "train_mean_joint_reward": 8.07,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.3666666666666667,
+            2.3666666666666667
+          ],
+          "mean_joint_reward": 3.7333333333333334,
+          "episode": 2000,
+          "global_step": 100800,
+          "gradient_step": 25080,
+          "train_mean_joint_reward": 7.76,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.0166666666666666,
+            2.183333333333333
+          ],
+          "mean_joint_reward": 3.2,
+          "episode": 2100,
+          "global_step": 105600,
+          "gradient_step": 26280,
+          "train_mean_joint_reward": 8.33,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            0.8833333333333333,
+            2.15
+          ],
+          "mean_joint_reward": 3.033333333333333,
+          "episode": 2200,
+          "global_step": 110400,
+          "gradient_step": 27480,
+          "train_mean_joint_reward": 8.64,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.2333333333333334,
+            2.7
+          ],
+          "mean_joint_reward": 3.933333333333333,
+          "episode": 2300,
+          "global_step": 115200,
+          "gradient_step": 28680,
+          "train_mean_joint_reward": 8.54,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.3666666666666667,
+            1.5666666666666667
+          ],
+          "mean_joint_reward": 2.933333333333333,
+          "episode": 2400,
+          "global_step": 120000,
+          "gradient_step": 29880,
+          "train_mean_joint_reward": 8.46,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.3833333333333333,
+            2.216666666666667
+          ],
+          "mean_joint_reward": 3.6,
+          "episode": 2500,
+          "global_step": 126400,
+          "gradient_step": 31480,
+          "train_mean_joint_reward": 8.54,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.4166666666666667,
+            2.783333333333333
+          ],
+          "mean_joint_reward": 4.2,
+          "episode": 2600,
+          "global_step": 131200,
+          "gradient_step": 32680,
+          "train_mean_joint_reward": 8.84,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.3166666666666667,
+            2.25
+          ],
+          "mean_joint_reward": 3.566666666666667,
+          "episode": 2700,
+          "global_step": 136000,
+          "gradient_step": 33880,
+          "train_mean_joint_reward": 8.69,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.1666666666666667,
+            2.8
+          ],
+          "mean_joint_reward": 3.966666666666667,
+          "episode": 2800,
+          "global_step": 140800,
+          "gradient_step": 35080,
+          "train_mean_joint_reward": 8.6,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.35,
+            3.1166666666666667
+          ],
+          "mean_joint_reward": 4.466666666666667,
+          "episode": 2900,
+          "global_step": 145600,
+          "gradient_step": 36280,
+          "train_mean_joint_reward": 7.95,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.05,
+            1.7166666666666666
+          ],
+          "mean_joint_reward": 2.7666666666666666,
+          "episode": 3000,
+          "global_step": 150400,
+          "gradient_step": 37480,
+          "train_mean_joint_reward": 6.98,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.95,
+            2.8833333333333333
+          ],
+          "mean_joint_reward": 4.833333333333333,
+          "episode": 3100,
+          "global_step": 155200,
+          "gradient_step": 38680,
+          "train_mean_joint_reward": 7.23,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.1833333333333333,
+            2.0166666666666666
+          ],
+          "mean_joint_reward": 3.2,
+          "episode": 3200,
+          "global_step": 160000,
+          "gradient_step": 39880,
+          "train_mean_joint_reward": 7.13,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.1666666666666667,
+            2.566666666666667
+          ],
+          "mean_joint_reward": 3.7333333333333334,
+          "episode": 3300,
+          "global_step": 166400,
+          "gradient_step": 41480,
+          "train_mean_joint_reward": 6.73,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.6833333333333333,
+            2.4833333333333334
+          ],
+          "mean_joint_reward": 4.166666666666667,
+          "episode": 3400,
+          "global_step": 171200,
+          "gradient_step": 42680,
+          "train_mean_joint_reward": 7.6,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            2.0,
+            3.1666666666666665
+          ],
+          "mean_joint_reward": 5.166666666666667,
+          "episode": 3500,
+          "global_step": 176000,
+          "gradient_step": 43880,
+          "train_mean_joint_reward": 7.49,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.3666666666666667,
+            3.1666666666666665
+          ],
+          "mean_joint_reward": 4.533333333333333,
+          "episode": 3600,
+          "global_step": 180800,
+          "gradient_step": 45080,
+          "train_mean_joint_reward": 8.2,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.5833333333333333,
+            2.816666666666667
+          ],
+          "mean_joint_reward": 4.4,
+          "episode": 3700,
+          "global_step": 185600,
+          "gradient_step": 46280,
+          "train_mean_joint_reward": 7.17,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.2,
+            2.2666666666666666
+          ],
+          "mean_joint_reward": 3.466666666666667,
+          "episode": 3800,
+          "global_step": 190400,
+          "gradient_step": 47480,
+          "train_mean_joint_reward": 7.8,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.4166666666666667,
+            2.4833333333333334
+          ],
+          "mean_joint_reward": 3.9,
+          "episode": 3900,
+          "global_step": 195200,
+          "gradient_step": 48680,
+          "train_mean_joint_reward": 6.95,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            0.7333333333333333,
+            2.1
+          ],
+          "mean_joint_reward": 2.8333333333333335,
+          "episode": 4000,
+          "global_step": 200000,
+          "gradient_step": 49880,
+          "train_mean_joint_reward": 7.27,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.0,
+            2.3666666666666667
+          ],
+          "mean_joint_reward": 3.3666666666666667,
+          "episode": 4100,
+          "global_step": 206240,
+          "gradient_step": 51440,
+          "train_mean_joint_reward": 6.93,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.1333333333333333,
+            2.2
+          ],
+          "mean_joint_reward": 3.3333333333333335,
+          "episode": 4200,
+          "global_step": 211200,
+          "gradient_step": 52680,
+          "train_mean_joint_reward": 7.49,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.6,
+            2.1666666666666665
+          ],
+          "mean_joint_reward": 3.7666666666666666,
+          "episode": 4300,
+          "global_step": 216000,
+          "gradient_step": 53880,
+          "train_mean_joint_reward": 6.32,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.15,
+            2.0166666666666666
+          ],
+          "mean_joint_reward": 3.1666666666666665,
+          "episode": 4400,
+          "global_step": 220800,
+          "gradient_step": 55080,
+          "train_mean_joint_reward": 7.64,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.3833333333333333,
+            2.35
+          ],
+          "mean_joint_reward": 3.7333333333333334,
+          "episode": 4500,
+          "global_step": 225600,
+          "gradient_step": 56280,
+          "train_mean_joint_reward": 6.49,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.4166666666666667,
+            2.85
+          ],
+          "mean_joint_reward": 4.266666666666667,
+          "episode": 4600,
+          "global_step": 230400,
+          "gradient_step": 57480,
+          "train_mean_joint_reward": 6.89,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.2666666666666666,
+            2.066666666666667
+          ],
+          "mean_joint_reward": 3.3333333333333335,
+          "episode": 4700,
+          "global_step": 235200,
+          "gradient_step": 58680,
+          "train_mean_joint_reward": 7.14,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.5,
+            3.1
+          ],
+          "mean_joint_reward": 4.6,
+          "episode": 4800,
+          "global_step": 240000,
+          "gradient_step": 59880,
+          "train_mean_joint_reward": 7.1,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.2666666666666666,
+            2.6
+          ],
+          "mean_joint_reward": 3.8666666666666667,
+          "episode": 4900,
+          "global_step": 246144,
+          "gradient_step": 61416,
+          "train_mean_joint_reward": 6.87,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.0,
+            2.3333333333333335
+          ],
+          "mean_joint_reward": 3.3333333333333335,
+          "episode": 5000,
+          "global_step": 249879,
+          "gradient_step": 62349,
+          "train_mean_joint_reward": 7.55,
+          "train_reward_window_episodes": 100
+        }
+      ],
+      "best_joint_reward": 8.0,
+      "best_eval_joint_reward": 5.166666666666667,
+      "best_checkpoint_source": "periodic_eval_reward",
+      "checkpoint_paths": {
+        "best": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/training/lbf_8x8_2p_2f_levels12/0.1/shared_deepsrq_best.pt",
+        "final": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/training/lbf_8x8_2p_2f_levels12/0.1/shared_deepsrq_final.pt"
+      },
+      "include_replay_buffer": true,
+      "agent_labels": [
+        "Agent 1 (DeepSRQ)",
+        "Agent 2 (DeepSRQ)"
+      ],
+      "artifact_dir": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/training/lbf_8x8_2p_2f_levels12/0.1",
+      "stats_path": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/training/lbf_8x8_2p_2f_levels12/0.1/training_stats.json",
+      "reward_history_path": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/training/lbf_8x8_2p_2f_levels12/0.1/training_rewards.json",
+      "timing": {
+        "wall_clock_seconds": 2553.9102820319968,
+        "episode_time": {
+          "count": 5000,
+          "mean_milliseconds": 49975.8,
+          "min_milliseconds": 32000.0,
+          "max_milliseconds": 50000.0,
+          "std_milliseconds": 508.73800722965444
+        },
+        "sre_solve_time": {
+          "count": 698824,
+          "mean_milliseconds": 2.1077314142007313,
+          "min_milliseconds": 1.0074037188587681,
+          "max_milliseconds": 62.00810900190845,
+          "std_milliseconds": 0.9541379482328721
+        },
+        "backend_solve_time": {
+          "count": 698824,
+          "mean_milliseconds": 20.25313545913287,
+          "min_milliseconds": 2.2261850026552565,
+          "max_milliseconds": 386.36443500581663,
+          "std_milliseconds": 10.505616186192213
+        },
+        "agents": [
+          {
+            "agent_index": 0,
+            "algorithm": "DuelingDoubleDqnSreAgent",
+            "sre_solve_time": {
+              "count": 698824,
+              "mean_milliseconds": 2.1077314142007313,
+              "min_milliseconds": 1.0074037188587681,
+              "max_milliseconds": 62.00810900190845,
+              "std_milliseconds": 0.9541379482328721
+            },
+            "backend_solve_time": {
+              "count": 698824,
+              "mean_milliseconds": 20.25313545913287,
+              "min_milliseconds": 2.2261850026552565,
+              "max_milliseconds": 386.36443500581663,
+              "std_milliseconds": 10.505616186192213
+            },
+            "sre_policy_cache": {
+              "enabled": true,
+              "config_enabled": true,
+              "entries": 4096,
+              "max_entries": 4096,
+              "requests": 2226799,
+              "exact_hits": 61377,
+              "misses": 2165422,
+              "hit_rate": 0.02756288286459622,
+              "path_solves_avoided": 61377,
+              "evictions": 691004,
+              "candidate_returned": 698824,
+              "cache_round_digits": 6,
+              "state_round_digits": 4,
+              "target_equilibrium_update_steps": 4
+            },
+            "update_time": {
+              "count": 62349,
+              "mean_milliseconds": 26.962900836279456,
+              "min_milliseconds": 6.994753995968495,
+              "max_milliseconds": 433.0769840016728,
+              "std_milliseconds": 30.83741934881486
+            }
+          }
+        ],
+        "sre_policy_cache": {
+          "requests": 2226799,
+          "exact_hits": 61377,
+          "approx_hits": 0,
+          "misses": 2165422,
+          "path_solves_avoided": 61377,
+          "evictions": 691004,
+          "hit_rate": 0.02756288286459622
+        }
+      },
+      "solver_usage": {
+        "solve_time": {
+          "count": 698824,
+          "mean_milliseconds": 20.25313545913287,
+          "min_milliseconds": 2.2261850026552565,
+          "max_milliseconds": 386.36443500581663,
+          "std_milliseconds": 10.505616186192213
+        }
+      },
+      "algorithm": "deepsrq_path_mcp_nplayer_pool",
+      "gym_id": "SREDQNForaging-8x8-2p-2f-levels12-v0",
+      "time_limit": 50,
+      "sre_solver_workers": 16,
+      "training_reward_plot_paths": {
+        "agent_1": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/training/lbf_8x8_2p_2f_levels12/0.1/agent_1_training_reward.png",
+        "agent_1_max_100": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/training/lbf_8x8_2p_2f_levels12/0.1/agent_1_training_reward_max_100.png",
+        "agent_2": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/training/lbf_8x8_2p_2f_levels12/0.1/agent_2_training_reward.png",
+        "agent_2_max_100": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/training/lbf_8x8_2p_2f_levels12/0.1/agent_2_training_reward_max_100.png",
+        "combined": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/training/lbf_8x8_2p_2f_levels12/0.1/combined_agent_training_rewards.png",
+        "combined_max_100": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/training/lbf_8x8_2p_2f_levels12/0.1/combined_agent_training_rewards_max_100.png",
+        "periodic_eval": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/training/lbf_8x8_2p_2f_levels12/0.1/periodic_eval_reward.png"
+      },
+      "summary_path": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/training/lbf_8x8_2p_2f_levels12/0.1/training_summary.txt"
+    },
+    "lbf_8x8_2p_2f_force_coop": {
+      "reward_summary": {
+        "episodes": 5000,
+        "per_agent": [
+          {
+            "agent": "Agent 1 (DeepSRQ)",
+            "mean": 2.0823,
+            "std": 1.5270156220549937,
+            "min": 0.0,
+            "max": 9.0
+          },
+          {
+            "agent": "Agent 2 (DeepSRQ)",
+            "mean": 2.0861,
+            "std": 1.522148741089385,
+            "min": 0.0,
+            "max": 9.0
+          }
+        ],
+        "joint": {
+          "mean": 4.1684,
+          "std": 2.4364813645911596,
+          "min": 0.0,
+          "max": 15.0
+        }
+      },
+      "environment": "lbf_grid",
+      "scenario_key": "lbf_8x8_2p_2f_force_coop",
+      "scenario_name": "2 level-1 agents, 8x8 grid, 10 foods (5 level-1, 5 level-2), full sight, forced cooperation, 50-step episodes",
+      "pairing": [
+        "DeepSRQ",
+        "DeepSRQ"
+      ],
+      "pair_label": "DeepSRQ self-play",
+      "pair_slug": "path_c_pool_eps0.1_constant",
+      "training_mode": "vectorized",
+      "num_envs": 32,
+      "eval_num_envs": 8,
+      "completed_episodes": 5000,
+      "vectorized_collection_steps": 7850,
+      "n_episodes": 5000,
+      "seed": 2036,
+      "solver_name": "path_c_pool",
+      "epsilon_robust_initial": 0.1,
+      "epsilon_schedule": "constant",
+      "hyperparameters": {
+        "agent": {
+          "agent_id": 0,
+          "obs_dim": 4,
+          "num_agents": 2,
+          "num_actions": 4,
+          "pathwrap_path": "pathwrap.so",
+          "epsilon_robust": 1.0,
+          "epsilon_explore": 1.0,
+          "lr": 0.0003,
+          "gamma": 0.99,
+          "decay_rate": 0.999,
+          "buffer_size": 20000,
+          "batch_size": 32,
+          "learning_starts": 500,
+          "grad_clip_norm": 10.0,
+          "use_gpu": true,
+          "sre_num_random_starts": 5,
+          "sre_num_pure_starts": 10,
+          "train_every": 4,
+          "network_type": "joint_output",
+          "target_tau": null,
+          "target_update_steps": 250,
+          "target_equilibrium_update_steps": 4,
+          "action_epsilon_start": 1.0,
+          "action_epsilon_end": 0.05,
+          "action_epsilon_decay_fraction": 0.6,
+          "sre_solver_name": "path_c_pool",
+          "sre_solver_workers": 8,
+          "sre_solver_start_method": null,
+          "q_hidden_dims": [
+            128,
+            128
+          ],
+          "epsilon_robust_initial": 1.0,
+          "epsilon_schedule": "constant",
+          "sre_policy_cache_enabled": true,
+          "sre_policy_cache_size": 4096,
+          "sre_policy_cache_round_digits": 6,
+          "sre_state_cache_round_digits": 4,
+          "sre_remove_fixed_players": true
+        },
+        "path_mcp": {
+          "pathwrap_path": "/home/wowthecoder/SRE-DQN/discrete_action_space/sre_solvers/pathwrap.so",
+          "random_seed": null
+        },
+        "path_mcp_pool": {
+          "pathwrap_path": "/home/wowthecoder/SRE-DQN/discrete_action_space/sre_solvers/pathwrap.so",
+          "max_workers": 16,
+          "start_method": null,
+          "random_seed": null
+        },
+        "logit_qre": {
+          "precision_max": 100.0,
+          "precision_growth": 1.5,
+          "max_homotopy_steps": 64,
+          "corrector_max_iters": 100,
+          "qre_tol": 1e-06,
+          "exploitability_tol": 0.0001,
+          "damping": 0.5,
+          "min_prob": 1e-12,
+          "random_seed": null,
+          "device": "cuda",
+          "pure_start_logit": 20.0
+        },
+        "nfg_transformer": {
+          "checkpoint_path": null,
+          "device": "cuda",
+          "num_players": null,
+          "num_actions": null,
+          "fallback_enabled": false,
+          "fallback_solver": null,
+          "pathwrap_path": null,
+          "accept_exploitability_tol": null,
+          "compute_exploitability_diagnostics": true
+        }
+      },
+      "lbf_config": {
+        "players": 2,
+        "field_size": [
+          8,
+          8
+        ],
+        "sight": 8,
+        "max_food": 10,
+        "max_episode_steps": 50,
+        "player_levels": [
+          1,
+          1
+        ],
+        "min_food_level": 1,
+        "max_food_level": 3,
+        "normalize_reward": false,
+        "empty_load_penalty": 0.0,
+        "food_levels": [
+          1,
+          1,
+          1,
+          1,
+          1,
+          2,
+          2,
+          2,
+          2,
+          2
+        ],
+        "force_coop": true,
+        "penalty": 0.0,
+        "simple_food_rewards": true
+      },
+      "num_agents": 2,
+      "num_actions": 6,
+      "obs_dim": 36,
+      "agent_device": "cuda",
+      "sre_solver_device": "n/a",
+      "total_environment_steps": 249997,
+      "gradient_steps": 62379,
+      "best_loss": 0.001582885393872857,
+      "latest_loss": 0.07486248761415482,
+      "periodic_eval": [
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            0.85,
+            0.85
+          ],
+          "mean_joint_reward": 1.7,
+          "episode": 100,
+          "global_step": 6400,
+          "gradient_step": 1480,
+          "train_mean_joint_reward": 2.47,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.0333333333333334,
+            0.9
+          ],
+          "mean_joint_reward": 1.9333333333333333,
+          "episode": 200,
+          "global_step": 11200,
+          "gradient_step": 2680,
+          "train_mean_joint_reward": 2.71,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            0.55,
+            0.75
+          ],
+          "mean_joint_reward": 1.3,
+          "episode": 300,
+          "global_step": 16000,
+          "gradient_step": 3880,
+          "train_mean_joint_reward": 2.85,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            0.45,
+            0.65
+          ],
+          "mean_joint_reward": 1.1,
+          "episode": 400,
+          "global_step": 20800,
+          "gradient_step": 5080,
+          "train_mean_joint_reward": 3.14,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            0.9833333333333333,
+            0.8166666666666667
+          ],
+          "mean_joint_reward": 1.8,
+          "episode": 500,
+          "global_step": 25600,
+          "gradient_step": 6280,
+          "train_mean_joint_reward": 3.2,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            0.9166666666666666,
+            0.8166666666666667
+          ],
+          "mean_joint_reward": 1.7333333333333334,
+          "episode": 600,
+          "global_step": 30400,
+          "gradient_step": 7480,
+          "train_mean_joint_reward": 3.32,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            0.8333333333333334,
+            1.1333333333333333
+          ],
+          "mean_joint_reward": 1.9666666666666666,
+          "episode": 700,
+          "global_step": 35200,
+          "gradient_step": 8680,
+          "train_mean_joint_reward": 3.37,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            0.9166666666666666,
+            0.85
+          ],
+          "mean_joint_reward": 1.7666666666666666,
+          "episode": 800,
+          "global_step": 40000,
+          "gradient_step": 9880,
+          "train_mean_joint_reward": 3.38,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            0.9,
+            1.5
+          ],
+          "mean_joint_reward": 2.4,
+          "episode": 900,
+          "global_step": 46400,
+          "gradient_step": 11480,
+          "train_mean_joint_reward": 3.55,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            0.9,
+            0.7
+          ],
+          "mean_joint_reward": 1.6,
+          "episode": 1000,
+          "global_step": 51200,
+          "gradient_step": 12680,
+          "train_mean_joint_reward": 3.42,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            0.7666666666666667,
+            0.8333333333333334
+          ],
+          "mean_joint_reward": 1.6,
+          "episode": 1100,
+          "global_step": 56000,
+          "gradient_step": 13880,
+          "train_mean_joint_reward": 3.67,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.0,
+            0.9
+          ],
+          "mean_joint_reward": 1.9,
+          "episode": 1200,
+          "global_step": 60800,
+          "gradient_step": 15080,
+          "train_mean_joint_reward": 4.0,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.4,
+            1.4
+          ],
+          "mean_joint_reward": 2.8,
+          "episode": 1300,
+          "global_step": 65600,
+          "gradient_step": 16280,
+          "train_mean_joint_reward": 3.92,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.2333333333333334,
+            0.8
+          ],
+          "mean_joint_reward": 2.033333333333333,
+          "episode": 1400,
+          "global_step": 70400,
+          "gradient_step": 17480,
+          "train_mean_joint_reward": 4.07,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.4166666666666667,
+            1.1166666666666667
+          ],
+          "mean_joint_reward": 2.533333333333333,
+          "episode": 1500,
+          "global_step": 75200,
+          "gradient_step": 18680,
+          "train_mean_joint_reward": 4.09,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.0666666666666667,
+            1.3333333333333333
+          ],
+          "mean_joint_reward": 2.4,
+          "episode": 1600,
+          "global_step": 80000,
+          "gradient_step": 19880,
+          "train_mean_joint_reward": 4.7,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            0.7,
+            1.0
+          ],
+          "mean_joint_reward": 1.7,
+          "episode": 1700,
+          "global_step": 86400,
+          "gradient_step": 21480,
+          "train_mean_joint_reward": 4.64,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            0.9666666666666667,
+            1.1
+          ],
+          "mean_joint_reward": 2.066666666666667,
+          "episode": 1800,
+          "global_step": 91200,
+          "gradient_step": 22680,
+          "train_mean_joint_reward": 4.49,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.0666666666666667,
+            1.1333333333333333
+          ],
+          "mean_joint_reward": 2.2,
+          "episode": 1900,
+          "global_step": 96000,
+          "gradient_step": 23880,
+          "train_mean_joint_reward": 5.29,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.0,
+            0.9666666666666667
+          ],
+          "mean_joint_reward": 1.9666666666666666,
+          "episode": 2000,
+          "global_step": 100800,
+          "gradient_step": 25080,
+          "train_mean_joint_reward": 4.92,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.2,
+            1.1333333333333333
+          ],
+          "mean_joint_reward": 2.3333333333333335,
+          "episode": 2100,
+          "global_step": 105600,
+          "gradient_step": 26280,
+          "train_mean_joint_reward": 5.15,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.2,
+            0.9666666666666667
+          ],
+          "mean_joint_reward": 2.1666666666666665,
+          "episode": 2200,
+          "global_step": 110400,
+          "gradient_step": 27480,
+          "train_mean_joint_reward": 5.03,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.15,
+            1.05
+          ],
+          "mean_joint_reward": 2.2,
+          "episode": 2300,
+          "global_step": 115200,
+          "gradient_step": 28680,
+          "train_mean_joint_reward": 4.81,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            0.85,
+            1.3166666666666667
+          ],
+          "mean_joint_reward": 2.1666666666666665,
+          "episode": 2400,
+          "global_step": 120000,
+          "gradient_step": 29880,
+          "train_mean_joint_reward": 5.32,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            0.5833333333333334,
+            0.6833333333333333
+          ],
+          "mean_joint_reward": 1.2666666666666666,
+          "episode": 2500,
+          "global_step": 126400,
+          "gradient_step": 31480,
+          "train_mean_joint_reward": 4.53,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.1166666666666667,
+            1.0833333333333333
+          ],
+          "mean_joint_reward": 2.2,
+          "episode": 2600,
+          "global_step": 131200,
+          "gradient_step": 32680,
+          "train_mean_joint_reward": 5.01,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            0.8833333333333333,
+            0.9166666666666666
+          ],
+          "mean_joint_reward": 1.8,
+          "episode": 2700,
+          "global_step": 136000,
+          "gradient_step": 33880,
+          "train_mean_joint_reward": 5.35,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            0.5666666666666667,
+            0.8333333333333334
+          ],
+          "mean_joint_reward": 1.4,
+          "episode": 2800,
+          "global_step": 140800,
+          "gradient_step": 35080,
+          "train_mean_joint_reward": 4.76,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.0166666666666666,
+            0.85
+          ],
+          "mean_joint_reward": 1.8666666666666667,
+          "episode": 2900,
+          "global_step": 145600,
+          "gradient_step": 36280,
+          "train_mean_joint_reward": 4.42,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.1333333333333333,
+            0.9666666666666667
+          ],
+          "mean_joint_reward": 2.1,
+          "episode": 3000,
+          "global_step": 150400,
+          "gradient_step": 37480,
+          "train_mean_joint_reward": 4.56,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.25,
+            1.15
+          ],
+          "mean_joint_reward": 2.4,
+          "episode": 3100,
+          "global_step": 155200,
+          "gradient_step": 38680,
+          "train_mean_joint_reward": 4.13,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            0.8,
+            0.9
+          ],
+          "mean_joint_reward": 1.7,
+          "episode": 3200,
+          "global_step": 160000,
+          "gradient_step": 39880,
+          "train_mean_joint_reward": 4.18,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.0,
+            1.0333333333333334
+          ],
+          "mean_joint_reward": 2.033333333333333,
+          "episode": 3300,
+          "global_step": 166400,
+          "gradient_step": 41480,
+          "train_mean_joint_reward": 4.31,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            0.8833333333333333,
+            0.95
+          ],
+          "mean_joint_reward": 1.8333333333333333,
+          "episode": 3400,
+          "global_step": 171200,
+          "gradient_step": 42680,
+          "train_mean_joint_reward": 4.07,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.25,
+            0.9833333333333333
+          ],
+          "mean_joint_reward": 2.2333333333333334,
+          "episode": 3500,
+          "global_step": 176000,
+          "gradient_step": 43880,
+          "train_mean_joint_reward": 4.29,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            0.75,
+            1.0166666666666666
+          ],
+          "mean_joint_reward": 1.7666666666666666,
+          "episode": 3600,
+          "global_step": 180800,
+          "gradient_step": 45080,
+          "train_mean_joint_reward": 4.32,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.65,
+            1.05
+          ],
+          "mean_joint_reward": 2.7,
+          "episode": 3700,
+          "global_step": 185600,
+          "gradient_step": 46280,
+          "train_mean_joint_reward": 4.42,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            0.9,
+            0.9
+          ],
+          "mean_joint_reward": 1.8,
+          "episode": 3800,
+          "global_step": 190400,
+          "gradient_step": 47480,
+          "train_mean_joint_reward": 4.18,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.4,
+            1.4333333333333333
+          ],
+          "mean_joint_reward": 2.8333333333333335,
+          "episode": 3900,
+          "global_step": 195200,
+          "gradient_step": 48680,
+          "train_mean_joint_reward": 4.27,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            0.55,
+            1.2833333333333334
+          ],
+          "mean_joint_reward": 1.8333333333333333,
+          "episode": 4000,
+          "global_step": 200000,
+          "gradient_step": 49880,
+          "train_mean_joint_reward": 4.36,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.0166666666666666,
+            1.2833333333333334
+          ],
+          "mean_joint_reward": 2.3,
+          "episode": 4100,
+          "global_step": 206400,
+          "gradient_step": 51480,
+          "train_mean_joint_reward": 4.4,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            0.9,
+            0.9333333333333333
+          ],
+          "mean_joint_reward": 1.8333333333333333,
+          "episode": 4200,
+          "global_step": 211200,
+          "gradient_step": 52680,
+          "train_mean_joint_reward": 3.85,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.1166666666666667,
+            1.2833333333333334
+          ],
+          "mean_joint_reward": 2.4,
+          "episode": 4300,
+          "global_step": 216000,
+          "gradient_step": 53880,
+          "train_mean_joint_reward": 4.49,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            0.8666666666666667,
+            1.1
+          ],
+          "mean_joint_reward": 1.9666666666666666,
+          "episode": 4400,
+          "global_step": 220800,
+          "gradient_step": 55080,
+          "train_mean_joint_reward": 4.35,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.2166666666666666,
+            0.9166666666666666
+          ],
+          "mean_joint_reward": 2.1333333333333333,
+          "episode": 4500,
+          "global_step": 225600,
+          "gradient_step": 56280,
+          "train_mean_joint_reward": 3.44,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.1833333333333333,
+            1.0833333333333333
+          ],
+          "mean_joint_reward": 2.2666666666666666,
+          "episode": 4600,
+          "global_step": 230400,
+          "gradient_step": 57480,
+          "train_mean_joint_reward": 4.34,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.0833333333333333,
+            0.9833333333333333
+          ],
+          "mean_joint_reward": 2.066666666666667,
+          "episode": 4700,
+          "global_step": 235200,
+          "gradient_step": 58680,
+          "train_mean_joint_reward": 4.55,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.3,
+            0.9
+          ],
+          "mean_joint_reward": 2.2,
+          "episode": 4800,
+          "global_step": 240000,
+          "gradient_step": 59880,
+          "train_mean_joint_reward": 4.11,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.1,
+            1.0333333333333334
+          ],
+          "mean_joint_reward": 2.1333333333333333,
+          "episode": 4900,
+          "global_step": 246400,
+          "gradient_step": 61480,
+          "train_mean_joint_reward": 4.07,
+          "train_reward_window_episodes": 100
+        },
+        {
+          "n_eval_episodes": 30,
+          "mean_agent_rewards": [
+            1.1,
+            1.0
+          ],
+          "mean_joint_reward": 2.1,
+          "episode": 5000,
+          "global_step": 249997,
+          "gradient_step": 62379,
+          "train_mean_joint_reward": 4.15,
+          "train_reward_window_episodes": 100
+        }
+      ],
+      "best_joint_reward": 6.0,
+      "best_eval_joint_reward": 2.8333333333333335,
+      "best_checkpoint_source": "periodic_eval_reward",
+      "checkpoint_paths": {
+        "best": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/training/lbf_8x8_2p_2f_force_coop/0.1/shared_deepsrq_best.pt",
+        "final": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/training/lbf_8x8_2p_2f_force_coop/0.1/shared_deepsrq_final.pt"
+      },
+      "include_replay_buffer": true,
+      "agent_labels": [
+        "Agent 1 (DeepSRQ)",
+        "Agent 2 (DeepSRQ)"
+      ],
+      "artifact_dir": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/training/lbf_8x8_2p_2f_force_coop/0.1",
+      "stats_path": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/training/lbf_8x8_2p_2f_force_coop/0.1/training_stats.json",
+      "reward_history_path": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/training/lbf_8x8_2p_2f_force_coop/0.1/training_rewards.json",
+      "timing": {
+        "wall_clock_seconds": 2692.6342304220016,
+        "episode_time": {
+          "count": 5000,
+          "mean_milliseconds": 49999.4,
+          "min_milliseconds": 47000.0,
+          "max_milliseconds": 50000.0,
+          "std_milliseconds": 42.422164018352476
+        },
+        "sre_solve_time": {
+          "count": 696083,
+          "mean_milliseconds": 2.2782035771622735,
+          "min_milliseconds": 1.0960942499878001,
+          "max_milliseconds": 78.17437500489177,
+          "std_milliseconds": 0.9258557364441368
+        },
+        "backend_solve_time": {
+          "count": 696083,
+          "mean_milliseconds": 22.102623970884135,
+          "min_milliseconds": 2.4912669978220947,
+          "max_milliseconds": 338.5174620052567,
+          "std_milliseconds": 11.572241378201472
+        },
+        "agents": [
+          {
+            "agent_index": 0,
+            "algorithm": "DuelingDoubleDqnSreAgent",
+            "sre_solve_time": {
+              "count": 696083,
+              "mean_milliseconds": 2.2782035771622735,
+              "min_milliseconds": 1.0960942499878001,
+              "max_milliseconds": 78.17437500489177,
+              "std_milliseconds": 0.9258557364441368
+            },
+            "backend_solve_time": {
+              "count": 696083,
+              "mean_milliseconds": 22.102623970884135,
+              "min_milliseconds": 2.4912669978220947,
+              "max_milliseconds": 338.5174620052567,
+              "std_milliseconds": 11.572241378201472
+            },
+            "sre_policy_cache": {
+              "enabled": true,
+              "config_enabled": true,
+              "entries": 4096,
+              "max_entries": 4096,
+              "requests": 2227745,
+              "exact_hits": 64366,
+              "misses": 2163379,
+              "hit_rate": 0.028892893935347178,
+              "path_solves_avoided": 64366,
+              "evictions": 687548,
+              "candidate_returned": 696083,
+              "cache_round_digits": 6,
+              "state_round_digits": 4,
+              "target_equilibrium_update_steps": 4
+            },
+            "update_time": {
+              "count": 62379,
+              "mean_milliseconds": 28.614946414122187,
+              "min_milliseconds": 7.036295995931141,
+              "max_milliseconds": 329.3717109991121,
+              "std_milliseconds": 33.52558882524217
+            }
+          }
+        ],
+        "sre_policy_cache": {
+          "requests": 2227745,
+          "exact_hits": 64366,
+          "approx_hits": 0,
+          "misses": 2163379,
+          "path_solves_avoided": 64366,
+          "evictions": 687548,
+          "hit_rate": 0.028892893935347178
+        }
+      },
+      "solver_usage": {
+        "solve_time": {
+          "count": 696083,
+          "mean_milliseconds": 22.102623970884135,
+          "min_milliseconds": 2.4912669978220947,
+          "max_milliseconds": 338.5174620052567,
+          "std_milliseconds": 11.572241378201472
+        }
+      },
+      "algorithm": "deepsrq_path_mcp_nplayer_pool",
+      "gym_id": "SREDQNForaging-8x8-2p-2f-force-coop-v0",
+      "time_limit": 50,
+      "sre_solver_workers": 16,
+      "training_reward_plot_paths": {
+        "agent_1": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/training/lbf_8x8_2p_2f_force_coop/0.1/agent_1_training_reward.png",
+        "agent_1_max_100": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/training/lbf_8x8_2p_2f_force_coop/0.1/agent_1_training_reward_max_100.png",
+        "agent_2": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/training/lbf_8x8_2p_2f_force_coop/0.1/agent_2_training_reward.png",
+        "agent_2_max_100": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/training/lbf_8x8_2p_2f_force_coop/0.1/agent_2_training_reward_max_100.png",
+        "combined": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/training/lbf_8x8_2p_2f_force_coop/0.1/combined_agent_training_rewards.png",
+        "combined_max_100": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/training/lbf_8x8_2p_2f_force_coop/0.1/combined_agent_training_rewards_max_100.png",
+        "periodic_eval": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/training/lbf_8x8_2p_2f_force_coop/0.1/periodic_eval_reward.png"
+      },
+      "summary_path": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/training/lbf_8x8_2p_2f_force_coop/0.1/training_summary.txt"
+    }
+  }
+}

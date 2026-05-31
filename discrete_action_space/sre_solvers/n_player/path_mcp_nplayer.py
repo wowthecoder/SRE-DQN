@@ -6,11 +6,12 @@ from pathlib import Path
 import time
 
 import numpy as np
-from path_solver import PathSolverWrapper
+from path_solver import PathSolverWrapper, sample_pure_profiles
 
 from ..base import (
     SreSolveResult,
     SreStageGameSolver,
+    _duration_summary_from_seconds,
     _empty_duration_summary,
     _normalize_policy,
 )
@@ -211,11 +212,11 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
             starts.append(
                 self._make_start(index, action_sizes, opponent_data, initial_policies)
             )
-        for profile_idx, pure_profile in enumerate(
-            itertools.product(*[range(size) for size in action_sizes])
+        for pure_profile in sample_pure_profiles(
+            action_sizes,
+            num_pure_starts,
+            self.rng,
         ):
-            if profile_idx >= max(0, int(num_pure_starts)):
-                break
             policies = []
             for action_size, action_id in zip(action_sizes, pure_profile):
                 policy = np.zeros(action_size, dtype=np.float64)
@@ -1164,17 +1165,13 @@ class ProcessPoolPathMcpNPlayerSreSolver(SreStageGameSolver):
         mean = self.solve_time_sum / count
         variance = max(self.solve_time_sumsq / count - mean * mean, 0.0)
         std = float(np.sqrt(variance))
-        return {
-            "count": int(count),
-            "mean_seconds": float(mean),
-            "min_seconds": float(self.solve_time_min),
-            "max_seconds": float(self.solve_time_max),
-            "std_seconds": std,
-            "mean_microseconds": float(mean * 1_000_000.0),
-            "min_microseconds": float(self.solve_time_min * 1_000_000.0),
-            "max_microseconds": float(self.solve_time_max * 1_000_000.0),
-            "std_microseconds": float(std * 1_000_000.0),
-        }
+        return _duration_summary_from_seconds(
+            count,
+            mean,
+            self.solve_time_min,
+            self.solve_time_max,
+            std,
+        )
 
     def close(self):
         pool = getattr(self, "_pool", None)

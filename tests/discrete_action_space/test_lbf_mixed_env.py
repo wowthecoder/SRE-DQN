@@ -6,7 +6,11 @@ pytest.importorskip("lbforaging")
 from lbf_grid.pz_wrapper import make_pz_env
 from lbf_grid.deep_srq_lbf import _print_lbf_evaluation_metrics
 from lbf_grid.epymarl_lbf_env import EPYMARL_LBF_SCENARIOS, ExactLevelForagingEnv
-from lbf_grid.notebook_eval import sample_lbf_rollouts_vectorized
+from lbf_grid.notebook_eval import (
+    best_joint_reward_rollout_index,
+    capture_lbf_rollout_frames_from_actions,
+    sample_lbf_rollouts_vectorized,
+)
 from lbf_grid.robust_notebook_utils import scenario_to_lbf_config
 
 
@@ -348,6 +352,73 @@ def test_vectorized_rollout_records_lbf_episode_metrics():
     assert len(rollouts["episode_metrics"]) == 2
     assert [metric["invalid_loads_total"] for metric in rollouts["episode_metrics"]] == [1, 1]
     assert rollouts["metric_totals"]["invalid_loads_total"] == 2
+
+
+def test_best_joint_reward_rollout_can_be_replayed_for_frames():
+    reward_by_seed = {10: 0.0, 11: 5.0, 12: 2.0}
+    instances = []
+
+    class FakeEnv:
+        possible_agents = ["player_0", "player_1"]
+
+        def __init__(self):
+            self.agents = list(self.possible_agents)
+            self.seed = None
+            self.steps = 0
+            self.actions = []
+            instances.append(self)
+
+        def reset(self, seed=None, options=None):
+            self.seed = int(seed)
+            self.steps = 0
+            self.actions = []
+            self.agents = list(self.possible_agents)
+            return {}, {}
+
+        def step(self, action_dict):
+            self.actions.append(dict(action_dict))
+            reward = float(reward_by_seed[self.seed])
+            self.steps += 1
+            self.agents = []
+            done = {agent: True for agent in self.possible_agents}
+            truncated = {agent: False for agent in self.possible_agents}
+            rewards = {"player_0": reward, "player_1": 0.0}
+            return {}, rewards, done, truncated, {}
+
+        def render(self, mode="rgb_array"):
+            return np.full((2, 2, 3), self.seed * 10 + self.steps, dtype=np.uint8)
+
+        def close(self):
+            pass
+
+    rollouts = sample_lbf_rollouts_vectorized(
+        make_env=FakeEnv,
+        policy_batch_fn=lambda contexts: [
+            [context["episode_idx"], context["step"]] for context in contexts
+        ],
+        seed=10,
+        n_episodes=3,
+        max_steps=1,
+        num_envs=3,
+        show_progress=False,
+        capture_first_episode_frames=False,
+    )
+
+    best_idx = best_joint_reward_rollout_index(rollouts)
+    assert best_idx == 1
+    assert rollouts["joint_rewards"] == [0.0, 5.0, 2.0]
+
+    replay = capture_lbf_rollout_frames_from_actions(
+        make_env=FakeEnv,
+        actions=rollouts["rollouts"][best_idx]["actions"],
+        seed=10,
+        episode_idx=best_idx,
+        max_steps=1,
+    )
+
+    assert replay["render_error"] is None
+    assert [int(frame[0, 0, 0]) for frame in replay["frames"]] == [110, 111]
+    assert instances[-1].actions == [{"player_0": 1, "player_1": 0}]
 
 
 def test_training_summary_prints_latest_lbf_eval_metrics(capsys):

@@ -1,34 +1,34 @@
 {
   "episode_reward_summary": {
-    "episodes": 50,
+    "episodes": 100,
     "per_agent": [
       {
         "agent": "Agent 1\nDeep SRQ",
-        "mean": 0.87,
-        "std": 1.2720455966670379,
+        "mean": 0.7,
+        "std": 0.8602325267042626,
         "min": 0.0,
-        "max": 5.0
+        "max": 3.0
       },
       {
         "agent": "Agent 2\nIPPO",
-        "mean": 0.73,
-        "std": 0.9392017887546849,
+        "mean": 0.68,
+        "std": 0.915204895091804,
         "min": 0.0,
         "max": 4.0
       }
     ],
     "joint": {
-      "mean": 1.6,
-      "std": 1.6492422502470645,
+      "mean": 1.38,
+      "std": 1.3474420210161178,
       "min": 0.0,
-      "max": 7.0
+      "max": 6.0
     }
   },
   "mean_agent_rewards": [
-    0.87,
-    0.73
+    0.7,
+    0.68
   ],
-  "mean_joint_reward": 1.6,
+  "mean_joint_reward": 1.38,
   "scenario_key": "lbf_8x8_2p_2f_levels12",
   "scenario_name": "2 agents with levels 1 and 2, 8x8 grid, 10 foods (3 level-3, 2 level-2, 5 level-1), full sight, 50-step episodes",
   "primary_label": "deepsrq_path_mcp_nplayer_pool",
@@ -37,7 +37,7 @@
   "pair_label": "Deep SRQ vs IPPO",
   "plot_title": "Scenario 1, Deep SRQ vs IPPO",
   "matchup_note": "Agent 1 uses Deep SRQ; Agents 2-2 use IPPO.",
-  "n_episodes": 50,
+  "n_episodes": 100,
   "fixed_primary_agent": 1,
   "agent_labels": [
     "Agent 1\nDeep SRQ",
@@ -46,13 +46,15 @@
   "agent_algorithm_counts": [
     {
       "agent": 1,
-      "Deep SRQ": 50
+      "Deep SRQ": 100
     },
     {
       "agent": 2,
-      "IPPO": 50
+      "IPPO": 100
     }
   ],
+  "video_episode_index": 11,
+  "video_joint_reward": 6.0,
   "render_error": null,
   "artifact_dir": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/evaluation/lbf_8x8_2p_2f_levels12/0.1/vs_ippo",
   "rewards_path": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/evaluation/lbf_8x8_2p_2f_levels12/0.1/vs_ippo/evaluation_rewards.json",

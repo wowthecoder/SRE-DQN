@@ -119,8 +119,14 @@ The notebook writes the following files for each scenario/epsilon run:
 - `training_stats.json`: JSON stats emitted by `train_lbf_deep_srq_vectorized`
   and then overwritten by the notebook wrapper after it adds scenario/family
   metadata and plot paths.
+- `training_rewards.json`: per-episode reward history kept outside the compact
+  stats payload.
 - `training_summary.txt`: compact human-readable summary.
-- `agent_<n>_training_reward.png` and `combined_agent_training_rewards.png`.
+- `agent_<n>_training_reward.png`,
+  `agent_<n>_training_reward_max_100.png`,
+  `combined_agent_training_rewards.png`,
+  `combined_agent_training_rewards_max_100.png`, and
+  `periodic_eval_reward.png`.
 - `shared_deepsrq_best.pt` and `shared_deepsrq_final.pt`.
 
 It also writes an epsilon-level manifest at:
@@ -130,8 +136,10 @@ discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/training/manifest_e
 ```
 
 The manifest stores `algorithm`, `solver_name`, `sre_solver_workers`,
-`epsilon`, and a `results` map keyed by scenario. The persisted payloads are
-compact: per-episode reward histories are replaced by summary statistics.
+`epsilon`, and a `results` map keyed by scenario. The persisted
+`training_stats.json` payload is compact: per-episode reward histories are
+stored in `training_rewards.json`, while the stats file keeps summary,
+evaluation, checkpoint, timing, and artifact metadata.
 
 The full top-level stats payload persisted in `training_stats.json` contains:
 
@@ -142,6 +150,11 @@ scenario_name
 pairing
 pair_label
 pair_slug
+training_mode
+num_envs
+eval_num_envs
+completed_episodes
+vectorized_collection_steps
 reward_summary
 n_episodes
 seed
@@ -153,6 +166,8 @@ lbf_config
 num_agents
 num_actions
 obs_dim
+agent_device
+sre_solver_device
 total_environment_steps
 gradient_steps
 best_loss
@@ -166,6 +181,7 @@ include_replay_buffer
 agent_labels
 artifact_dir
 stats_path
+reward_history_path
 timing
 solver_usage
 algorithm
@@ -179,33 +195,58 @@ summary_path
 The nested fields inside the stats payload are:
 
 ```text
+reward_summary
+  episodes
+  per_agent[]
+    agent
+    mean
+    std
+    min
+    max
+  joint
+    mean
+    std
+    min
+    max
+
 hyperparameters
   agent
+    agent_id
+    obs_dim
+    num_agents
+    num_actions
+    pathwrap_path
+    epsilon_robust
+    epsilon_explore
     lr
+    gamma
+    decay_rate
     batch_size
     buffer_size
     learning_starts
-    gamma
+    grad_clip_norm
+    use_gpu
+    sre_num_random_starts
+    sre_num_pure_starts
+    train_every
+    network_type
+    target_tau
+    target_update_steps
+    target_equilibrium_update_steps
     action_epsilon_start
     action_epsilon_end
     action_epsilon_decay_fraction
-    grad_clip_norm
-    sre_num_repeats
-    sre_include_pure_starts
-    train_every
-    network_type
-    target_update_steps
-    target_equilibrium_update_steps
-    target_tau
+    sre_solver_name
+    sre_solver_workers
+    sre_solver_start_method
+    q_hidden_dims
+    epsilon_robust_initial
+    epsilon_schedule
     sre_policy_cache_enabled
     sre_policy_cache_size
     sre_policy_cache_round_digits
     sre_state_cache_round_digits
-    sre_approx_cache_enabled
-    sre_cache_exploitability_tol
-    sre_solver_exploitability_tol
-    sre_approx_accept_tol
-    sre_solver_early_exit
+    sre_remove_fixed_players
   path_mcp
     pathwrap_path
     random_seed
@@ -220,9 +261,12 @@ hyperparameters
     max_homotopy_steps
     corrector_max_iters
     qre_tol
+    exploitability_tol
     damping
     min_prob
+    random_seed
     device
+    pure_start_logit
 
 lbf_config
   players
@@ -241,51 +285,8 @@ lbf_config
   simple_food_rewards
 
 periodic_eval[]
-  episode_rewards
-  joint_rewards
-  episode_lengths
-  episode_metrics
-    initial_agent_positions
-      agent
-      agent_id
-      row
-      col
-      level
-    initial_foods
-      row
-      col
-      level
-    episode_length
-    foods_collected_total
-    foods_collected_per_agent
-      agent_<n>
-    foods_collected_by_agent
-      agent_<n>
-        step
-        row
-        col
-        level
-    foods_collected_events
-    empty_loads_total
-    empty_loads_per_agent
-      agent_<n>
-    empty_load_events
-    invalid_loads_total
-    invalid_loads_per_agent
-      agent_<n>
-    invalid_load_events
-  metric_totals
-    episode_count
-    episode_lengths
-    foods_collected_total
-    foods_collected_per_agent
-      agent_<n>
-    empty_loads_total
-    empty_loads_per_agent
-      agent_<n>
-    invalid_loads_total
-    invalid_loads_per_agent
-      agent_<n>
+  n_eval_episodes
+  mean_agent_rewards
   mean_joint_reward
   episode
   global_step
@@ -299,77 +300,37 @@ timing
   wall_clock_seconds
   episode_time
     count
-    mean_seconds
-    min_seconds
-    max_seconds
-    std_seconds
-    mean_microseconds
-    min_microseconds
-    max_microseconds
-    std_microseconds
+    mean_milliseconds
+    min_milliseconds
+    max_milliseconds
+    std_milliseconds
   sre_solve_time
     count
-    mean_seconds
-    min_seconds
-    max_seconds
-    std_seconds
-    mean_microseconds
-    min_microseconds
-    max_microseconds
-    std_microseconds
+    mean_milliseconds
+    min_milliseconds
+    max_milliseconds
+    std_milliseconds
   backend_solve_time
     count
-    mean_seconds
-    min_seconds
-    max_seconds
-    std_seconds
-    mean_microseconds
-    min_microseconds
-    max_microseconds
-    std_microseconds
-  path_solve_time
-    count
-    mean_seconds
-    min_seconds
-    max_seconds
-    std_seconds
-    mean_microseconds
-    min_microseconds
-    max_microseconds
-    std_microseconds
+    mean_milliseconds
+    min_milliseconds
+    max_milliseconds
+    std_milliseconds
   agents[]
     agent_index
     algorithm
     sre_solve_time
       count
-      mean_seconds
-      min_seconds
-      max_seconds
-      std_seconds
-      mean_microseconds
-      min_microseconds
-      max_microseconds
-      std_microseconds
+      mean_milliseconds
+      min_milliseconds
+      max_milliseconds
+      std_milliseconds
     backend_solve_time
       count
-      mean_seconds
-      min_seconds
-      max_seconds
-      std_seconds
-      mean_microseconds
-      min_microseconds
-      max_microseconds
-      std_microseconds
-    path_solve_time
-      count
-      mean_seconds
-      min_seconds
-      max_seconds
-      std_seconds
-      mean_microseconds
-      min_microseconds
-      max_microseconds
-      std_microseconds
+      mean_milliseconds
+      min_milliseconds
+      max_milliseconds
+      std_milliseconds
     sre_policy_cache
       enabled
       config_enabled
@@ -379,53 +340,43 @@ timing
       requests
       exact_hits
       approx_hits
-	      misses
-	      hit_rate
-	      path_solves_avoided
-	      evictions
-	      candidate_returned
-	      cache_round_digits
-	      state_round_digits
-	      approx_exploitability_tol
-	      solver_exploitability_tol
-	      solver_approx_accept_tol
-	      candidate_selection
-	      exploitability_filter_enabled
-	      target_equilibrium_update_steps
-	    update_time
-	      count
-      mean_seconds
-      min_seconds
-      max_seconds
-      std_seconds
-      mean_microseconds
-      min_microseconds
-      max_microseconds
-      std_microseconds
+      misses
+      hit_rate
+      path_solves_avoided
+      evictions
+      candidate_returned
+      cache_round_digits
+      state_round_digits
+      target_equilibrium_update_steps
+    update_time
+      count
+      mean_milliseconds
+      min_milliseconds
+      max_milliseconds
+      std_milliseconds
   sre_policy_cache
     requests
     exact_hits
-	    approx_hits
-	    misses
-	    path_solves_avoided
-	    evictions
-	    hit_rate
+    approx_hits
+    misses
+    path_solves_avoided
+    evictions
+    hit_rate
 
 solver_usage
   solve_time
     count
-    mean_seconds
-    min_seconds
-    max_seconds
-    std_seconds
-    mean_microseconds
-    min_microseconds
-    max_microseconds
-    std_microseconds
+    mean_milliseconds
+    min_milliseconds
+    max_milliseconds
+    std_milliseconds
 
 training_reward_plot_paths
   agent_<n>
+  agent_<n>_max_100
   combined
+  combined_max_100
+  periodic_eval
 ```
 
 The recorded training metrics are:
@@ -442,14 +393,13 @@ The recorded training metrics are:
 - Checkpoint metrics: `best_eval_joint_reward`, `best_checkpoint_source`, and
   `checkpoint_paths.best` / `checkpoint_paths.final`.
 - Timing metrics: `timing.wall_clock_seconds`, `timing.episode_time`,
-  `timing.sre_solve_time`, `timing.backend_solve_time`,
-  `timing.path_solve_time`, and per-agent entries under `timing.agents`.
-  Duration summaries use `count`, `mean_seconds`, `min_seconds`,
-  `max_seconds`, `std_seconds`, `mean_microseconds`, `min_microseconds`,
-  `max_microseconds`, and `std_microseconds`.
+  `timing.sre_solve_time`, `timing.backend_solve_time`, and per-agent entries
+  under `timing.agents`.
+  Duration summaries use `count`, `mean_milliseconds`, `min_milliseconds`,
+  `max_milliseconds`, and `std_milliseconds`.
 - Per-agent timing/cache metrics: each `timing.agents` entry stores
   `agent_index`, `algorithm`, `sre_solve_time`, `backend_solve_time`,
-  `path_solve_time`, `sre_policy_cache`, and `update_time`.
+  `sre_policy_cache`, and `update_time`.
 - Aggregated cache metrics: `timing.sre_policy_cache` stores `requests`,
   `exact_hits`, `approx_hits`, `misses`, `path_solves_avoided`,
   `evictions`, and `hit_rate`.

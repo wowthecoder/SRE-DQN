@@ -1,42 +1,42 @@
 {
   "episode_reward_summary": {
-    "episodes": 50,
+    "episodes": 100,
     "per_agent": [
       {
         "agent": "Agent 1\nDeep SRQ",
-        "mean": 0.14,
-        "std": 0.5295280917949491,
+        "mean": 0.3,
+        "std": 0.5567764362830022,
         "min": 0.0,
-        "max": 3.0
+        "max": 2.5
       },
       {
         "agent": "Agent 2\nIPPO",
-        "mean": 0.23,
-        "std": 0.5216320542297991,
+        "mean": 0.26,
+        "std": 0.5721887800367986,
         "min": 0.0,
         "max": 2.0
       },
       {
         "agent": "Agent 3\nIPPO",
-        "mean": 0.87,
-        "std": 1.0621205204683695,
+        "mean": 1.01,
+        "std": 1.2688183479127342,
         "min": 0.0,
-        "max": 3.0
+        "max": 5.0
       }
     ],
     "joint": {
-      "mean": 1.24,
-      "std": 1.2737346662472526,
+      "mean": 1.57,
+      "std": 1.471427877947132,
       "min": 0.0,
-      "max": 5.0
+      "max": 8.0
     }
   },
   "mean_agent_rewards": [
-    0.14,
-    0.23,
-    0.87
+    0.3,
+    0.26,
+    1.01
   ],
-  "mean_joint_reward": 1.24,
+  "mean_joint_reward": 1.57,
   "scenario_key": "lbf_10x10_3p_8f_levels123",
   "scenario_name": "3 agents with levels 1, 2, and 3, 10x10 grid, 18 foods (3 each for levels 1-6), full sight, 100-step episodes",
   "primary_label": "deepsrq_path_mcp_nplayer_pool",
@@ -45,7 +45,7 @@
   "pair_label": "Deep SRQ vs IPPO",
   "plot_title": "Scenario 3, Deep SRQ vs IPPO",
   "matchup_note": "Agent 1 uses Deep SRQ; Agents 2-3 use IPPO.",
-  "n_episodes": 50,
+  "n_episodes": 100,
   "fixed_primary_agent": 1,
   "agent_labels": [
     "Agent 1\nDeep SRQ",
@@ -55,17 +55,19 @@
   "agent_algorithm_counts": [
     {
       "agent": 1,
-      "Deep SRQ": 50
+      "Deep SRQ": 100
     },
     {
       "agent": 2,
-      "IPPO": 50
+      "IPPO": 100
     },
     {
       "agent": 3,
-      "IPPO": 50
+      "IPPO": 100
     }
   ],
+  "video_episode_index": 57,
+  "video_joint_reward": 8.0,
   "render_error": null,
   "artifact_dir": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/evaluation/lbf_10x10_3p_8f_levels123/0.01/vs_ippo",
   "rewards_path": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/evaluation/lbf_10x10_3p_8f_levels123/0.01/vs_ippo/evaluation_rewards.json",

@@ -1,34 +1,34 @@
 {
   "episode_reward_summary": {
-    "episodes": 50,
+    "episodes": 100,
     "per_agent": [
       {
         "agent": "Agent 1\nDeep SRQ",
-        "mean": 0.54,
-        "std": 0.876584280032445,
+        "mean": 0.82,
+        "std": 1.1147196957082979,
         "min": 0.0,
-        "max": 3.0
+        "max": 6.0
       },
       {
         "agent": "Agent 2\nMAPPO",
-        "mean": 0.4,
-        "std": 0.6000000000000001,
+        "mean": 0.38,
+        "std": 0.6087692502089769,
         "min": 0.0,
-        "max": 2.0
+        "max": 3.0
       }
     ],
     "joint": {
-      "mean": 0.94,
-      "std": 1.047091209016674,
+      "mean": 1.2,
+      "std": 1.3416407864998736,
       "min": 0.0,
-      "max": 3.0
+      "max": 7.0
     }
   },
   "mean_agent_rewards": [
-    0.54,
-    0.4
+    0.82,
+    0.38
   ],
-  "mean_joint_reward": 0.94,
+  "mean_joint_reward": 1.2,
   "scenario_key": "lbf_8x8_2p_2f_force_coop",
   "scenario_name": "2 level-1 agents, 8x8 grid, 10 foods (5 level-1, 5 level-2), full sight, forced cooperation, 50-step episodes",
   "primary_label": "deepsrq_path_mcp_nplayer_pool",
@@ -37,7 +37,7 @@
   "pair_label": "Deep SRQ vs MAPPO",
   "plot_title": "Scenario 2, Deep SRQ vs MAPPO",
   "matchup_note": "Agent 1 uses Deep SRQ; Agents 2-2 use MAPPO.",
-  "n_episodes": 50,
+  "n_episodes": 100,
   "fixed_primary_agent": 1,
   "agent_labels": [
     "Agent 1\nDeep SRQ",
@@ -46,13 +46,15 @@
   "agent_algorithm_counts": [
     {
       "agent": 1,
-      "Deep SRQ": 50
+      "Deep SRQ": 100
     },
     {
       "agent": 2,
-      "MAPPO": 50
+      "MAPPO": 100
     }
   ],
+  "video_episode_index": 1,
+  "video_joint_reward": 7.0,
   "render_error": null,
   "artifact_dir": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/evaluation/lbf_8x8_2p_2f_force_coop/0.1/vs_mappo",
   "rewards_path": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/evaluation/lbf_8x8_2p_2f_force_coop/0.1/vs_mappo/evaluation_rewards.json",

@@ -644,9 +644,9 @@ def summarize_ablation_timing_rows(results):
                 "env_steps": env_steps,
                 "steps_per_second": env_steps / timing["wall_clock_seconds"],
                 "sre_count": timing["sre_solve_time"]["count"],
-                "mean_sre_ms": timing["sre_solve_time"]["mean_microseconds"] / 1000.0,
+                "mean_sre_ms": timing["sre_solve_time"]["mean_milliseconds"],
                 "backend_count": timing["backend_solve_time"]["count"],
-                "mean_backend_ms": timing["backend_solve_time"]["mean_microseconds"] / 1000.0,
+                "mean_backend_ms": timing["backend_solve_time"]["mean_milliseconds"],
             }
             for agent_index, reward_summary in enumerate(rewards, start=1):
                 row[f"agent{agent_index}_mean_last"] = reward_summary["MeanLastN"]

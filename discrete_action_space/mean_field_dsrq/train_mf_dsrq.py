@@ -24,7 +24,8 @@ _DEFAULT_RUNS_DIR = _THIS_DIR / "runs"
 if str(_DISCRETE_DIR) not in sys.path:
     sys.path.insert(0, str(_DISCRETE_DIR))
 
-from mean_field_dsrq.path_mean_field_dsrq import MFDsrqAgent
+from mean_field_dsrq.path_mean_field_dsrq import MFDsrqAgent as PathMFDsrqAgent
+from mean_field_dsrq.solver_free_mean_field_dsrq import SolverFreeMFDsrqAgent
 from mean_field_dsrq.magent_env_wrapper import VectorizedMAgentWrapper
 from mean_field_dsrq.benchmarl_magent2 import make_magent2_parallel_env_factory
 
@@ -86,45 +87,105 @@ def _make_env_factory(cfg: dict):
     )
 
 
-def train(cfg: dict):
-    seed = cfg.get("seed", 42)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
+def _team_counts(env_obj, type_prefixes: dict) -> dict[str, int]:
+    return {type_name: len(env_obj.agents_of_type(type_name)) for type_name in type_prefixes}
 
-    device = torch.device("cuda" if torch.cuda.is_available() and cfg.get("use_gpu", True) else "cpu")
-    print(f"Device: {device}")
 
-    env_factory = _make_env_factory(cfg)
-    type_prefixes = cfg["type_prefixes"]  # e.g. {"red": "red_", "blue": "blue_"}
-    num_envs = cfg.get("num_envs", 16)
-    ema_momentum = cfg.get("ema_momentum", 0.5)
+def _episode_win_record(
+    *,
+    episode: int,
+    global_step: int,
+    env_idx: int,
+    rewards: dict[str, float],
+    initial_counts: dict[str, int],
+    final_counts: dict[str, int],
+    type_names: list[str],
+) -> dict:
+    if len(type_names) != 2:
+        kills = {
+            t: sum(initial_counts.get(o, 0) - final_counts.get(o, 0) for o in type_names if o != t)
+            for t in type_names
+        }
+    else:
+        left, right = type_names
+        kills = {
+            left: initial_counts.get(right, 0) - final_counts.get(right, 0),
+            right: initial_counts.get(left, 0) - final_counts.get(left, 0),
+        }
 
-    vec_env = VectorizedMAgentWrapper(env_factory, type_prefixes, num_envs, ema_momentum)
+    max_kill = max(kills.values()) if kills else 0
+    wins = {t: int(kills[t] == max_kill) for t in type_names}
+    return {
+        "episode": int(episode),
+        "global_step": int(global_step),
+        "env_idx": int(env_idx),
+        "rewards": {t: float(rewards.get(t, 0.0)) for t in type_names},
+        "initial_counts": {t: int(initial_counts.get(t, 0)) for t in type_names},
+        "final_counts": {t: int(final_counts.get(t, 0)) for t in type_names},
+        "kills": {t: int(kills.get(t, 0)) for t in type_names},
+        "wins": wins,
+        "tie": int(sum(wins.values()) > 1),
+    }
 
-    n_own = vec_env.n_actions
 
-    # One agent per type.
-    agents: dict[str, MFDsrqAgent] = {}
-    for type_name in type_prefixes:
-        obs_shape = vec_env.obs_shape[type_name]  # (C, H, W)
-        C, H, W = obs_shape
-        n_own_t = n_own[type_name]
-        n_nbr_t = n_nbr_t_default(n_own, type_name, cfg)
-        agents[type_name] = MFDsrqAgent(
-            type_id=list(type_prefixes.keys()).index(type_name),
-            obs_channels=C, obs_height=H, obs_width=W,
-            n_own_actions=n_own_t,
-            n_nbr_actions=n_nbr_t,
-            epsilon_robust=cfg.get("epsilon_robust_start", 0.10),
-            gamma=cfg.get("gamma", 0.95),
-            lr=cfg.get("lr", 1e-4),
-            batch_size=cfg.get("batch_size", 64),
-            buffer_capacity=cfg.get("buffer_capacity", 80_000),
-            learning_starts=cfg.get("learning_starts", 5_000),
-            train_every=cfg.get("train_every", 5),
-            target_tau=cfg.get("target_tau", 0.005),
-            grad_clip=cfg.get("grad_clip", 10.0),
-            epsilon_explore=cfg.get("epsilon_explore_start", 1.0),
+def _summarize_episode_records(records: list[dict], type_names: list[str]) -> dict:
+    n = len(records)
+    win_counts = {t: int(sum(record["wins"].get(t, 0) for record in records)) for t in type_names}
+    return {
+        "episodes": n,
+        "win_counts": win_counts,
+        "win_rates": {t: (win_counts[t] / n if n else 0.0) for t in type_names},
+        "tie_count": int(sum(record.get("tie", 0) for record in records)),
+        "tie_rate": (sum(record.get("tie", 0) for record in records) / n if n else 0.0),
+    }
+
+
+def mfdsrq_algorithm_name(cfg: dict) -> str:
+    return str(cfg.get("algorithm", "mf_srq_lp")).lower()
+
+
+def make_mfdsrq_agent(
+    cfg: dict,
+    *,
+    type_id: int,
+    obs_shape: tuple[int, int, int],
+    n_own_actions: int,
+    n_nbr_actions: int,
+    device,
+):
+    C, H, W = obs_shape
+    common = dict(
+        type_id=int(type_id),
+        obs_channels=C,
+        obs_height=H,
+        obs_width=W,
+        n_own_actions=int(n_own_actions),
+        n_nbr_actions=int(n_nbr_actions),
+        epsilon_robust=cfg.get("epsilon_robust_start", 0.10),
+        gamma=cfg.get("gamma", 0.95),
+        lr=cfg.get("lr", 1e-4),
+        batch_size=cfg.get("batch_size", 64),
+        buffer_capacity=cfg.get("buffer_capacity", 80_000),
+        learning_starts=cfg.get("learning_starts", 5_000),
+        train_every=cfg.get("train_every", 5),
+        target_tau=cfg.get("target_tau", 0.005),
+        grad_clip=cfg.get("grad_clip", 10.0),
+        epsilon_explore=cfg.get("epsilon_explore_start", 1.0),
+        device=device,
+    )
+    algorithm = mfdsrq_algorithm_name(cfg)
+    if algorithm in {"mf_srq_lp", "solver_free_mf_srq", "solver_free_mfdsrq"}:
+        return SolverFreeMFDsrqAgent(
+            **common,
+            robust_distance=cfg.get("robust_distance", "tv"),
+            robust_lp_fallback=cfg.get("robust_lp_fallback", "greedy_tv"),
+            robust_policy_cache_enabled=cfg.get("robust_policy_cache_enabled", True),
+            robust_policy_cache_size=cfg.get("robust_policy_cache_size", 4096),
+            robust_policy_cache_round_digits=cfg.get("robust_policy_cache_round_digits", 6),
+        )
+    if algorithm in {"path_mf_dsrq", "path_mean_field_dsrq"}:
+        return PathMFDsrqAgent(
+            **common,
             pathwrap_path=cfg.get("pathwrap_path", _DISCRETE_DIR / "sre_solvers" / "pathwrap.so"),
             sre_solver_name=cfg.get("sre_solver_name", "path_c_pool"),
             sre_solver_workers=cfg.get("sre_solver_workers", 8),
@@ -135,6 +196,44 @@ def train(cfg: dict):
             sre_policy_cache_size=cfg.get("sre_policy_cache_size", 4096),
             sre_policy_cache_round_digits=cfg.get("sre_policy_cache_round_digits", 6),
             sre_uniform_fallback_on_failure=cfg.get("sre_uniform_fallback_on_failure", True),
+        )
+    raise ValueError(
+        "algorithm must be 'mf_srq_lp' or 'path_mf_dsrq', "
+        f"got {cfg.get('algorithm')!r}."
+    )
+
+
+def train(cfg: dict):
+    seed = cfg.get("seed", 42)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+
+    device = torch.device("cuda" if torch.cuda.is_available() and cfg.get("use_gpu", True) else "cpu")
+    print(f"Device: {device}")
+
+    env_factory = _make_env_factory(cfg)
+    type_prefixes = cfg["type_prefixes"]  # e.g. {"red": "red_", "blue": "blue_"}
+    type_names = list(type_prefixes.keys())
+    num_envs = cfg.get("num_envs", 16)
+    ema_momentum = cfg.get("ema_momentum", 1.0)
+
+    vec_env = VectorizedMAgentWrapper(env_factory, type_prefixes, num_envs, ema_momentum)
+
+    n_own = vec_env.n_actions
+
+    # One agent per type.
+    agents = {}
+    for type_name in type_prefixes:
+        obs_shape = vec_env.obs_shape[type_name]  # (C, H, W)
+        C, H, W = obs_shape
+        n_own_t = n_own[type_name]
+        n_nbr_t = n_nbr_t_default(n_own, type_name, cfg)
+        agents[type_name] = make_mfdsrq_agent(
+            cfg,
+            type_id=list(type_prefixes.keys()).index(type_name),
+            obs_shape=(C, H, W),
+            n_own_actions=n_own_t,
+            n_nbr_actions=n_nbr_t,
             device=device,
         )
 
@@ -143,7 +242,8 @@ def train(cfg: dict):
     eps_robust_end = cfg.get("epsilon_robust_end", 0.02)
     eps_robust_decay_frac = cfg.get("epsilon_robust_decay_frac", 1.0)
 
-    run_dir = Path(cfg.get("output_dir", _DEFAULT_RUNS_DIR)) / cfg["env_name"] / f"mf_dsrq_seed{seed}"
+    algorithm = mfdsrq_algorithm_name(cfg)
+    run_dir = Path(cfg.get("output_dir", _DEFAULT_RUNS_DIR)) / cfg["env_name"] / f"{algorithm}_seed{seed}"
     run_dir.mkdir(parents=True, exist_ok=True)
     with open(run_dir / "config.json", "w") as f:
         json.dump(cfg, f, indent=2)
@@ -157,8 +257,10 @@ def train(cfg: dict):
     for result in vec_env.reset_all():
         env_obs_dicts.append(result[0])
 
+    episode_initial_counts = [_team_counts(env, type_prefixes) for env in vec_env.envs]
     episode_rewards = [{t: [] for t in type_prefixes} for _ in range(num_envs)]
     ep_reward_accum = [{t: 0.0 for t in type_prefixes} for _ in range(num_envs)]
+    episode_records: list[dict] = []
     completed_episodes = 0
     global_step = 0
     gradient_steps = 0
@@ -166,7 +268,7 @@ def train(cfg: dict):
     save_interval = cfg.get("save_interval", 50_000)
     t_start = time.perf_counter()
 
-    print(f"Starting training: {total_steps} env steps, {num_envs} envs")
+    print(f"Starting {algorithm} training: {total_steps} env steps, {num_envs} envs")
     progress_bar = _make_progress_bar(total_steps, cfg)
 
     try:
@@ -195,12 +297,13 @@ def train(cfg: dict):
                     if not type_agents:
                         continue
                     agent = agents[type_name]
-                    obs_batch = np.stack([obs_dict[aid] for aid in type_agents if aid in obs_dict])
-                    mean_a_batch = np.stack([env_obj.get_mean_a(aid) for aid in type_agents if aid in obs_dict])
-                    if len(obs_batch) == 0:
+                    eligible_agents = [aid for aid in type_agents if aid in obs_dict]
+                    if not eligible_agents:
                         continue
+                    obs_batch = np.stack([obs_dict[aid] for aid in eligible_agents])
+                    mean_a_batch = np.stack([env_obj.get_mean_a(aid) for aid in eligible_agents])
                     acts = agent.act_batch(obs_batch, mean_a_batch)
-                    for aid, a in zip(type_agents, acts):
+                    for aid, a in zip(eligible_agents, acts):
                         env_actions[aid] = int(a)
                 actions_per_env.append(env_actions)
 
@@ -209,7 +312,7 @@ def train(cfg: dict):
 
             # Process transitions and push to buffers.
             new_obs_dicts = []
-            for env_idx, (obs_dict_next, rewards, dones, mean_a_t, mean_a_tp1, _) in enumerate(results):
+            for env_idx, (obs_dict_next, rewards, dones, mean_a_t, mean_a_tp1, info) in enumerate(results):
                 env_obj = vec_env.envs[env_idx]
                 obs_dict_prev = env_obs_dicts[env_idx]
                 env_actions = actions_per_env[env_idx]
@@ -235,12 +338,25 @@ def train(cfg: dict):
                     agent.push(obs, action, reward, next_obs_arr, m_a, m_a_next, done, valid)
                     ep_reward_accum[env_idx][type_name] += reward
 
-                # Check if env is done (no alive agents).
-                if len(env_obj.alive_agents) == 0:
+                # Check if env is done. Time-limit truncation is an episode
+                # boundary but survivors still count as alive for win/kills.
+                if info.get("episode_done", False) or len(env_obj.alive_agents) == 0:
+                    final_counts = _team_counts(env_obj, type_prefixes)
+                    episode_record = _episode_win_record(
+                        episode=completed_episodes + 1,
+                        global_step=global_step,
+                        env_idx=env_idx,
+                        rewards=ep_reward_accum[env_idx],
+                        initial_counts=episode_initial_counts[env_idx],
+                        final_counts=final_counts,
+                        type_names=type_names,
+                    )
+                    episode_records.append(episode_record)
                     for type_name in type_prefixes:
                         episode_rewards[env_idx][type_name].append(ep_reward_accum[env_idx][type_name])
                         ep_reward_accum[env_idx][type_name] = 0.0
                     obs_d, _ = env_obj.reset()
+                    episode_initial_counts[env_idx] = _team_counts(env_obj, type_prefixes)
                     new_obs_dicts.append(obs_d)
                     completed_episodes += 1
                 else:
@@ -279,9 +395,14 @@ def train(cfg: dict):
                     if agent._last_loss is not None:
                         progress_metrics[f"loss_{type_name}"] = f"{agent._last_loss:.4f}"
                         log_str += f"  loss_{type_name}={agent._last_loss:.4f}"
-                    if agent.sre_failure_fallbacks:
-                        progress_metrics[f"sre_fb_{type_name}"] = str(agent.sre_failure_fallbacks)
-                        log_str += f"  sre_fb_{type_name}={agent.sre_failure_fallbacks}"
+                    path_fallbacks = getattr(agent, "sre_failure_fallbacks", 0)
+                    lp_failures = getattr(agent, "robust_lp_failures", 0)
+                    if path_fallbacks:
+                        progress_metrics[f"sre_fb_{type_name}"] = str(path_fallbacks)
+                        log_str += f"  sre_fb_{type_name}={path_fallbacks}"
+                    if lp_failures:
+                        progress_metrics[f"lp_fb_{type_name}"] = str(lp_failures)
+                        log_str += f"  lp_fb_{type_name}={lp_failures}"
                     all_ep_r = episode_rewards[0].get(type_name, [])
                     if all_ep_r:
                         mean_ep_reward = np.mean(all_ep_r[-20:])
@@ -323,12 +444,33 @@ def train(cfg: dict):
     for agent in agents.values():
         agent.close()
 
+    summary = _summarize_episode_records(episode_records, type_names)
+    stats = {
+        "run_dir": str(run_dir),
+        "algorithm": algorithm,
+        "config": cfg,
+        "total_steps": int(global_step),
+        "completed_episodes": int(completed_episodes),
+        "gradient_steps": int(gradient_steps),
+        "type_names": type_names,
+        "episode_records": episode_records,
+        "summary": summary,
+    }
+    stats_path = run_dir / "training_stats.json"
+    with open(stats_path, "w", encoding="utf-8") as f:
+        json.dump(stats, f, indent=2)
+
     print(f"\nTraining complete. {global_step:,} steps, {completed_episodes} episodes.")
     print(f"Checkpoints saved to {run_dir}")
+    print(f"Training stats saved to {stats_path}")
     return {
         "run_dir": str(run_dir),
+        "stats_path": str(stats_path),
         "total_steps": global_step,
         "completed_episodes": completed_episodes,
+        "episode_records": episode_records,
+        "summary": summary,
+        "team_win_rates": summary["win_rates"],
     }
 
 
@@ -344,10 +486,11 @@ def main():
     parser = argparse.ArgumentParser(description="Train MF-DSRQ on MAgent2")
     parser.add_argument("--config", required=True, help="Path to YAML config file")
     for key in [
-        "total_steps", "num_envs", "map_size", "max_cycles", "seed",
+        "algorithm", "total_steps", "num_envs", "map_size", "max_cycles", "seed",
         "epsilon_robust_start", "epsilon_robust_end",
         "lr", "batch_size", "buffer_capacity", "learning_starts",
-        "output_dir", "log_interval", "sre_solver_name", "sre_solver_workers",
+        "output_dir", "log_interval", "robust_distance", "robust_lp_fallback",
+        "robust_policy_cache_size", "sre_solver_name", "sre_solver_workers",
         "sre_num_random_starts", "sre_num_pure_starts",
     ]:
         parser.add_argument(f"--{key}", type=str, default=None)

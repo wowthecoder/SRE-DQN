@@ -27,6 +27,8 @@ from sre_solvers import (
     LemkeLcpBimatrixSreSolverConfig,
     LogitQreHomotopySreSolverConfig,
     LogitQreHomotopySreSolver,
+    NfgTransformerSreSolver,
+    NfgTransformerSreSolverConfig,
     PathCBimatrixSreSolver,
     PathCBimatrixSreSolverConfig,
     PathMcpNPlayerSreSolverConfig,
@@ -93,8 +95,8 @@ class DeepSrqLbfHyperparams:
             batch_size=32,
             learning_starts=500,
             grad_clip_norm=10.0,
-            sre_num_repeats=10,
-            sre_include_pure_starts=False,
+            sre_num_random_starts=10,
+            sre_num_pure_starts=0,
             train_every=4,
             target_update_steps=250,
             target_equilibrium_update_steps=4,
@@ -115,6 +117,9 @@ class DeepSrqLbfHyperparams:
     )
     logit_qre: LogitQreHomotopySreSolverConfig = field(
         default_factory=LogitQreHomotopySreSolverConfig
+    )
+    nfg_transformer: NfgTransformerSreSolverConfig = field(
+        default_factory=NfgTransformerSreSolverConfig
     )
 
 DEFAULT_LBF_CONFIG = basic_lbf_config()
@@ -190,6 +195,24 @@ def _episode_rewards_from_agent_history(rewards_history):
         [float(rewards_history[agent_id][episode]) for agent_id in range(len(rewards_history))]
         for episode in range(episode_count)
     ]
+
+
+def _recent_mean_joint_reward(rewards_history, window_size):
+    if not rewards_history:
+        return None
+    episode_count = min((len(agent_rewards) for agent_rewards in rewards_history), default=0)
+    if episode_count <= 0:
+        return None
+    window_size = max(1, int(window_size))
+    start_episode = max(0, episode_count - window_size)
+    joint_rewards = [
+        sum(
+            float(rewards_history[agent_id][episode])
+            for agent_id in range(len(rewards_history))
+        )
+        for episode in range(start_episode, episode_count)
+    ]
+    return float(np.mean(joint_rewards)) if joint_rewards else None
 
 
 def _write_reward_history_snapshot(
@@ -431,6 +454,8 @@ def _make_solver(solver_name, hp, seed):
         hp = deep_srq_lbf_hyperparams(hp)
     if solver_name in {"logit_qre_sre", "qre_homotopy_sre", "logit_qre"}:
         return LogitQreHomotopySreSolver(config=replace(hp.logit_qre, random_seed=seed))
+    if solver_name in {"nfg_transformer_sre", "nfg_sre"}:
+        return NfgTransformerSreSolver(config=hp.nfg_transformer)
     if solver_name in {"path_mcp_nplayer_pool", "path_nplayer_pool", "path_mcp_pool"}:
         return ProcessPoolPathMcpNPlayerSreSolver(
             config=replace(hp.path_mcp_pool, random_seed=seed)
@@ -457,10 +482,13 @@ def _make_solver(solver_name, hp, seed):
             config=ProcessPoolPathCBimatrixSreSolverConfig(
                 max_workers=hp.path_mcp_pool.max_workers,
                 start_method=hp.path_mcp_pool.start_method,
+                random_seed=seed,
             )
         )
     if solver_name == "path_c":
-        return PathCBimatrixSreSolver(config=PathCBimatrixSreSolverConfig())
+        return PathCBimatrixSreSolver(
+            config=PathCBimatrixSreSolverConfig(random_seed=seed)
+        )
     if solver_name == "lemkelcp_pool":
         return ProcessPoolLemkeLcpBimatrixSreSolver(
             config=ProcessPoolLemkeLcpBimatrixSreSolverConfig(
@@ -485,7 +513,6 @@ def _make_deep_srq_agent(
     epsilon_schedule,
     use_gpu,
 ):
-    solver_exploitability_tol = hp.agent.sre_solver_exploitability_tol
     agent_config = replace(
         hp.agent,
         agent_id=0,
@@ -498,7 +525,6 @@ def _make_deep_srq_agent(
         epsilon_explore=hp.agent.action_epsilon_start,
         use_gpu=use_gpu,
         sre_solver=_make_solver(solver_name, hp, seed),
-        sre_solver_exploitability_tol=solver_exploitability_tol,
     )
     return DuelingDoubleDqnSreAgent(
         agent_config
@@ -510,6 +536,81 @@ def _action_dict_from_list(action_list, agent_order):
         agent_name: int(action_list[agent_id])
         for agent_id, agent_name in enumerate(agent_order)
     }
+
+
+def _agent_metric_label(agent_key):
+    try:
+        agent_idx = int(str(agent_key).rsplit("_", 1)[-1]) + 1
+    except (TypeError, ValueError):
+        return str(agent_key)
+    return f"Agent {agent_idx}"
+
+
+def _format_agent_counts(counts):
+    if not counts:
+        return "none"
+    return ", ".join(
+        f"{_agent_metric_label(agent_key)}: {int(value)}"
+        for agent_key, value in sorted(counts.items())
+    )
+
+
+def _format_positions(records):
+    if not records:
+        return "none"
+    labels = []
+    for record in records:
+        agent_idx = int(record.get("agent_id", len(labels))) + 1
+        labels.append(
+            f"Agent {agent_idx}: ({int(record['row'])}, {int(record['col'])}) "
+            f"L{int(record['level'])}"
+        )
+    return ", ".join(labels)
+
+
+def _format_foods(records):
+    if not records:
+        return "none"
+    return ", ".join(
+        f"({int(record['row'])}, {int(record['col'])}) L{int(record['level'])}"
+        for record in records
+    )
+
+
+def _print_lbf_evaluation_metrics(stats):
+    periodic_eval = list((stats or {}).get("periodic_eval") or [])
+    if not periodic_eval:
+        print("LBF Evaluation Metrics: none")
+        return
+
+    latest_eval = periodic_eval[-1]
+    episode_metrics = list(latest_eval.get("episode_metrics") or [])
+    metric = episode_metrics[-1] if episode_metrics else {}
+    totals = latest_eval.get("metric_totals") or {}
+
+    print("LBF Evaluation Metrics")
+    if "episode" in latest_eval:
+        print(f"Episode: {int(latest_eval['episode'])}")
+    if "global_step" in latest_eval:
+        print(f"Global step: {int(latest_eval['global_step'])}")
+    print(
+        "Agent starting coordinates: "
+        f"{_format_positions(metric.get('initial_agent_positions') or [])}"
+    )
+    print(f"Food coordinates: {_format_foods(metric.get('initial_foods') or [])}")
+    if metric.get("episode_length") is not None:
+        print(f"Episode length: {int(metric['episode_length'])}")
+
+    foods_total = totals.get("foods_collected_total", metric.get("foods_collected_total", 0))
+    print(f"Foods collected total: {int(foods_total)}")
+    foods_by_agent = metric.get("foods_collected_by_agent") or {}
+    for agent_key, food_records in sorted(foods_by_agent.items()):
+        print(f"{_agent_metric_label(agent_key)}: {_format_foods(food_records)}")
+
+    empty_counts = totals.get("empty_loads_per_agent") or metric.get("empty_loads_per_agent")
+    invalid_counts = totals.get("invalid_loads_per_agent") or metric.get("invalid_loads_per_agent")
+    print(f"Empty loads per agent: {_format_agent_counts(empty_counts)}")
+    print(f"Invalid loads per agent: {_format_agent_counts(invalid_counts)}")
 
 
 def _train_step_due_count(previous_update_calls, current_update_calls, train_every):
@@ -791,6 +892,10 @@ def train_lbf_deep_srq_vectorized(
                     joint_reward = float(np.sum(slot["ep_rewards"]))
 
                     if eval_interval and completed_episodes % int(eval_interval) == 0:
+                        train_mean_joint_reward = _recent_mean_joint_reward(
+                            rewards_history,
+                            eval_interval,
+                        )
                         eval_record = _evaluate_agent_rewards(
                             agent,
                             lbf_env_config=config,
@@ -804,6 +909,11 @@ def train_lbf_deep_srq_vectorized(
                                 "episode": int(completed_episodes),
                                 "global_step": int(global_step),
                                 "gradient_step": int(gradient_steps),
+                                "train_mean_joint_reward": train_mean_joint_reward,
+                                "train_reward_window_episodes": min(
+                                    int(eval_interval),
+                                    int(completed_episodes),
+                                ),
                             }
                         )
                         eval_history.append(eval_record)
@@ -818,15 +928,21 @@ def train_lbf_deep_srq_vectorized(
                         solver_usage = _solver_usage_summary(getattr(agent, "sre_solver", None))
                         fallback_rate = solver_usage.get("fallback_rate")
                         solve_time = solver_usage.get("solve_time") or {}
-                        solve_ms = solve_time.get("mean_microseconds")
+                        solve_ms = solve_time.get("mean_milliseconds")
                         if solve_ms is not None:
-                            solver_status = f"solver_mean_ms={solve_ms / 1000.0:.3f}"
+                            solver_status = f"solver_mean_ms={solve_ms:.3f}"
                         elif fallback_rate is not None:
                             solver_status = f"fallback_rate={fallback_rate:.3f}"
                         else:
                             solver_status = "solver_status=unavailable"
+                        train_mean_display = (
+                            train_mean_joint_reward
+                            if train_mean_joint_reward is not None
+                            else float("nan")
+                        )
                         print(
-                            f"[ep {completed_episodes:5d}] train_joint={joint_reward:8.4f} | "
+                            f"[ep {completed_episodes:5d}] "
+                            f"train_joint={train_mean_display:8.4f} | "
                             f"eval_joint={mean_eval if mean_eval is not None else float('nan'):8.4f} | "
                             f"best_loss={best_loss if best_loss is not None else float('nan'):.6f} | "
                             f"latest_loss={latest_loss if latest_loss is not None else float('nan'):.6f} | "

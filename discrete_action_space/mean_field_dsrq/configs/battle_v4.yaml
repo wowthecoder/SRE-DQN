@@ -1,4 +1,5 @@
-# PATH mean-field DSRQ config for MAgent2 battle_v4
+# Solver-free mean-field SRQ config for MAgent2 battle_v4
+algorithm: mf_srq_lp
 env_name: battle_v4
 env_backend: magent2
 map_size: 40
@@ -9,13 +10,17 @@ type_prefixes:
   red: "red_"
   blue: "blue_"
 
-# Neighbor action space equals own action space. The PATH-backed
-# representative bimatrix game currently requires this symmetry.
+# Neighbor action space defaults to the own action space for Battle teams.
 
-# SRE robustness
+# Local mean-field SRE robustness
 epsilon_robust_start: 0.10
 epsilon_robust_end: 0.02
 epsilon_robust_decay_frac: 1.0
+robust_distance: tv
+robust_lp_fallback: greedy_tv
+robust_policy_cache_enabled: true
+robust_policy_cache_size: 4096
+robust_policy_cache_round_digits: 6
 
 # Exploration schedule follows the mfrl-master Battle training script:
 # 1.0 -> 0.2 over the first 80%, then 0.2 -> 0.1.
@@ -33,17 +38,7 @@ learning_starts: 5000
 train_every: 5
 target_tau: 0.005
 grad_clip: 10.0
-ema_momentum: 0.5
-
-# PATH bimatrix SRE solver
-sre_solver_name: path_c_pool
-sre_solver_workers: 8
-sre_num_random_starts: 5
-sre_num_pure_starts: 5
-sre_policy_cache_enabled: true
-sre_policy_cache_size: 4096
-sre_policy_cache_round_digits: 6
-sre_uniform_fallback_on_failure: true
+ema_momentum: 1.0
 
 # Training budget
 total_steps: 1000000

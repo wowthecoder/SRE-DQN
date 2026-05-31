@@ -7,14 +7,20 @@ import numpy as np
 def _empty_duration_summary():
     return {
         "count": 0,
-        "mean_seconds": None,
-        "min_seconds": None,
-        "max_seconds": None,
-        "std_seconds": None,
-        "mean_microseconds": None,
-        "min_microseconds": None,
-        "max_microseconds": None,
-        "std_microseconds": None,
+        "mean_milliseconds": None,
+        "min_milliseconds": None,
+        "max_milliseconds": None,
+        "std_milliseconds": None,
+    }
+
+
+def _duration_summary_from_seconds(count, mean, minimum, maximum, std):
+    return {
+        "count": int(count),
+        "mean_milliseconds": float(mean * 1_000.0),
+        "min_milliseconds": float(minimum * 1_000.0),
+        "max_milliseconds": float(maximum * 1_000.0),
+        "std_milliseconds": float(std * 1_000.0),
     }
 
 

@@ -19,6 +19,7 @@ from sre_solvers import (
     PathCBimatrixSreSolver,
     PathMcpNPlayerSreSolver,
 )
+from sre_solvers.base import _duration_summary_from_seconds, _empty_duration_summary
 
 
 def _linear_schedule(start, end, step, total_steps):
@@ -393,31 +394,17 @@ class DuelingDoubleDqnSreAgent:
     def get_sre_solve_time_summary(self):
         count = self.sre_solve_time_count
         if count == 0:
-            return {
-                "count": 0,
-                "mean_seconds": None,
-                "min_seconds": None,
-                "max_seconds": None,
-                "std_seconds": None,
-                "mean_microseconds": None,
-                "min_microseconds": None,
-                "max_microseconds": None,
-                "std_microseconds": None,
-            }
+            return _empty_duration_summary()
         mean = self.sre_solve_time_sum / count
         variance = max(self.sre_solve_time_sumsq / count - mean * mean, 0.0)
         std = float(np.sqrt(variance))
-        return {
-            "count": int(count),
-            "mean_seconds": float(mean),
-            "min_seconds": float(self.sre_solve_time_min),
-            "max_seconds": float(self.sre_solve_time_max),
-            "std_seconds": std,
-            "mean_microseconds": float(mean * 1_000_000.0),
-            "min_microseconds": float(self.sre_solve_time_min * 1_000_000.0),
-            "max_microseconds": float(self.sre_solve_time_max * 1_000_000.0),
-            "std_microseconds": float(std * 1_000_000.0),
-        }
+        return _duration_summary_from_seconds(
+            count,
+            mean,
+            self.sre_solve_time_min,
+            self.sre_solve_time_max,
+            std,
+        )
 
     def get_sre_cache_summary(self):
         exact_hits = int(self.sre_cache_exact_hits)
@@ -846,7 +833,7 @@ class DuelingDoubleDqnSreAgent:
         metadata = dict(getattr(result, "metadata", None) or {})
         if not result.policies or metadata.get("path_failed", False):
             if self._policies_valid(warm_policies):
-                return self._copy_policies(warm_policies), True
+                return self._copy_policies(warm_policies), False
             message = getattr(result, "message", "") or "Solver returned no policies."
             raise RuntimeError(f"SRE solver failed. {message} Metadata: {metadata}")
 
@@ -928,7 +915,7 @@ class DuelingDoubleDqnSreAgent:
                             action_indices,
                             strategic_agent_ids,
                         ),
-                        True,
+                        False,
                     )
             message = (
                 "Strategic masked SRE solver returned no result."

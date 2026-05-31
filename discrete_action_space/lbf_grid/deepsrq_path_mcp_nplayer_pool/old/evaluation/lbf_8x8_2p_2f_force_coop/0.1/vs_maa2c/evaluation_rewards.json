@@ -1,0 +1,61 @@
+{
+  "episode_reward_summary": {
+    "episodes": 50,
+    "per_agent": [
+      {
+        "agent": "Agent 1\nDeep SRQ",
+        "mean": 0.54,
+        "std": 0.876584280032445,
+        "min": 0.0,
+        "max": 3.0
+      },
+      {
+        "agent": "Agent 2\nMAA2C",
+        "mean": 0.4,
+        "std": 0.6000000000000001,
+        "min": 0.0,
+        "max": 2.0
+      }
+    ],
+    "joint": {
+      "mean": 0.94,
+      "std": 1.047091209016674,
+      "min": 0.0,
+      "max": 3.0
+    }
+  },
+  "mean_agent_rewards": [
+    0.54,
+    0.4
+  ],
+  "mean_joint_reward": 0.94,
+  "scenario_key": "lbf_8x8_2p_2f_force_coop",
+  "scenario_name": "2 level-1 agents, 8x8 grid, 10 foods (5 level-1, 5 level-2), full sight, forced cooperation, 50-step episodes",
+  "primary_label": "deepsrq_path_mcp_nplayer_pool",
+  "opponent_label": "maa2c",
+  "matchup_label": "deepsrq_path_mcp_nplayer_pool_vs_maa2c",
+  "pair_label": "Deep SRQ vs MAA2C",
+  "plot_title": "Scenario 2, Deep SRQ vs MAA2C",
+  "matchup_note": "Agent 1 uses Deep SRQ; Agents 2-2 use MAA2C.",
+  "n_episodes": 50,
+  "fixed_primary_agent": 1,
+  "agent_labels": [
+    "Agent 1\nDeep SRQ",
+    "Agent 2\nMAA2C"
+  ],
+  "agent_algorithm_counts": [
+    {
+      "agent": 1,
+      "Deep SRQ": 50
+    },
+    {
+      "agent": 2,
+      "MAA2C": 50
+    }
+  ],
+  "render_error": null,
+  "artifact_dir": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/evaluation/lbf_8x8_2p_2f_force_coop/0.1/vs_maa2c",
+  "rewards_path": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/evaluation/lbf_8x8_2p_2f_force_coop/0.1/vs_maa2c/evaluation_rewards.json",
+  "boxplot_path": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/evaluation/lbf_8x8_2p_2f_force_coop/0.1/vs_maa2c/evaluation_boxplot.png",
+  "video_path": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/evaluation/lbf_8x8_2p_2f_force_coop/0.1/vs_maa2c/sample_rollout.gif"
+}

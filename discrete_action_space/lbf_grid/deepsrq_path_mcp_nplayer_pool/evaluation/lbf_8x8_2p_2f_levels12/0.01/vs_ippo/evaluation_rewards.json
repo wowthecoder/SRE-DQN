@@ -1,32 +1,32 @@
 {
   "episode_reward_summary": {
-    "episodes": 50,
+    "episodes": 100,
     "per_agent": [
       {
         "agent": "Agent 1\nDeep SRQ",
-        "mean": 0.74,
-        "std": 0.928654941299512,
+        "mean": 0.71,
+        "std": 0.9438749917229505,
         "min": 0.0,
-        "max": 3.0
+        "max": 5.0
       },
       {
         "agent": "Agent 2\nIPPO",
-        "mean": 0.62,
-        "std": 0.8863407922464135,
+        "mean": 0.65,
+        "std": 0.8958236433584459,
         "min": 0.0,
         "max": 4.0
       }
     ],
     "joint": {
       "mean": 1.36,
-      "std": 1.2289833196589772,
+      "std": 1.2451505933018707,
       "min": 0.0,
       "max": 5.0
     }
   },
   "mean_agent_rewards": [
-    0.74,
-    0.62
+    0.71,
+    0.65
   ],
   "mean_joint_reward": 1.36,
   "scenario_key": "lbf_8x8_2p_2f_levels12",
@@ -37,7 +37,7 @@
   "pair_label": "Deep SRQ vs IPPO",
   "plot_title": "Scenario 1, Deep SRQ vs IPPO",
   "matchup_note": "Agent 1 uses Deep SRQ; Agents 2-2 use IPPO.",
-  "n_episodes": 50,
+  "n_episodes": 100,
   "fixed_primary_agent": 1,
   "agent_labels": [
     "Agent 1\nDeep SRQ",
@@ -46,13 +46,15 @@
   "agent_algorithm_counts": [
     {
       "agent": 1,
-      "Deep SRQ": 50
+      "Deep SRQ": 100
     },
     {
       "agent": 2,
-      "IPPO": 50
+      "IPPO": 100
     }
   ],
+  "video_episode_index": 9,
+  "video_joint_reward": 5.0,
   "render_error": null,
   "artifact_dir": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/evaluation/lbf_8x8_2p_2f_levels12/0.01/vs_ippo",
   "rewards_path": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/evaluation/lbf_8x8_2p_2f_levels12/0.01/vs_ippo/evaluation_rewards.json",

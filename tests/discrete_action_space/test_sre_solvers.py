@@ -6,7 +6,11 @@ from sre_solvers import (
     PathCBimatrixSreSolver,
     SreSolveResult,
 )
-from sre_solvers.n_player.path_mcp_nplayer import _sort_sre_candidates
+from path_solver import sample_pure_profiles
+from sre_solvers.n_player.path_mcp_nplayer import (
+    PathMcpNPlayerSreSolver,
+    _select_sre_candidate,
+)
 from bimatrix_game.stats_utils import collect_timing_stats
 
 
@@ -18,14 +22,60 @@ def _assert_valid_policy_pair(policies):
         assert np.isclose(np.sum(policy), 1.0)
 
 
+def test_sample_pure_profiles_uses_seeded_sampling_when_budget_is_partial():
+    first = list(sample_pure_profiles((2, 3), 3, np.random.default_rng(123)))
+    second = list(sample_pure_profiles((2, 3), 3, np.random.default_rng(123)))
+    lexicographic_prefix = [(0, 0), (0, 1), (0, 2)]
+
+    assert first == second
+    assert first != lexicographic_prefix
+    assert len(first) == 3
+    assert len(set(first)) == 3
+
+
+def test_sample_pure_profiles_keeps_all_profiles_lexicographic_when_budget_covers_all():
+    profiles = list(sample_pure_profiles((2, 2), 10, np.random.default_rng(123)))
+    assert profiles == [(0, 0), (0, 1), (1, 0), (1, 1)]
+
+
+def test_nplayer_initial_starts_sample_pure_profiles_with_solver_rng():
+    solver = PathMcpNPlayerSreSolver.__new__(PathMcpNPlayerSreSolver)
+    solver.rng = np.random.default_rng(123)
+
+    def make_start(_index, _action_sizes, _opponent_data, policies=None):
+        if policies is None:
+            return ("random",)
+        return tuple(int(np.argmax(policy)) for policy in policies)
+
+    solver._make_start = make_start
+
+    starts = solver._initial_starts(
+        index={},
+        action_sizes=(2, 3),
+        opponent_data=None,
+        num_random_starts=0,
+        num_pure_starts=3,
+    )
+
+    assert starts == list(sample_pure_profiles((2, 3), 3, np.random.default_rng(123)))
+
+
 class _FakeSolver:
     def __init__(self, name="fake_solver"):
         self.name = name
         self.calls = 0
         self.closed = False
 
-    def solve(self, q_tensor, epsilon, *, num_repeats=20, round_digits=4):
-        del epsilon, num_repeats, round_digits
+    def solve(
+        self,
+        q_tensor,
+        epsilon,
+        *,
+        num_random_starts=20,
+        num_pure_starts=0,
+        round_digits=4,
+    ):
+        del epsilon, num_random_starts, num_pure_starts, round_digits
         self.calls += 1
         q_tensor = np.asarray(q_tensor)
         return SreSolveResult(
@@ -89,7 +139,7 @@ def test_path_c_solver_returns_valid_policies(path_runtime_available):
     )
     solver = PathCBimatrixSreSolver(pathwrap_path=path_runtime_available)
     try:
-        result = solver.solve(q_tensor, epsilon=0.0, num_repeats=2, round_digits=None)
+        result = solver.solve(q_tensor, epsilon=0.0, num_random_starts=2, round_digits=None)
         assert result.success, result.message
         _assert_valid_policy_pair(result.policies)
     finally:
@@ -106,7 +156,7 @@ def test_path_c_solver_rejects_non_bimatrix_tensor(path_runtime_available):
         solver.close()
 
 
-def test_path_c_joint_welfare_selection_does_not_check_exploitability(monkeypatch):
+def test_path_c_selects_highest_expected_joint_payoff():
     from sre_solvers import path_c as path_c_module
 
     q_tensor = np.array(
@@ -121,49 +171,15 @@ def test_path_c_joint_welfare_selection_does_not_check_exploitability(monkeypatc
         {"p1": [0.0, 1.0], "p2": [0.0, 1.0]},
     ]
 
-    def fail_if_called(*args, **kwargs):
-        raise AssertionError("robust exploitability should not be checked")
-
-    monkeypatch.setattr(path_c_module, "robust_exploitability", fail_if_called)
     policies, metadata = path_c_module._select_best_solution(
         q_tensor,
         solutions,
         epsilon=0.5,
-        candidate_selection="expected_joint_payoff",
     )
 
     assert np.allclose(policies[0], [0.0, 1.0])
     assert np.allclose(policies[1], [0.0, 1.0])
     assert metadata["joint_nominal_welfare"] == pytest.approx(9.0)
-    assert "robust_exploitability" not in metadata
-
-
-def test_path_c_robust_exploitability_selection_records_scalar_policy_values():
-    from sre_solvers import path_c as path_c_module
-
-    q_tensor = np.array(
-        [
-            [[1.0, 1.0], [0.0, 0.0]],
-            [[0.0, 0.0], [5.0, 4.0]],
-        ],
-        dtype=np.float64,
-    )
-    solutions = [
-        {"p1": [0.5, 0.5], "p2": [0.5, 0.5]},
-        {"p1": [0.0, 1.0], "p2": [0.0, 1.0]},
-    ]
-
-    policies, metadata = path_c_module._select_best_solution(
-        q_tensor,
-        solutions,
-        epsilon=0.1,
-        candidate_selection="robust_exploitability",
-    )
-
-    assert policies is not None
-    assert len(metadata["robust_policy_values"]) == 2
-    assert all(np.isscalar(value) for value in metadata["robust_policy_values"])
-    assert all(isinstance(value, float) for value in metadata["robust_policy_values"])
 
 
 def test_lemke_solver_returns_valid_policies_when_installed():
@@ -349,6 +365,7 @@ def test_dueling_double_dqn_reuses_greedy_masked_warm_policy_on_path_failure():
         assert policies[0][1] == pytest.approx(0.0)
         assert policies[1][2] == pytest.approx(0.0)
         assert policies[2][2] == pytest.approx(0.0)
+        assert len(agent._sre_policy_cache) == 0
     finally:
         agent.close()
 
@@ -407,8 +424,8 @@ def test_sre_batch_key_depends_only_on_epsilon_and_q_bytes():
         key_a = agent._sre_batch_key(q_tensor)
         solver.name = "solver_b"
         key_b = agent._sre_batch_key(q_tensor)
-        agent.config.sre_num_repeats += 1
-        agent.config.sre_include_pure_starts = not agent.config.sre_include_pure_starts
+        agent.config.sre_num_random_starts += 1
+        agent.config.sre_num_pure_starts += 1
         key_c = agent._sre_batch_key(q_tensor)
         agent.config.epsilon_robust += 0.1
         key_d = agent._sre_batch_key(q_tensor)
@@ -460,8 +477,8 @@ def test_dueling_double_dqn_act_joint_solves_once_for_all_agents():
         def __init__(self):
             self.calls = 0
 
-        def solve(self, q_tensor, epsilon, *, num_repeats=20, round_digits=4):
-            del epsilon, num_repeats, round_digits
+        def solve(self, q_tensor, epsilon, *, num_random_starts=20, round_digits=4):
+            del epsilon, num_random_starts, round_digits
             self.calls += 1
             assert np.asarray(q_tensor).shape == (2, 2, 2, 3)
             return SreSolveResult(
@@ -511,8 +528,6 @@ def test_dueling_double_dqn_accepts_approximate_sre_candidate():
             num_actions=2,
             use_gpu=False,
             sre_solver=_FakeSolver(),
-            sre_approx_accept_tol=1e-2,
-            sre_exploitability_filter_enabled=True,
         )
     )
     try:
@@ -525,79 +540,12 @@ def test_dueling_double_dqn_accepts_approximate_sre_candidate():
             utilities_sr=[],
             utilities_nominal=[],
             success=False,
-            metadata={"robust_exploitability": 5e-3},
         )
         policies, cacheable = agent._policies_from_sre_result(result)
         assert cacheable is True
         assert np.allclose(policies[0], [0.8, 0.2])
         summary = agent.get_sre_cache_summary()
         assert summary["candidate_returned"] == 1
-    finally:
-        agent.close()
-
-
-def test_dueling_double_dqn_raises_on_large_gap_sre_candidate():
-    pytest.importorskip("torch")
-    from dueling_double_dqn_sre import DuelingDoubleDqnSreAgent, DuelingDoubleDqnSreAgentConfig
-
-    agent = DuelingDoubleDqnSreAgent(
-        DuelingDoubleDqnSreAgentConfig(
-            obs_dim=4,
-            num_agents=2,
-            num_actions=2,
-            use_gpu=False,
-            sre_solver=_FakeSolver(),
-            sre_approx_accept_tol=1e-2,
-            sre_exploitability_filter_enabled=True,
-        )
-    )
-    try:
-        result = SreSolveResult(
-            policies=[
-                np.array([1.0, 0.0], dtype=np.float64),
-                np.array([1.0, 0.0], dtype=np.float64),
-            ],
-            solutions=[],
-            utilities_sr=[],
-            utilities_nominal=[],
-            success=False,
-            metadata={"robust_exploitability": 5e-2},
-        )
-        with pytest.raises(RuntimeError, match="Rejected approximate SRE candidate"):
-            agent._policies_from_sre_result(result)
-    finally:
-        agent.close()
-
-
-def test_dueling_double_dqn_raises_on_rejected_sre_candidate():
-    pytest.importorskip("torch")
-    from dueling_double_dqn_sre import DuelingDoubleDqnSreAgent, DuelingDoubleDqnSreAgentConfig
-
-    agent = DuelingDoubleDqnSreAgent(
-        DuelingDoubleDqnSreAgentConfig(
-            obs_dim=4,
-            num_agents=2,
-            num_actions=2,
-            use_gpu=False,
-            sre_solver=_FakeSolver(),
-            sre_approx_accept_tol=1e-2,
-            sre_exploitability_filter_enabled=True,
-        )
-    )
-    try:
-        result = SreSolveResult(
-            policies=[
-                np.array([1.0, 0.0], dtype=np.float64),
-                np.array([1.0, 0.0], dtype=np.float64),
-            ],
-            solutions=[],
-            utilities_sr=[],
-            utilities_nominal=[],
-            success=False,
-            metadata={"robust_exploitability": 5e-2},
-        )
-        with pytest.raises(RuntimeError, match="Rejected approximate SRE candidate"):
-            agent._policies_from_sre_result(result)
     finally:
         agent.close()
 
@@ -630,72 +578,105 @@ def test_dueling_double_dqn_reuses_warm_policy_when_path_returns_no_candidate():
             utilities_nominal=[],
             success=False,
             message="PATH MCP failed to return a candidate.",
-            metadata={"path_failed": True, "robust_exploitability": 5e-2},
+            metadata={"path_failed": True},
         )
         policies, cacheable = agent._policies_from_sre_result(
             result,
             warm_policies=warm_policies,
         )
-        assert cacheable is True
+        assert cacheable is False
         assert np.allclose(policies[0], warm_policies[0])
         assert np.allclose(policies[1], warm_policies[1])
     finally:
         agent.close()
 
 
-def test_dueling_double_dqn_can_disable_exploitability_filter():
+def test_dueling_double_dqn_does_not_cache_warm_policy_after_path_failure():
     pytest.importorskip("torch")
     from dueling_double_dqn_sre import DuelingDoubleDqnSreAgent, DuelingDoubleDqnSreAgentConfig
 
+    class SolverThatFailsAfterFirstCandidate:
+        name = "fails_after_first_candidate"
+
+        def __init__(self):
+            self.calls = 0
+
+        def solve(self, q_tensor, epsilon, **kwargs):
+            del q_tensor, epsilon, kwargs
+            self.calls += 1
+            if self.calls == 1:
+                return SreSolveResult(
+                    policies=[
+                        np.array([0.8, 0.2], dtype=np.float64),
+                        np.array([0.3, 0.7], dtype=np.float64),
+                    ],
+                    solutions=[],
+                    utilities_sr=[],
+                    utilities_nominal=[],
+                    success=True,
+                )
+            return SreSolveResult(
+                policies=[],
+                solutions=[],
+                utilities_sr=[],
+                utilities_nominal=[],
+                success=False,
+                message="PATH failed",
+                metadata={"path_failed": True},
+            )
+
+        def close(self):
+            pass
+
+    solver = SolverThatFailsAfterFirstCandidate()
     agent = DuelingDoubleDqnSreAgent(
         DuelingDoubleDqnSreAgentConfig(
             obs_dim=4,
             num_agents=2,
             num_actions=2,
             use_gpu=False,
-            sre_solver=_FakeSolver(),
-            sre_approx_accept_tol=1e-2,
-            sre_exploitability_filter_enabled=False,
+            sre_solver=solver,
+            sre_policy_cache_enabled=True,
         )
     )
     try:
-        result = SreSolveResult(
-            policies=[
-                np.array([1.0, 0.0], dtype=np.float64),
-                np.array([1.0, 0.0], dtype=np.float64),
-            ],
-            solutions=[],
-            utilities_sr=[],
-            utilities_nominal=[],
-            success=False,
-            metadata={"robust_exploitability": 5e-2},
-        )
-        policies, cacheable = agent._policies_from_sre_result(result)
-        assert cacheable is True
-        assert np.allclose(policies[0], [1.0, 0.0])
-        summary = agent.get_sre_cache_summary()
-        assert summary["candidate_returned"] == 1
+        state = np.zeros(4, dtype=np.float32)
+        q_first = np.zeros((2, 2, 2), dtype=np.float32)
+        q_failed = np.ones((2, 2, 2), dtype=np.float32)
+
+        first_key = agent._sre_batch_key(q_first)
+        failed_key = agent._sre_batch_key(q_failed)
+
+        first_policies = agent._solve_sre(q_first, state_key=agent._sre_state_key(state))
+        assert solver.calls == 1
+        assert first_key in agent._sre_policy_cache
+
+        fallback_policies = agent._solve_sre(q_failed, state_key=agent._sre_state_key(state))
+        assert solver.calls == 2
+        assert failed_key not in agent._sre_policy_cache
+        assert len(agent._sre_policy_cache) == 1
+        assert np.allclose(fallback_policies[0], first_policies[0])
+        assert np.allclose(fallback_policies[1], first_policies[1])
+
+        agent._solve_sre(q_failed, state_key=agent._sre_state_key(state))
+        assert solver.calls == 3
     finally:
         agent.close()
 
 
-def test_nplayer_path_candidate_selection_can_prefer_joint_welfare():
+def test_nplayer_path_selection_prefers_highest_joint_welfare():
     candidates = [
         {
-            "robust_exploitability": 1e-4,
             "joint_nominal_welfare": 1.0,
         },
         {
-            "robust_exploitability": 5e-2,
             "joint_nominal_welfare": 10.0,
         },
     ]
 
-    by_gap = _sort_sre_candidates(candidates, "robust_exploitability")
-    by_welfare = _sort_sre_candidates(candidates, "joint_nominal_welfare")
+    selected = _select_sre_candidate(candidates)
 
-    assert by_gap[0]["joint_nominal_welfare"] == pytest.approx(1.0)
-    assert by_welfare[0]["joint_nominal_welfare"] == pytest.approx(10.0)
+    assert selected["joint_nominal_welfare"] == pytest.approx(10.0)
 
 
 def test_dueling_double_dqn_default_targets_match_tabular_srq_nominal_expectation():
@@ -791,13 +772,11 @@ def test_target_equilibrium_frequency_reuses_cache_between_refreshes():
             q_tensors,
             epsilon,
             *,
-            num_repeats=20,
-            include_pure_starts=True,
+            num_random_starts=20,
+            num_pure_starts=0,
             initial_policies_batch=None,
-            exploitability_tol=1e-4,
-            early_exit=True,
         ):
-            del epsilon, num_repeats, include_pure_starts, exploitability_tol, early_exit
+            del epsilon, num_random_starts, num_pure_starts
             self.batch_calls += 1
             self.batch_sizes.append(len(q_tensors))
             self.initial_policies_batches.append(initial_policies_batch)
@@ -832,7 +811,6 @@ def test_target_equilibrium_frequency_reuses_cache_between_refreshes():
             use_gpu=False,
             sre_solver=solver,
             sre_policy_cache_enabled=True,
-            sre_approx_cache_enabled=False,
         )
     )
     try:

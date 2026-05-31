@@ -12,7 +12,12 @@ from ..nfg_transformer.torch_utils import (
     robust_policy_values_torch,
 )
 
-from ..base import SreSolveResult, SreStageGameSolver, _empty_duration_summary
+from ..base import (
+    SreSolveResult,
+    SreStageGameSolver,
+    _duration_summary_from_seconds,
+    _empty_duration_summary,
+)
 from ..nplayer_common import (
     _expected_nominal_values,
     _solution_dict_from_policies,
@@ -1004,14 +1009,10 @@ class LogitQreHomotopySreSolver(SreStageGameSolver):
         mean = self.solve_time_sum / count
         variance = max(0.0, self.solve_time_sumsq / count - mean * mean)
         std = float(np.sqrt(variance))
-        return {
-            "count": count,
-            "mean_seconds": float(mean),
-            "min_seconds": float(self.solve_time_min),
-            "max_seconds": float(self.solve_time_max),
-            "std_seconds": std,
-            "mean_microseconds": float(mean * 1e6),
-            "min_microseconds": float(self.solve_time_min * 1e6),
-            "max_microseconds": float(self.solve_time_max * 1e6),
-            "std_microseconds": float(std * 1e6),
-        }
+        return _duration_summary_from_seconds(
+            count,
+            mean,
+            self.solve_time_min,
+            self.solve_time_max,
+            std,
+        )

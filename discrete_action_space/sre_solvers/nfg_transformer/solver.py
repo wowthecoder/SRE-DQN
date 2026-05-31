@@ -7,7 +7,12 @@ import time
 import numpy as np
 import torch
 
-from ..base import SreSolveResult, SreStageGameSolver, _empty_duration_summary
+from ..base import (
+    SreSolveResult,
+    SreStageGameSolver,
+    _duration_summary_from_seconds,
+    _empty_duration_summary,
+)
 from ..nplayer_common import (
     _expected_nominal_values,
     _solution_dict_from_policies,
@@ -555,17 +560,13 @@ class NfgTransformerSreSolver(SreStageGameSolver):
         mean = self.solve_time_sum / count
         variance = max(self.solve_time_sumsq / count - mean * mean, 0.0)
         std = float(np.sqrt(variance))
-        return {
-            "count": int(count),
-            "mean_seconds": float(mean),
-            "min_seconds": float(self.solve_time_min),
-            "max_seconds": float(self.solve_time_max),
-            "std_seconds": std,
-            "mean_microseconds": float(mean * 1_000_000.0),
-            "min_microseconds": float(self.solve_time_min * 1_000_000.0),
-            "max_microseconds": float(self.solve_time_max * 1_000_000.0),
-            "std_microseconds": float(std * 1_000_000.0),
-        }
+        return _duration_summary_from_seconds(
+            count,
+            mean,
+            self.solve_time_min,
+            self.solve_time_max,
+            std,
+        )
 
     def get_usage_summary(self):
         neural = int(self.neural_accept_count)

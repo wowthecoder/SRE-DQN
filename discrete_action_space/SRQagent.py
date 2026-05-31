@@ -10,6 +10,7 @@ if str(_THIS_DIR) not in sys.path:
     sys.path.insert(0, str(_THIS_DIR))
 
 from path_solver import PathSolverWrapper, solve_strategically_robust_bimatrix_game_path_lcp
+from sre_solvers.base import _duration_summary_from_seconds, _empty_duration_summary
 
 
 @dataclass
@@ -71,31 +72,17 @@ class SRQAgent:
     def get_sre_solve_time_summary(self):
         count = self.sre_solve_time_count
         if count == 0:
-            return {
-                "count": 0,
-                "mean_seconds": None,
-                "min_seconds": None,
-                "max_seconds": None,
-                "std_seconds": None,
-                "mean_microseconds": None,
-                "min_microseconds": None,
-                "max_microseconds": None,
-                "std_microseconds": None,
-            }
+            return _empty_duration_summary()
         mean = self.sre_solve_time_sum / count
         variance = max(self.sre_solve_time_sumsq / count - mean * mean, 0.0)
         std = float(np.sqrt(variance))
-        return {
-            "count": int(count),
-            "mean_seconds": float(mean),
-            "min_seconds": float(self.sre_solve_time_min),
-            "max_seconds": float(self.sre_solve_time_max),
-            "std_seconds": std,
-            "mean_microseconds": float(mean * 1_000_000.0),
-            "min_microseconds": float(self.sre_solve_time_min * 1_000_000.0),
-            "max_microseconds": float(self.sre_solve_time_max * 1_000_000.0),
-            "std_microseconds": float(std * 1_000_000.0),
-        }
+        return _duration_summary_from_seconds(
+            count,
+            mean,
+            self.sre_solve_time_min,
+            self.sre_solve_time_max,
+            std,
+        )
 
     def _uniform_policies(self):
         uniform = np.ones(self.config.num_actions) / self.config.num_actions

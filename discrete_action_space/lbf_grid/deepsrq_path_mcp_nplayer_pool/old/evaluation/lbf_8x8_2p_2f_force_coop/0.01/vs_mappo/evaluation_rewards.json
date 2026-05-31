@@ -1,0 +1,61 @@
+{
+  "episode_reward_summary": {
+    "episodes": 50,
+    "per_agent": [
+      {
+        "agent": "Agent 1\nDeep SRQ",
+        "mean": 0.76,
+        "std": 0.9911609354691094,
+        "min": 0.0,
+        "max": 3.0
+      },
+      {
+        "agent": "Agent 2\nMAPPO",
+        "mean": 0.4,
+        "std": 0.6000000000000001,
+        "min": 0.0,
+        "max": 2.0
+      }
+    ],
+    "joint": {
+      "mean": 1.16,
+      "std": 1.1723480711802277,
+      "min": 0.0,
+      "max": 4.0
+    }
+  },
+  "mean_agent_rewards": [
+    0.76,
+    0.4
+  ],
+  "mean_joint_reward": 1.16,
+  "scenario_key": "lbf_8x8_2p_2f_force_coop",
+  "scenario_name": "2 level-1 agents, 8x8 grid, 10 foods (5 level-1, 5 level-2), full sight, forced cooperation, 50-step episodes",
+  "primary_label": "deepsrq_path_mcp_nplayer_pool",
+  "opponent_label": "mappo",
+  "matchup_label": "deepsrq_path_mcp_nplayer_pool_vs_mappo",
+  "pair_label": "Deep SRQ vs MAPPO",
+  "plot_title": "Scenario 2, Deep SRQ vs MAPPO",
+  "matchup_note": "Agent 1 uses Deep SRQ; Agents 2-2 use MAPPO.",
+  "n_episodes": 50,
+  "fixed_primary_agent": 1,
+  "agent_labels": [
+    "Agent 1\nDeep SRQ",
+    "Agent 2\nMAPPO"
+  ],
+  "agent_algorithm_counts": [
+    {
+      "agent": 1,
+      "Deep SRQ": 50
+    },
+    {
+      "agent": 2,
+      "MAPPO": 50
+    }
+  ],
+  "render_error": null,
+  "artifact_dir": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/evaluation/lbf_8x8_2p_2f_force_coop/0.01/vs_mappo",
+  "rewards_path": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/evaluation/lbf_8x8_2p_2f_force_coop/0.01/vs_mappo/evaluation_rewards.json",
+  "boxplot_path": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/evaluation/lbf_8x8_2p_2f_force_coop/0.01/vs_mappo/evaluation_boxplot.png",
+  "video_path": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/evaluation/lbf_8x8_2p_2f_force_coop/0.01/vs_mappo/sample_rollout.gif"
+}

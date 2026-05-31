@@ -155,99 +155,6 @@ def lbf_state_frame(env, *, grid_size: int = 50):
     return np.asarray(image, dtype=np.uint8)
 
 
-def sample_lbf_rollout(
-    *,
-    make_env: Callable,
-    policy_fn: Callable,
-    seed: int = 0,
-    max_steps: int | None = None,
-    capture_frames: bool = True,
-):
-    """Run one evaluation episode, returning frames and reward diagnostics."""
-    env = make_env()
-    frames = []
-    actions = []
-    render_failed = False
-    render_error = None
-
-    def _try_render():
-        nonlocal render_failed, render_error
-        if not capture_frames:
-            return None
-        if render_failed:
-            return None
-        frame = lbf_state_frame(env)
-        if frame is not None:
-            return frame
-        try:  # Last-resort array render for non-standard envs; never requests human mode.
-            return env.render(mode="rgb_array")
-        except Exception as exc:  # pragma: no cover - depends on local render backend
-            render_failed = True
-            render_error = f"{type(exc).__name__}: {exc}"
-            print(f"[rollout render disabled: {render_error}]")
-            return None
-
-    try:
-        obs_dict, reset_info = env.reset(seed=seed)
-        agent_order = list(env.possible_agents)
-        total_rewards = np.zeros(len(agent_order), dtype=np.float64)
-        step_rewards = []
-        steps = 0
-        episode_metrics = extract_lbf_metrics(reset_info)
-
-        frame = _try_render()
-        if frame is not None:
-            frames.append(np.asarray(frame))
-
-        while env.agents and (max_steps is None or steps < int(max_steps)):
-            state = canonical_lbf_state(env, agent_order)
-            action_list = policy_fn(
-                state=state,
-                obs_dict=obs_dict,
-                agent_order=agent_order,
-                env=env,
-                step=steps,
-                action_masks=action_masks(env, agent_order),
-            )
-            action_list = [int(action) for action in action_list]
-            action_dict = {
-                agent: action_list[index] for index, agent in enumerate(agent_order)
-            }
-            obs_dict, reward_dict, term_dict, trunc_dict, step_info = env.step(action_dict)
-            episode_metrics = extract_lbf_metrics(step_info) or episode_metrics
-            rewards = np.asarray(
-                [reward_dict.get(agent, 0.0) for agent in agent_order],
-                dtype=np.float64,
-            )
-            total_rewards += rewards
-            step_rewards.append(rewards.tolist())
-            actions.append(action_list)
-            steps += 1
-
-            frame = _try_render()
-            if frame is not None:
-                frames.append(np.asarray(frame))
-
-            if all(
-                bool(term_dict.get(agent, False)) or bool(trunc_dict.get(agent, False))
-                for agent in agent_order
-            ):
-                break
-    finally:
-        env.close()
-
-    return {
-        "frames": frames,
-        "actions": actions,
-        "step_rewards": step_rewards,
-        "total_rewards": total_rewards.tolist(),
-        "joint_reward": float(total_rewards.sum()),
-        "steps": int(steps),
-        "episode_metrics": episode_metrics,
-        "render_error": render_error,
-    }
-
-
 def _make_episode_env(make_env: Callable, capture_frames: bool, accepts_capture: bool):
     if accepts_capture:
         return make_env(capture_frames=capture_frames)
@@ -266,6 +173,92 @@ def _make_env_accepts_capture_arg(make_env: Callable) -> bool:
             for parameter in make_env_signature.parameters.values()
         )
     )
+
+
+def _capture_lbf_frame(env) -> tuple[np.ndarray | None, str | None]:
+    frame = lbf_state_frame(env)
+    if frame is not None:
+        return np.asarray(frame), None
+    try:
+        frame = env.render(mode="rgb_array")
+    except Exception as exc:  # pragma: no cover - render backend specific
+        return None, f"{type(exc).__name__}: {exc}"
+    if frame is None:
+        return None, None
+    return np.asarray(frame), None
+
+
+def best_joint_reward_rollout_index(rollouts: dict) -> int | None:
+    """Return the index of the evaluated rollout with highest joint reward."""
+    joint_rewards = rollouts.get("joint_rewards") or []
+    if not joint_rewards:
+        return None
+    return int(np.argmax(np.asarray(joint_rewards, dtype=np.float64)))
+
+
+def capture_lbf_rollout_frames_from_actions(
+    *,
+    make_env: Callable,
+    actions,
+    seed: int = 0,
+    episode_idx: int = 0,
+    max_steps: int | None = None,
+):
+    """Replay a saved LBF action trajectory and capture render frames."""
+    make_env_accepts_capture = _make_env_accepts_capture_arg(make_env)
+    env = _make_episode_env(make_env, True, make_env_accepts_capture)
+    frames = []
+    render_error = None
+    steps = 0
+    try:
+        env.reset(seed=int(seed) + int(episode_idx))
+        agent_order = list(env.possible_agents)
+
+        frame, render_error = _capture_lbf_frame(env)
+        if frame is not None:
+            frames.append(frame)
+        elif render_error:
+            print(f"[rollout render disabled: {render_error}]")
+            return {
+                "frames": frames,
+                "render_error": render_error,
+                "steps": steps,
+            }
+
+        for action_list in actions:
+            if not env.agents or (
+                max_steps is not None and steps >= int(max_steps)
+            ):
+                break
+            action_list = [int(action) for action in action_list]
+            action_dict = {
+                agent: action_list[index]
+                for index, agent in enumerate(agent_order)
+            }
+            _, _, term_dict, trunc_dict, _ = env.step(action_dict)
+            steps += 1
+
+            frame, render_error = _capture_lbf_frame(env)
+            if frame is not None:
+                frames.append(frame)
+            elif render_error:
+                print(f"[rollout render disabled: {render_error}]")
+                break
+
+            if all(
+                bool(term_dict.get(agent, False))
+                or bool(trunc_dict.get(agent, False))
+                for agent in agent_order
+            ):
+                break
+    finally:
+        env.close()
+
+    return {
+        "frames": frames,
+        "render_error": render_error,
+        "steps": steps,
+    }
 
 
 def sample_lbf_rollouts_vectorized(
@@ -319,19 +312,13 @@ def sample_lbf_rollouts_vectorized(
             "render_error": None,
         }
         if capture_frames:
-            frame = lbf_state_frame(env)
+            frame, render_error = _capture_lbf_frame(env)
             if frame is not None:
-                slot["frames"].append(np.asarray(frame))
-            else:
-                try:
-                    frame = env.render(mode="rgb_array")
-                except Exception as exc:  # pragma: no cover - render backend specific
-                    slot["render_failed"] = True
-                    slot["render_error"] = f"{type(exc).__name__}: {exc}"
-                    print(f"[rollout render disabled: {slot['render_error']}]")
-                else:
-                    if frame is not None:
-                        slot["frames"].append(np.asarray(frame))
+                slot["frames"].append(frame)
+            elif render_error:
+                slot["render_failed"] = True
+                slot["render_error"] = render_error
+                print(f"[rollout render disabled: {slot['render_error']}]")
         return slot
 
     try:
@@ -396,16 +383,13 @@ def sample_lbf_rollouts_vectorized(
                     slot["steps"] += 1
 
                     if slot["capture_frames"] and not slot["render_failed"]:
-                        frame = lbf_state_frame(env)
-                        if frame is None:
-                            try:
-                                frame = env.render(mode="rgb_array")
-                            except Exception as exc:  # pragma: no cover
-                                slot["render_failed"] = True
-                                slot["render_error"] = f"{type(exc).__name__}: {exc}"
-                                print(f"[rollout render disabled: {slot['render_error']}]")
+                        frame, render_error = _capture_lbf_frame(env)
                         if frame is not None:
-                            slot["frames"].append(np.asarray(frame))
+                            slot["frames"].append(frame)
+                        elif render_error:
+                            slot["render_failed"] = True
+                            slot["render_error"] = render_error
+                            print(f"[rollout render disabled: {slot['render_error']}]")
 
                     if all(
                         bool(term_dict.get(agent, False))
@@ -548,60 +532,6 @@ def display_rollout_video(
     display(FileLink(str(saved_path)))
     print(f"[rollout video saved: {saved_path}]")
     return saved_path
-
-
-def sample_lbf_rollouts(
-    *,
-    make_env: Callable,
-    policy_fn: Callable,
-    seed: int = 0,
-    n_episodes: int = 1,
-    max_steps: int | None = None,
-    progress_label: str | None = None,
-    show_progress: bool = True,
-    capture_first_episode_frames: bool = True,
-):
-    """Run multiple evaluation episodes and keep the first episode's frames."""
-    make_env_accepts_capture = _make_env_accepts_capture_arg(make_env)
-
-    rollouts = []
-    episode_count = max(1, int(n_episodes))
-    episode_iter = range(episode_count)
-    if show_progress and tqdm is not None:
-        episode_iter = tqdm(
-            episode_iter,
-            total=episode_count,
-            desc=progress_label or "LBF evaluation",
-            unit="episode",
-            leave=True,
-        )
-    for episode_idx in episode_iter:
-        capture_frames = bool(capture_first_episode_frames and episode_idx == 0)
-        rollout = sample_lbf_rollout(
-            make_env=lambda capture_frames=capture_frames: _make_episode_env(
-                make_env, capture_frames, make_env_accepts_capture
-            ),
-            policy_fn=policy_fn,
-            seed=int(seed) + episode_idx,
-            max_steps=max_steps,
-            capture_frames=capture_frames,
-        )
-        rollouts.append(rollout)
-
-    return {
-        "rollouts": rollouts,
-        "frames": rollouts[0]["frames"] if rollouts else [],
-        "render_error": rollouts[0].get("render_error") if rollouts else None,
-        "episode_rewards": [rollout["total_rewards"] for rollout in rollouts],
-        "joint_rewards": [rollout["joint_reward"] for rollout in rollouts],
-        "steps": [rollout["steps"] for rollout in rollouts],
-        "episode_lengths": [rollout["steps"] for rollout in rollouts],
-        "episode_metrics": [rollout.get("episode_metrics") for rollout in rollouts],
-        "metric_totals": aggregate_lbf_episode_metrics(
-            [rollout.get("episode_metrics") for rollout in rollouts],
-            len(rollouts[0]["total_rewards"]) if rollouts else None,
-        ),
-    }
 
 
 def _record_label(record: dict) -> str:

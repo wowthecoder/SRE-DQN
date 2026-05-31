@@ -46,9 +46,11 @@ def _sample_policy_actions(policy_batch, epsilon_explore, num_actions):
                 policy = np.clip(policy, 0.0, None)
                 policy_sum = float(policy.sum())
                 if policy_sum <= 0.0:
-                    policy = np.full(num_actions, 1.0 / num_actions)
-                else:
-                    policy = policy / policy_sum
+                    raise RuntimeError(
+                        "SRE solver returned an invalid policy during vectorized "
+                        f"action selection for env {env_id}, agent {agent_id}."
+                    )
+                policy = policy / policy_sum
                 actions[env_id, agent_id] = np.random.choice(num_actions, p=policy)
     return actions
 
