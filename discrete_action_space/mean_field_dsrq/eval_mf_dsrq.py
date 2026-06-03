@@ -11,6 +11,7 @@ Usage:
 import argparse
 import json
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 
 import numpy as np
@@ -21,8 +22,8 @@ _DISCRETE_DIR = _THIS_DIR.parent
 if str(_DISCRETE_DIR) not in sys.path:
     sys.path.insert(0, str(_DISCRETE_DIR))
 
-from mean_field_dsrq.benchmarl_magent2 import latest_checkpoint
 from mean_field_dsrq.magent_env_wrapper import MAgentMFWrapper
+from mean_field_dsrq.mfrl_baselines import MFRLPolicyAdapter
 from mean_field_dsrq.train_mf_dsrq import (
     _episode_win_record,
     _load_config,
@@ -40,10 +41,86 @@ def _add_obs_noise(obs: np.ndarray, sigma: float) -> np.ndarray:
     return obs + np.random.normal(0.0, sigma, size=obs.shape).astype(np.float32)
 
 
-def load_mfdsrq_agents(cfg: dict, checkpoint_dir: str | Path, env: MAgentMFWrapper):
+def _mfdsrq_checkpoint_path(
+    checkpoint_source: str | Path | Mapping[str, str | Path],
+    type_name: str,
+    *,
+    type_idx: int = 0,
+    prefer_main: bool = False,
+) -> Path:
+    if isinstance(checkpoint_source, Mapping):
+        if type_name in checkpoint_source:
+            return Path(checkpoint_source[type_name])
+        role = "main" if prefer_main or type_idx == 0 else "opponent"
+        if role in checkpoint_source:
+            return Path(checkpoint_source[role])
+        if "main" in checkpoint_source:
+            return Path(checkpoint_source["main"])
+        raise KeyError(
+            f"checkpoint_source mapping has keys {list(checkpoint_source.keys())!r}, "
+            f"but none match {type_name!r} or role {role!r}."
+        )
+
+    source = Path(checkpoint_source)
+    if source.is_file():
+        return source
+
+    role = "main" if prefer_main or type_idx == 0 else "opponent"
+    role_best = source / f"ckpt_{role}_best.pt"
+    if role_best.exists():
+        return role_best
+    role_final = source / f"ckpt_{role}_final.pt"
+    if role_final.exists():
+        return role_final
+    return source / f"ckpt_{type_name}_final.pt"
+
+
+def _checkpoint_source_repr(checkpoint_source: str | Path | Mapping[str, str | Path]):
+    if isinstance(checkpoint_source, Mapping):
+        return {team: str(path) for team, path in checkpoint_source.items()}
+    return str(checkpoint_source)
+
+
+def _resolve_torch_device(device=None, *, use_gpu: bool = True):
     import torch
 
-    device = torch.device("cpu")
+    if device is None or str(device).lower() == "auto":
+        device = "cuda" if bool(use_gpu) and torch.cuda.is_available() else "cpu"
+    resolved = torch.device(device)
+    if resolved.type == "cuda":
+        if not torch.cuda.is_available():
+            raise RuntimeError(
+                f"Requested evaluation device {resolved}, but torch.cuda.is_available() is False."
+            )
+        if resolved.index is not None and resolved.index >= torch.cuda.device_count():
+            raise RuntimeError(
+                f"Requested evaluation device {resolved}, but only "
+                f"{torch.cuda.device_count()} CUDA device(s) are visible."
+            )
+    return resolved
+
+
+def _checkpoint_feature_dim(path: Path, default: int = 0) -> int:
+    if not path.exists():
+        return int(default)
+    import torch
+
+    checkpoint = torch.load(path, map_location="cpu", weights_only=False)
+    return int(checkpoint.get("feature_dim", default))
+
+
+def load_mfdsrq_agents(
+    cfg: dict,
+    checkpoint_source: str | Path | Mapping[str, str | Path],
+    env: MAgentMFWrapper,
+    *,
+    device=None,
+    prefer_main_for_all: bool = False,
+):
+    device = _resolve_torch_device(
+        device if device is not None else cfg.get("device"),
+        use_gpu=cfg.get("use_gpu", True),
+    )
     type_prefixes = cfg["type_prefixes"]
     n_own = env.n_actions
     agents = {}
@@ -56,6 +133,13 @@ def load_mfdsrq_agents(cfg: dict, checkpoint_dir: str | Path, env: MAgentMFWrapp
         obs_shape = env.obs_shape[type_name]
         n_own_t = n_own[type_name]
         n_nbr_t = n_nbr_t_default(n_own, type_name, cfg)
+        ckpt_path = _mfdsrq_checkpoint_path(
+            checkpoint_source,
+            type_name,
+            type_idx=type_idx,
+            prefer_main=prefer_main_for_all,
+        )
+        feature_dim = _checkpoint_feature_dim(ckpt_path, cfg.get("feature_dim", 0))
         agent = make_mfdsrq_agent(
             eval_cfg,
             type_id=type_idx,
@@ -63,10 +147,10 @@ def load_mfdsrq_agents(cfg: dict, checkpoint_dir: str | Path, env: MAgentMFWrapp
             n_own_actions=n_own_t,
             n_nbr_actions=n_nbr_t,
             device=device,
+            feature_dim=feature_dim,
         )
-        ckpt_path = Path(checkpoint_dir) / f"ckpt_{type_name}_final.pt"
         if ckpt_path.exists():
-            agent.load_checkpoint(ckpt_path)
+            agent.load_checkpoint(ckpt_path, map_location=device)
             print(f"Loaded {ckpt_path}")
         else:
             print(f"Warning: no checkpoint at {ckpt_path}, using random weights")
@@ -77,15 +161,26 @@ def load_mfdsrq_agents(cfg: dict, checkpoint_dir: str | Path, env: MAgentMFWrapp
 
 def evaluate(
     cfg: dict,
-    checkpoint_dir: str,
+    checkpoint_dir: str | Path | Mapping[str, str | Path],
     num_episodes: int = 100,
     obs_noise_sigmas: list[float] = [0.0],
+    *,
+    device=None,
 ) -> dict:
     env_factory = _make_env_factory(cfg)
     type_prefixes = cfg["type_prefixes"]
 
-    env = MAgentMFWrapper(env_factory, type_prefixes, ema_momentum=cfg.get("ema_momentum", 1.0))
-    agents = load_mfdsrq_agents(cfg, checkpoint_dir, env)
+    env = MAgentMFWrapper(
+        env_factory,
+        type_prefixes,
+        ema_momentum=cfg.get("ema_momentum", 1.0),
+        mean_field_source=cfg.get("mean_field_source", "opponent"),
+    )
+    device = _resolve_torch_device(
+        device if device is not None else cfg.get("device"),
+        use_gpu=cfg.get("use_gpu", True),
+    )
+    agents = load_mfdsrq_agents(cfg, checkpoint_dir, env, device=device)
 
     results = {}
     for sigma in obs_noise_sigmas:
@@ -146,83 +241,6 @@ def evaluate(
     return results
 
 
-class BenchmarlPolicyAdapter:
-    """Reload a BenchMARL checkpoint and expose per-team greedy actions."""
-
-    def __init__(self, checkpoint_or_folder: str | Path, *, map_location: str = "cpu"):
-        import torch
-        from benchmarl.experiment import Experiment
-        from torchrl.envs.utils import ExplorationType
-
-        checkpoint_or_folder = Path(checkpoint_or_folder)
-        checkpoint = latest_checkpoint(checkpoint_or_folder) if checkpoint_or_folder.is_dir() else checkpoint_or_folder
-        self.experiment = Experiment.reload_from_file(
-            str(checkpoint),
-            experiment_patch={
-                "evaluation_episodes": 1,
-                "render": False,
-                "loggers": [],
-                "create_json": False,
-                "restore_map_location": map_location,
-            },
-        )
-        self.policy = self.experiment.policy
-        self.torch = torch
-        self.exploration_type = ExplorationType.DETERMINISTIC
-        self.checkpoint = str(checkpoint)
-
-    @staticmethod
-    def _to_benchmarl_obs(obs: np.ndarray) -> np.ndarray:
-        obs = np.asarray(obs, dtype=np.float32)
-        if obs.ndim == 3:
-            obs = np.transpose(obs, (1, 2, 0))
-        return obs
-
-    def act(
-        self,
-        *,
-        obs_dict: dict[str, np.ndarray],
-        env: MAgentMFWrapper,
-        type_prefixes: dict[str, str],
-        controlled_type: str,
-    ) -> dict[str, int]:
-        from tensordict import TensorDict
-        from torchrl.envs.utils import set_exploration_type
-
-        type_agents = {
-            type_name: [aid for aid in env.agents_of_type(type_name) if aid in obs_dict]
-            for type_name in type_prefixes
-        }
-        controlled_agents = type_agents.get(controlled_type, [])
-        if not controlled_agents:
-            return {}
-
-        td = TensorDict({}, batch_size=[])
-        for type_name, agents in type_agents.items():
-            if agents:
-                obs_batch = np.stack([self._to_benchmarl_obs(obs_dict[aid]) for aid in agents])
-            else:
-                C, H, W = env.obs_shape[type_name]
-                obs_batch = np.zeros((1, H, W, C), dtype=np.float32)
-            obs_tensor = self.torch.as_tensor(obs_batch, dtype=self.torch.float32)
-            done = self.torch.zeros((obs_tensor.shape[0], 1), dtype=self.torch.bool)
-            td.set((type_name, "observation"), obs_tensor)
-            td.set((type_name, "done"), done)
-            td.set((type_name, "terminated"), done.clone())
-            td.set((type_name, "truncated"), done.clone())
-        td.set("done", self.torch.zeros((1,), dtype=self.torch.bool))
-        td.set("terminated", self.torch.zeros((1,), dtype=self.torch.bool))
-        td.set("truncated", self.torch.zeros((1,), dtype=self.torch.bool))
-
-        with self.torch.no_grad(), set_exploration_type(self.exploration_type):
-            out = self.policy(td)
-        actions = out.get((controlled_type, "action")).detach().cpu().numpy().reshape(-1)
-        return {aid: int(action) for aid, action in zip(controlled_agents, actions)}
-
-    def close(self):
-        self.experiment.close()
-
-
 def _mfdsrq_actions(
     *,
     agent,
@@ -264,26 +282,152 @@ def _summarize_matchup_records(records: list[dict]) -> dict:
     }
 
 
-def evaluate_mfdsrq_vs_benchmarl(
+def _matchup_assignment_name(mfdsrq_team: str, baseline_team: str) -> str:
+    return f"mfdsrq_{mfdsrq_team}_vs_baseline_{baseline_team}"
+
+
+def _evaluate_mfdsrq_vs_mfrl_assignment(
     cfg: dict,
-    checkpoint_dir: str | Path,
+    checkpoint_dir: str | Path | Mapping[str, str | Path],
+    baseline_checkpoint_or_folder: str | Path,
+    *,
+    baseline_name: str = "baseline",
+    mfdsrq_team: str,
+    baseline_team: str,
+    num_episodes: int = 20,
+    max_steps: int | None = None,
+    episode_offset: int = 0,
+    progress_queue=None,
+    device=None,
+) -> dict:
+    env_factory = _make_env_factory(cfg)
+    type_prefixes = cfg["type_prefixes"]
+    type_names = list(type_prefixes.keys())
+    if len(type_names) != 2:
+        raise ValueError("Head-to-head MFRL comparison expects exactly two teams.")
+    if mfdsrq_team not in type_names or baseline_team not in type_names:
+        raise ValueError(
+            f"Unknown matchup assignment ({mfdsrq_team!r}, {baseline_team!r}); "
+            f"expected teams from {type_names!r}."
+        )
+
+    env = MAgentMFWrapper(
+        env_factory,
+        type_prefixes,
+        ema_momentum=cfg.get("ema_momentum", 1.0),
+        mean_field_source=cfg.get("mean_field_source", "opponent"),
+    )
+    device = _resolve_torch_device(
+        device if device is not None else cfg.get("device"),
+        use_gpu=cfg.get("use_gpu", True),
+    )
+    mf_agents = {}
+    baseline = None
+    mf_agents = load_mfdsrq_agents(
+        cfg,
+        checkpoint_dir,
+        env,
+        device=device,
+        prefer_main_for_all=True,
+    )
+    baseline = MFRLPolicyAdapter(baseline_checkpoint_or_folder, map_location=device)
+    max_steps = int(max_steps or cfg.get("max_cycles", 400))
+    assignment = _matchup_assignment_name(mfdsrq_team, baseline_team)
+
+    records = []
+    try:
+        for ep_idx in range(num_episodes):
+            obs_dict, _ = env.reset()
+            initial_counts = _team_counts(env, type_prefixes)
+            ep_rewards = {t: 0.0 for t in type_names}
+
+            for _ in range(max_steps):
+                if not env.alive_agents:
+                    break
+                env_actions = {}
+                env_actions.update(
+                    _mfdsrq_actions(
+                        agent=mf_agents[mfdsrq_team],
+                        env=env,
+                        obs_dict=obs_dict,
+                        type_name=mfdsrq_team,
+                    )
+                )
+                env_actions.update(
+                    baseline.act_mf_wrapper(
+                        env=env,
+                        type_prefixes=type_prefixes,
+                        controlled_type=baseline_team,
+                    )
+                )
+                if not env_actions:
+                    break
+                obs_dict, rewards, _, _, _, info = env.step(env_actions)
+                for aid, reward in rewards.items():
+                    type_name = env.agent_type(aid)
+                    if type_name in ep_rewards:
+                        ep_rewards[type_name] += reward
+                if info.get("episode_done", False):
+                    break
+
+            record = _episode_win_record(
+                episode=int(episode_offset) + ep_idx + 1,
+                global_step=int(episode_offset) + ep_idx + 1,
+                env_idx=0,
+                rewards=ep_rewards,
+                initial_counts=initial_counts,
+                final_counts=_team_counts(env, type_prefixes),
+                type_names=type_names,
+            )
+            record["assignment"] = assignment
+            record["mfdsrq_team"] = mfdsrq_team
+            record["baseline_team"] = baseline_team
+            record["baseline"] = baseline_name
+            record["mfdsrq_win"] = int(record["wins"].get(mfdsrq_team, 0))
+            record["baseline_win"] = int(record["wins"].get(baseline_team, 0))
+            record["mfdsrq_reward"] = float(record["rewards"].get(mfdsrq_team, 0.0))
+            record["baseline_reward"] = float(record["rewards"].get(baseline_team, 0.0))
+            record["mfdsrq_kills"] = int(record["kills"].get(mfdsrq_team, 0))
+            record["baseline_kills"] = int(record["kills"].get(baseline_team, 0))
+            records.append(record)
+            if progress_queue is not None:
+                progress_queue.put(1)
+    finally:
+        if baseline is not None:
+            baseline.close()
+        for agent in mf_agents.values():
+            agent.close()
+
+    return {
+        "baseline": baseline_name,
+        "baseline_checkpoint": baseline.checkpoint if baseline is not None else None,
+        "checkpoint_dir": _checkpoint_source_repr(checkpoint_dir),
+        "device": str(device),
+        "num_episodes": int(num_episodes),
+        "episode_offset": int(episode_offset),
+        "assignment": assignment,
+        "mfdsrq_team": mfdsrq_team,
+        "baseline_team": baseline_team,
+        "records": records,
+        "summary": _summarize_matchup_records(records),
+    }
+
+
+def evaluate_mfdsrq_vs_mfrl_baseline(
+    cfg: dict,
+    checkpoint_dir: str | Path | Mapping[str, str | Path],
     baseline_checkpoint_or_folder: str | Path,
     *,
     baseline_name: str = "baseline",
     num_episodes: int = 20,
     max_steps: int | None = None,
     evaluate_both_sides: bool = True,
+    device=None,
 ) -> dict:
-    env_factory = _make_env_factory(cfg)
     type_prefixes = cfg["type_prefixes"]
     type_names = list(type_prefixes.keys())
     if len(type_names) != 2:
-        raise ValueError("Head-to-head BenchMARL comparison expects exactly two teams.")
-
-    env = MAgentMFWrapper(env_factory, type_prefixes, ema_momentum=cfg.get("ema_momentum", 1.0))
-    mf_agents = load_mfdsrq_agents(cfg, checkpoint_dir, env)
-    baseline = BenchmarlPolicyAdapter(baseline_checkpoint_or_folder)
-    max_steps = int(max_steps or cfg.get("max_cycles", 400))
+        raise ValueError("Head-to-head MFRL comparison expects exactly two teams.")
 
     assignments = [(type_names[0], type_names[1])]
     if evaluate_both_sides:
@@ -291,76 +435,33 @@ def evaluate_mfdsrq_vs_benchmarl(
 
     all_records = []
     assignment_summaries = {}
-    try:
-        for mfdsrq_team, baseline_team in assignments:
-            assignment = f"mfdsrq_{mfdsrq_team}_vs_baseline_{baseline_team}"
-            records = []
-            for ep_idx in range(num_episodes):
-                obs_dict, _ = env.reset()
-                initial_counts = _team_counts(env, type_prefixes)
-                ep_rewards = {t: 0.0 for t in type_names}
-
-                for _ in range(max_steps):
-                    if not env.alive_agents:
-                        break
-                    env_actions = {}
-                    env_actions.update(
-                        _mfdsrq_actions(
-                            agent=mf_agents[mfdsrq_team],
-                            env=env,
-                            obs_dict=obs_dict,
-                            type_name=mfdsrq_team,
-                        )
-                    )
-                    env_actions.update(
-                        baseline.act(
-                            obs_dict=obs_dict,
-                            env=env,
-                            type_prefixes=type_prefixes,
-                            controlled_type=baseline_team,
-                        )
-                    )
-                    if not env_actions:
-                        break
-                    obs_dict, rewards, _, _, _, info = env.step(env_actions)
-                    for aid, reward in rewards.items():
-                        type_name = env.agent_type(aid)
-                        if type_name in ep_rewards:
-                            ep_rewards[type_name] += reward
-                    if info.get("episode_done", False):
-                        break
-
-                record = _episode_win_record(
-                    episode=ep_idx + 1,
-                    global_step=ep_idx + 1,
-                    env_idx=0,
-                    rewards=ep_rewards,
-                    initial_counts=initial_counts,
-                    final_counts=_team_counts(env, type_prefixes),
-                    type_names=type_names,
-                )
-                record["assignment"] = assignment
-                record["mfdsrq_team"] = mfdsrq_team
-                record["baseline_team"] = baseline_team
-                record["mfdsrq_win"] = int(record["wins"].get(mfdsrq_team, 0))
-                record["baseline_win"] = int(record["wins"].get(baseline_team, 0))
-                record["mfdsrq_reward"] = float(record["rewards"].get(mfdsrq_team, 0.0))
-                record["baseline_reward"] = float(record["rewards"].get(baseline_team, 0.0))
-                record["mfdsrq_kills"] = int(record["kills"].get(mfdsrq_team, 0))
-                record["baseline_kills"] = int(record["kills"].get(baseline_team, 0))
-                records.append(record)
-                all_records.append(record)
-
-            assignment_summaries[assignment] = _summarize_matchup_records(records)
-    finally:
-        baseline.close()
-        for agent in mf_agents.values():
-            agent.close()
+    baseline_checkpoint = None
+    for mfdsrq_team, baseline_team in assignments:
+        result = _evaluate_mfdsrq_vs_mfrl_assignment(
+            dict(cfg),
+            checkpoint_dir,
+            baseline_checkpoint_or_folder,
+            baseline_name=baseline_name,
+            mfdsrq_team=mfdsrq_team,
+            baseline_team=baseline_team,
+            num_episodes=int(num_episodes),
+            max_steps=max_steps,
+            device=device,
+        )
+        baseline_checkpoint = result["baseline_checkpoint"]
+        all_records.extend(result["records"])
+        assignment_summaries[result["assignment"]] = result["summary"]
 
     return {
         "baseline": baseline_name,
-        "baseline_checkpoint": baseline.checkpoint,
-        "checkpoint_dir": str(checkpoint_dir),
+        "baseline_checkpoint": baseline_checkpoint,
+        "checkpoint_dir": _checkpoint_source_repr(checkpoint_dir),
+        "device": str(
+            _resolve_torch_device(
+                device if device is not None else cfg.get("device"),
+                use_gpu=cfg.get("use_gpu", True),
+            )
+        ),
         "num_episodes_per_assignment": int(num_episodes),
         "records": all_records,
         "assignments": assignment_summaries,

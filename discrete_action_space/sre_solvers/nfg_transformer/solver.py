@@ -318,6 +318,13 @@ class NfgTransformerSreSolver(SreStageGameSolver):
             )
         return [float(value) for value in eps]
 
+    @staticmethod
+    def _shape_groups(q_tensors):
+        groups = {}
+        for index, q_tensor in enumerate(q_tensors):
+            groups.setdefault(tuple(q_tensor.shape[:-1]), []).append(index)
+        return list(groups.values())
+
     def solve(
         self,
         q_tensor,
@@ -470,23 +477,30 @@ class NfgTransformerSreSolver(SreStageGameSolver):
             initial_policies_batch = [None] * len(q_tensors)
         if len(initial_policies_batch) != len(q_tensors):
             raise ValueError("initial_policies_batch must match q_tensors length.")
-        if any(tuple(q.shape[:-1]) != q_tensors[0].shape[:-1] for q in q_tensors):
-            raise ValueError("NfgTransformerSreSolver batches must share one game shape.")
         epsilons = self._epsilon_batch(epsilon, len(q_tensors))
-        q_batch = torch.as_tensor(
-            np.stack(q_tensors, axis=0), dtype=torch.float32, device=self.config.device
-        )
-        results = self._solve_batch_core(
-            q_tensors=q_tensors,
-            q_batch=q_batch,
-            epsilons=epsilons,
-            initial_policies_batch=initial_policies_batch,
-            num_repeats=num_repeats,
-            round_digits=round_digits,
-            include_pure_starts=include_pure_starts,
-            exploitability_tol=exploitability_tol,
-            start=start,
-        )
+        results = [None] * len(q_tensors)
+        for group_indices in self._shape_groups(q_tensors):
+            group_q_tensors = [q_tensors[index] for index in group_indices]
+            q_batch = torch.as_tensor(
+                np.stack(group_q_tensors, axis=0),
+                dtype=torch.float32,
+                device=self.config.device,
+            )
+            group_results = self._solve_batch_core(
+                q_tensors=group_q_tensors,
+                q_batch=q_batch,
+                epsilons=[epsilons[index] for index in group_indices],
+                initial_policies_batch=[
+                    initial_policies_batch[index] for index in group_indices
+                ],
+                num_repeats=num_repeats,
+                round_digits=round_digits,
+                include_pure_starts=include_pure_starts,
+                exploitability_tol=exploitability_tol,
+                start=start,
+            )
+            for index, result in zip(group_indices, group_results):
+                results[index] = result
 
         self._record_solve_time(time.perf_counter() - start, count=len(q_tensors))
         return results

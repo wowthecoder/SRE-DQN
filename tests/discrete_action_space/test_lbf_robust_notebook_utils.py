@@ -205,6 +205,20 @@ def test_lbf_policy_actions_forward_action_masks():
     assert policy.seen_action_masks is masks
 
 
+def test_resolve_epymarl_checkpoint_prefers_best_over_final(tmp_path):
+    from lbf_grid.robust_notebook_utils import resolve_epymarl_checkpoint
+
+    model_root = tmp_path / "models"
+    best = model_root / "scenario_a" / "2025" / "iql" / "best" / "100"
+    final = model_root / "scenario_a" / "2025" / "iql" / "final" / "200"
+    best.mkdir(parents=True)
+    final.mkdir(parents=True)
+    (best / "agent.th").write_bytes(b"best")
+    (final / "agent.th").write_bytes(b"final")
+
+    assert resolve_epymarl_checkpoint("iql", "scenario_a", models_root=model_root) == best
+
+
 @pytest.mark.parametrize(
     ("available_checkpoints", "expected_checkpoint"),
     [

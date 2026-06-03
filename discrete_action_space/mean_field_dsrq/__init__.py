@@ -1,8 +1,3 @@
-from .path_mean_field_dsrq import (
-    MFDsrqAgent as PathMFDsrqAgent,
-    PathMFReplayBuffer,
-    PathMeanFieldQNetwork,
-)
 from .solver_free_mean_field_dsrq import (
     PairwiseMeanFieldQNetwork,
     RobustMeanFieldResult,
@@ -10,17 +5,22 @@ from .solver_free_mean_field_dsrq import (
     SolverFreeMFDsrqAgent,
     SolverFreeMFReplayBuffer,
 )
+from .torch_robust_mean_field_dsrq import (
+    TorchRobustActionValueOperator,
+    TorchRobustMFDsrqAgent,
+    torch_tv_worst_case_values,
+)
 
 MFDsrqAgent = SolverFreeMFDsrqAgent
 
 __all__ = [
     "MFDsrqAgent",
-    "PathMFDsrqAgent",
-    "PathMFReplayBuffer",
-    "PathMeanFieldQNetwork",
     "PairwiseMeanFieldQNetwork",
     "RobustMeanFieldResult",
     "RobustMeanFieldSreOperator",
     "SolverFreeMFDsrqAgent",
     "SolverFreeMFReplayBuffer",
+    "TorchRobustActionValueOperator",
+    "TorchRobustMFDsrqAgent",
+    "torch_tv_worst_case_values",
 ]

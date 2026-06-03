@@ -19,9 +19,15 @@ from mean_field_dsrq.solver_free_mean_field_dsrq import (  # noqa: E402
     RobustMeanFieldResult,
     RobustMeanFieldSreOperator,
     SolverFreeMFDsrqAgent,
+    _tv_worst_case_mean,
     _tv_worst_case_value,
 )
-from mean_field_dsrq.train_mf_dsrq import make_mfdsrq_agent  # noqa: E402
+from mean_field_dsrq.train_mf_dsrq import (  # noqa: E402
+    conditioning_group_idx,
+    make_mfdsrq_agent,
+    resolve_mean_field_source,
+)
+from scipy.optimize import linprog  # noqa: E402
 
 
 def test_robust_operator_epsilon_zero_matches_mean_field_greedy_value():
@@ -64,18 +70,62 @@ def test_robust_operator_matches_bruteforce_grid_for_two_actions():
     assert result.value == pytest.approx(max(grid_values), abs=2e-3)
 
 
+def test_tv_worst_case_mean_matches_transport_lp():
+    rng = np.random.default_rng(123)
+    for _ in range(20):
+        mean = rng.dirichlet(np.ones(5))
+        values = rng.normal(size=5)
+        epsilon = float(rng.uniform(0.0, 1.0))
+
+        actual = _tv_worst_case_mean(mean, values, epsilon)
+
+        cost = np.ones((5, 5), dtype=np.float64)
+        np.fill_diagonal(cost, 0.0)
+        c = np.tile(values.reshape(1, -1), (5, 1)).reshape(-1)
+        a_eq = np.zeros((5, 25), dtype=np.float64)
+        for b in range(5):
+            a_eq[b, b * 5 : (b + 1) * 5] = 1.0
+        result = linprog(
+            c,
+            A_ub=cost.reshape(1, -1),
+            b_ub=np.array([epsilon], dtype=np.float64),
+            A_eq=a_eq,
+            b_eq=mean,
+            bounds=[(0.0, None)] * 25,
+            method="highs",
+        )
+        assert result.success
+        expected = result.x.reshape(5, 5).sum(axis=0)
+
+        assert float(actual @ values) == pytest.approx(float(expected @ values), abs=1e-6)
+        np.testing.assert_allclose(actual.sum(), 1.0, atol=1e-7)
+
+
 def test_pairwise_network_forward_is_mean_weighted_payoff_sum():
     torch.manual_seed(0)
-    net = PairwiseMeanFieldQNetwork(2, 3, 3, n_own_actions=3, n_mean_actions=4)
+    net = PairwiseMeanFieldQNetwork(2, 3, 3, n_own_actions=3, n_mean_actions=4, feature_dim=5)
     obs = torch.randn(5, 2, 3, 3)
+    feature = torch.randn(5, 5)
     mean = torch.softmax(torch.randn(5, 4), dim=-1)
 
-    payoff = net.payoff_matrix(obs)
-    out = net(obs, mean)
+    payoff = net.payoff_matrix(obs, feature)
+    out = net(obs, mean, feature=feature)
 
     expected = torch.bmm(payoff, mean.unsqueeze(-1)).squeeze(-1)
     assert out.shape == (5, 3)
     torch.testing.assert_close(out, expected)
+
+
+def test_pairwise_network_conditions_payoffs_on_feature_vector():
+    torch.manual_seed(0)
+    net = PairwiseMeanFieldQNetwork(2, 3, 3, n_own_actions=3, n_mean_actions=4, feature_dim=2)
+    obs = torch.randn(1, 2, 3, 3).repeat(2, 1, 1, 1)
+    feature = torch.tensor([[0.0, 0.0], [1.0, -1.0]], dtype=torch.float32)
+
+    payoff = net.payoff_matrix(obs, feature)
+
+    assert payoff.shape == (2, 3, 4)
+    assert not torch.allclose(payoff[0], payoff[1])
 
 
 class FakeRobustOperator:
@@ -150,6 +200,35 @@ def test_train_step_updates_from_replay_without_path_solver():
     assert any(not torch.allclose(old, new) for old, new in zip(before, after))
 
 
+def test_replay_buffer_samples_feature_vectors_for_training():
+    agent = _make_agent(feature_dim=3)
+    mean = np.full(4, 0.25, dtype=np.float32)
+    feature = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+    next_feature = np.array([4.0, 5.0, 6.0], dtype=np.float32)
+
+    for i in range(4):
+        obs = np.random.randn(2, 3, 3).astype(np.float32)
+        next_obs = np.random.randn(2, 3, 3).astype(np.float32)
+        agent.push(
+            obs,
+            i % 4,
+            float(i),
+            next_obs,
+            mean,
+            mean,
+            done=False,
+            feature=feature,
+            next_feature=next_feature,
+        )
+
+    batch = agent.buffer.sample(4, torch.device("cpu"))
+
+    assert batch["feature"].shape == (4, 3)
+    assert batch["next_feature"].shape == (4, 3)
+    torch.testing.assert_close(batch["feature"][0], torch.as_tensor(feature))
+    torch.testing.assert_close(batch["next_feature"][0], torch.as_tensor(next_feature))
+
+
 def test_checkpoint_round_trip(tmp_path):
     agent = _make_agent()
     ckpt = tmp_path / "agent.pt"
@@ -184,6 +263,16 @@ def test_training_factory_defaults_to_solver_free_agent():
     assert not hasattr(agent, "sre_solver")
 
 
+def test_mean_field_source_defaults_to_opponent_conditioning():
+    assert resolve_mean_field_source({}) == "opponent"
+    assert conditioning_group_idx(0, "opponent") == 1
+    assert conditioning_group_idx(1, "opponent") == 0
+    assert conditioning_group_idx(0, "same_team") == 0
+    assert conditioning_group_idx(1, "self") == 1
+    with pytest.raises(ValueError, match="mean_field_source"):
+        resolve_mean_field_source({"mean_field_source": "nearby"})
+
+
 class _Space:
     def __init__(self, n=None, shape=None):
         self.n = n
@@ -214,10 +303,35 @@ class _FakeParallelEnv:
         return obs, rewards, terms, truncs, {}
 
 
-def test_magent_wrapper_default_mean_action_is_exact_previous_histogram():
+class _FakeTwoTeamParallelEnv:
+    def __init__(self):
+        self.agents = ["red_0", "red_1", "blue_0", "blue_1"]
+
+    def reset(self):
+        self.agents = ["red_0", "red_1", "blue_0", "blue_1"]
+        return {aid: np.zeros((2, 2, 1), dtype=np.float32) for aid in self.agents}, {}
+
+    def action_space(self, agent):
+        del agent
+        return _Space(n=2)
+
+    def observation_space(self, agent):
+        del agent
+        return _Space(shape=(2, 2, 1))
+
+    def step(self, actions):
+        obs = {aid: np.ones((2, 2, 1), dtype=np.float32) for aid in self.agents}
+        rewards = {aid: 0.0 for aid in self.agents}
+        terms = {aid: False for aid in self.agents}
+        truncs = {aid: False for aid in self.agents}
+        return obs, rewards, terms, truncs, {}
+
+
+def test_magent_wrapper_same_team_mean_action_is_exact_previous_histogram():
     wrapper = MAgentMFWrapper(
         _FakeParallelEnv,
         {"red": "red_"},
+        mean_field_source="same_team",
     )
     wrapper.reset()
 
@@ -227,3 +341,26 @@ def test_magent_wrapper_default_mean_action_is_exact_previous_histogram():
     np.testing.assert_allclose(mean_tp1["red_0"], [0.0, 1.0])
     np.testing.assert_allclose(mean_tp1["red_1"], [0.0, 1.0])
 
+
+def test_magent_wrapper_default_mean_action_uses_opponent_histogram():
+    wrapper = MAgentMFWrapper(
+        _FakeTwoTeamParallelEnv,
+        {"red": "red_", "blue": "blue_"},
+    )
+    wrapper.reset()
+
+    _, _, _, mean_t, mean_tp1, _ = wrapper.step(
+        {
+            "red_0": 1,
+            "red_1": 1,
+            "blue_0": 0,
+            "blue_1": 0,
+        }
+    )
+
+    np.testing.assert_allclose(mean_t["red_0"], [0.5, 0.5])
+    np.testing.assert_allclose(mean_t["blue_0"], [0.5, 0.5])
+    np.testing.assert_allclose(mean_tp1["red_0"], [1.0, 0.0])
+    np.testing.assert_allclose(mean_tp1["red_1"], [1.0, 0.0])
+    np.testing.assert_allclose(mean_tp1["blue_0"], [0.0, 1.0])
+    np.testing.assert_allclose(mean_tp1["blue_1"], [0.0, 1.0])

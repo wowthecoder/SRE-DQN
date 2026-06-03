@@ -1269,7 +1269,7 @@ def resolve_epymarl_checkpoint(
             if algorithm_root.is_dir():
                 canonical_roots.append(algorithm_root)
 
-    for kind in ("final", "best"):
+    for kind in ("best", "final"):
         selected = [
             step
             for root in canonical_roots

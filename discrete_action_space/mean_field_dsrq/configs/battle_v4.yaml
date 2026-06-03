@@ -11,6 +11,7 @@ type_prefixes:
   blue: "blue_"
 
 # Neighbor action space defaults to the own action space for Battle teams.
+mean_field_source: opponent
 
 # Local mean-field SRE robustness
 epsilon_robust_start: 0.10
@@ -38,16 +39,17 @@ learning_starts: 5000
 train_every: 5
 target_tau: 0.005
 grad_clip: 10.0
-ema_momentum: 1.0
 
 # Training budget
-total_steps: 1000000
+target_episodes: 2000
 num_envs: 16
 seed: 42
+self_play_tau: 0.01
+max_train_batches_per_update:
 
 # Logging
 output_dir: discrete_action_space/mean_field_dsrq/runs
-log_interval: 5000
-save_interval: 100000
+reward_log_interval: 100
+save_every: 20
 
 use_gpu: true

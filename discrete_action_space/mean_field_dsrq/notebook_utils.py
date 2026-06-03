@@ -3,18 +3,39 @@
 from __future__ import annotations
 
 import json
+import multiprocessing as mp
+import os
+from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
+from queue import Empty
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 import yaml
 
-from .benchmarl_magent2 import (
+try:
+    from tqdm.auto import tqdm as _tqdm
+except Exception:  # pragma: no cover - tqdm is optional in non-notebook contexts
+    _tqdm = None
+
+from .magent2_env import (
     DEFAULT_TASK_CONFIG,
-    ALGORITHM_NAMES,
-    run_benchmarl_algorithm,
-    sample_benchmarl_rollout_video,
 )
-from .eval_mf_dsrq import evaluate, evaluate_mfdsrq_vs_benchmarl
+from .mfrl_baselines import (
+    BASELINE_ALGORITHMS,
+    DEFAULT_BASELINE_RUNS_DIR,
+    DEFAULT_MFRL_TASK_CONFIG,
+    find_latest_mfrl_baseline_run,
+    sample_mfrl_rollout_video,
+    train_mfrl_baseline,
+)
+from .eval_mf_dsrq import (
+    _evaluate_mfdsrq_vs_mfrl_assignment,
+    _resolve_torch_device,
+    _summarize_matchup_records,
+    evaluate,
+    evaluate_mfdsrq_vs_mfrl_baseline,
+)
 from .train_mf_dsrq import train
 
 
@@ -44,7 +65,7 @@ def load_mfdsrq_config(
 
 def notebook_mfdsrq_config(
     *,
-    total_steps: int = 20_000,
+    target_episodes: int = 50,
     num_envs: int = 2,
     map_size: int = DEFAULT_TASK_CONFIG["map_size"],
     max_cycles: int = DEFAULT_TASK_CONFIG["max_cycles"],
@@ -58,15 +79,17 @@ def notebook_mfdsrq_config(
         "env_backend": "magent2",
         "map_size": int(map_size),
         "max_cycles": int(max_cycles),
-        "total_steps": int(total_steps),
+        "target_episodes": int(target_episodes),
         "num_envs": int(num_envs),
         "seed": int(seed),
         "output_dir": str(output_dir),
-        "log_interval": max(int(num_envs), min(1_000, int(total_steps))),
-        "save_interval": max(int(num_envs), int(total_steps)),
-        "learning_starts": min(1_000, max(128, int(total_steps) // 10)),
+        "reward_log_interval": max(int(num_envs), min(100, int(target_episodes))),
+        "save_every": max(int(num_envs), min(20, int(target_episodes))),
+        "learning_starts": min(5_000, max(128, int(target_episodes) * int(max_cycles) // 10)),
         "buffer_capacity": 80_000,
         "batch_size": 64,
+        "self_play_tau": 0.01,
+        "max_train_batches_per_update": None,
         "use_gpu": True,
     }
     if extra_overrides:
@@ -95,15 +118,52 @@ def mfdsrq_epsilon_config(
 
 def _load_training_stats(result_or_stats_path: dict[str, Any] | str | Path) -> dict[str, Any]:
     if isinstance(result_or_stats_path, dict):
-        if "episode_records" in result_or_stats_path and "summary" in result_or_stats_path:
+        if "episode_records" in result_or_stats_path or "records" in result_or_stats_path:
             return result_or_stats_path
         stats_path = result_or_stats_path.get("stats_path")
         if not stats_path:
             raise ValueError("Training result dict does not contain stats_path.")
     else:
-        stats_path = result_or_stats_path
+        stats_path = Path(result_or_stats_path)
+        if stats_path.is_dir():
+            stats_path = stats_path / "training_stats.json"
     with open(stats_path, encoding="utf-8") as f:
         return json.load(f)
+
+
+def _strict_kill_wins(record: dict[str, Any], type_names: list[str]) -> tuple[dict[str, int], int]:
+    if "winner" in record:
+        winner = record.get("winner")
+        return {t: int(winner == t) for t in type_names}, int(winner == "tie")
+    kills = {t: int(record.get("kills", {}).get(t, 0)) for t in type_names}
+    if not kills:
+        return {t: 0 for t in type_names}, 1
+    max_kill = max(kills.values())
+    winner_count = sum(int(kills[t] == max_kill) for t in type_names)
+    wins = {
+        t: int(winner_count == 1 and kills[t] == max_kill)
+        for t in type_names
+    }
+    return wins, int(winner_count != 1)
+
+
+def _strict_training_summary(stats: dict[str, Any], type_names: list[str]) -> dict[str, Any]:
+    records = stats.get("episode_records") or stats.get("records", [])
+    n = len(records)
+    win_counts = {t: 0 for t in type_names}
+    tie_count = 0
+    for record in records:
+        wins, tie = _strict_kill_wins(record, type_names)
+        tie_count += tie
+        for type_name in type_names:
+            win_counts[type_name] += wins.get(type_name, 0)
+    return {
+        "episodes": n,
+        "win_counts": win_counts,
+        "win_rates": {t: (win_counts[t] / n if n else 0.0) for t in type_names},
+        "tie_count": tie_count,
+        "tie_rate": (tie_count / n if n else 0.0),
+    }
 
 
 def plot_mfdsrq_training_curves(
@@ -112,12 +172,12 @@ def plot_mfdsrq_training_curves(
     smoothing_window: int = 20,
     save: bool = True,
 ):
-    """Plot team reward curves and cumulative kill-rule wins from training stats."""
+    """Plot team rewards, strict kill-rule wins, and kills from training stats."""
     import matplotlib.pyplot as plt
     import pandas as pd
 
     stats = _load_training_stats(result_or_stats_path)
-    records = stats.get("episode_records", [])
+    records = stats.get("episode_records") or stats.get("records", [])
     if not records:
         raise ValueError("No completed episode records found in training stats.")
 
@@ -126,23 +186,26 @@ def plot_mfdsrq_training_curves(
     for record in records:
         row = {
             "episode": record["episode"],
-            "global_step": record["global_step"],
+            "global_step": record.get("global_step", record.get("env_steps", record["episode"])),
             "env_idx": record["env_idx"],
         }
         for type_name in type_names:
+            strict_wins, _ = _strict_kill_wins(record, type_names)
             row[f"reward_{type_name}"] = record["rewards"].get(type_name, 0.0)
-            row[f"win_{type_name}"] = record["wins"].get(type_name, 0)
+            row[f"win_{type_name}"] = strict_wins.get(type_name, 0)
+            row[f"kills_{type_name}"] = record.get("kills", {}).get(type_name, 0)
         rows.append(row)
     df = pd.DataFrame(rows).sort_values(["episode", "env_idx"]).reset_index(drop=True)
     df["episode_index"] = range(1, len(df) + 1)
 
-    fig, axes = plt.subplots(1, 2, figsize=(13, 4))
+    fig, axes = plt.subplots(1, 3, figsize=(17, 4))
     window = max(int(smoothing_window), 1)
     for type_name in type_names:
         reward_col = f"reward_{type_name}"
         series = df[reward_col].rolling(window, min_periods=1).mean()
         axes[0].plot(df["episode_index"], series, label=type_name)
         axes[1].plot(df["episode_index"], df[f"win_{type_name}"].cumsum(), label=type_name)
+        axes[2].plot(df["episode_index"], df[f"kills_{type_name}"], label=type_name)
 
     axes[0].set_title(f"Training Rewards, rolling mean {window}")
     axes[0].set_xlabel("Completed episode")
@@ -156,10 +219,82 @@ def plot_mfdsrq_training_curves(
     axes[1].legend()
     axes[1].grid(alpha=0.25)
 
+    axes[2].set_title("Kills Per Episode")
+    axes[2].set_xlabel("Completed episode")
+    axes[2].set_ylabel("Kills")
+    axes[2].legend()
+    axes[2].grid(alpha=0.25)
+
     fig.tight_layout()
     if save:
         run_dir = Path(stats["run_dir"])
-        out_path = run_dir / "training_reward_and_wins.png"
+        out_path = run_dir / "training_reward_wins_and_kills.png"
+        fig.savefig(out_path, dpi=150, bbox_inches="tight")
+        print(f"Saved training curves to {out_path}")
+    return fig
+
+
+def plot_mfrl_baseline_training_curves(
+    result_or_stats_path: dict[str, Any] | str | Path,
+    *,
+    smoothing_window: int = 20,
+    save: bool = True,
+):
+    """Plot baseline team rewards, cumulative wins, and kills from training stats."""
+    import matplotlib.pyplot as plt
+    import pandas as pd
+
+    stats = _load_training_stats(result_or_stats_path)
+    records = stats.get("records", [])
+    if not records:
+        raise ValueError("No completed baseline records found in training stats.")
+
+    type_names = ["main", "opponent"]
+    rows = []
+    for record in records:
+        row = {
+            "episode": record["episode"],
+            "env_idx": record.get("env_idx", 0),
+        }
+        for type_name in type_names:
+            row[f"reward_{type_name}"] = record["rewards"].get(type_name, 0.0)
+            row[f"win_{type_name}"] = int(record.get("winner") == type_name)
+            row[f"kills_{type_name}"] = record.get("kills", {}).get(type_name, 0)
+        rows.append(row)
+    df = pd.DataFrame(rows).sort_values(["episode", "env_idx"]).reset_index(drop=True)
+    df["episode_index"] = range(1, len(df) + 1)
+
+    fig, axes = plt.subplots(1, 3, figsize=(17, 4))
+    window = max(int(smoothing_window), 1)
+    for type_name in type_names:
+        reward_col = f"reward_{type_name}"
+        series = df[reward_col].rolling(window, min_periods=1).mean()
+        axes[0].plot(df["episode_index"], series, label=type_name)
+        axes[1].plot(df["episode_index"], df[f"win_{type_name}"].cumsum(), label=type_name)
+        axes[2].plot(df["episode_index"], df[f"kills_{type_name}"], label=type_name)
+
+    axes[0].set_title(f"Training Rewards, rolling mean {window}")
+    axes[0].set_xlabel("Completed episode")
+    axes[0].set_ylabel("Team reward")
+    axes[0].legend()
+    axes[0].grid(alpha=0.25)
+
+    axes[1].set_title("Cumulative Team Wins")
+    axes[1].set_xlabel("Completed episode")
+    axes[1].set_ylabel("Wins")
+    axes[1].legend()
+    axes[1].grid(alpha=0.25)
+
+    axes[2].set_title("Kills Per Episode")
+    axes[2].set_xlabel("Completed episode")
+    axes[2].set_ylabel("Kills")
+    axes[2].legend()
+    axes[2].grid(alpha=0.25)
+
+    fig.tight_layout()
+    if save:
+        run_dir = Path(stats["run_dir"])
+        out_path = run_dir / "training_reward_wins_and_kills.png"
         fig.savefig(out_path, dpi=150, bbox_inches="tight")
         print(f"Saved training curves to {out_path}")
     return fig
@@ -168,8 +303,15 @@ def plot_mfdsrq_training_curves(
 def print_mfdsrq_training_win_rates(result_or_stats_path: dict[str, Any] | str | Path) -> dict[str, float]:
     """Print and return overall kill-rule team win rates from training stats."""
     stats = _load_training_stats(result_or_stats_path)
-    summary = stats.get("summary", {})
-    win_rates = summary.get("win_rates", {})
+    records = stats.get("episode_records") or stats.get("records", [])
+    type_names = stats.get("type_names") or (list(records[0]["rewards"].keys()) if records else [])
+    summary = _strict_training_summary(stats, type_names) if records else stats.get("summary", {})
+    win_rates = summary.get("win_rates")
+    if win_rates is None:
+        win_rates = {
+            "main": float(summary.get("main_win_rate", 0.0)),
+            "opponent": float(summary.get("opponent_win_rate", 0.0)),
+        }
     episodes = int(summary.get("episodes", stats.get("completed_episodes", 0)))
     tie_rate = float(summary.get("tie_rate", 0.0))
     print(f"Completed episodes: {episodes}")
@@ -181,70 +323,346 @@ def print_mfdsrq_training_win_rates(result_or_stats_path: dict[str, Any] | str |
 
 def evaluate_mfdsrq_from_notebook(
     cfg: dict[str, Any],
-    checkpoint_dir: str | Path,
+    checkpoint_dir: str | Path | Mapping[str, str | Path],
     *,
     num_episodes: int = 5,
     obs_noise_sigmas: list[float] | None = None,
+    device: str | None = None,
 ) -> dict[str, Any]:
     """Run greedy MF-DSRQ evaluation and robustness/noise sweeps."""
     return evaluate(
         dict(cfg),
-        str(checkpoint_dir),
+        checkpoint_dir,
         num_episodes=int(num_episodes),
         obs_noise_sigmas=obs_noise_sigmas or [0.0],
+        device=device,
     )
 
 
-def find_latest_benchmarl_run(
+def find_latest_mfrl_run(
     algorithm: str,
-    baseline_root: str | Path = RUNS_DIR / "benchmarl_magent2_notebooks",
-    *,
-    task_name: str | None = None,
+    baseline_root: str | Path = DEFAULT_BASELINE_RUNS_DIR,
 ) -> Path:
-    """Return the newest BenchMARL run folder for an algorithm with a checkpoint."""
-    baseline_root = Path(baseline_root)
-    candidates = []
-    for run_dir in baseline_root.glob(f"{algorithm.lower()}_*"):
-        if task_name and task_name.lower() not in run_dir.name.lower():
-            continue
-        checkpoint_dir = run_dir / "checkpoints"
-        checkpoints = list(checkpoint_dir.glob("checkpoint_*.pt"))
-        if checkpoints:
-            candidates.append((max(p.stat().st_mtime for p in checkpoints), run_dir))
-    if not candidates:
-        raise FileNotFoundError(
-            f"No BenchMARL checkpoints found for {algorithm!r} under {baseline_root}"
+    """Return the newest PyTorch MFRL baseline run folder for an algorithm."""
+    return find_latest_mfrl_baseline_run(algorithm, baseline_root)
+
+
+def _checkpoint_result_dir(checkpoint_source: str | Path | Mapping[str, str | Path]) -> Path:
+    if not isinstance(checkpoint_source, Mapping):
+        return Path(checkpoint_source)
+    parents = [Path(path).parent for path in checkpoint_source.values()]
+    if not parents:
+        raise ValueError("checkpoint_source mapping must contain at least one checkpoint path.")
+    return Path(os.path.commonpath([str(parent) for parent in parents]))
+
+
+def _checkpoint_source_payload(checkpoint_source: str | Path | Mapping[str, str | Path]):
+    if isinstance(checkpoint_source, Mapping):
+        return {team: str(path) for team, path in checkpoint_source.items()}
+    return str(checkpoint_source)
+
+
+def _split_episode_chunks(num_episodes: int, num_chunks: int) -> list[tuple[int, int]]:
+    num_episodes = int(num_episodes)
+    num_chunks = max(int(num_chunks), 1)
+    if num_episodes <= 0:
+        return []
+    num_chunks = min(num_chunks, num_episodes)
+    base = num_episodes // num_chunks
+    remainder = num_episodes % num_chunks
+    chunks = []
+    start = 0
+    for chunk_idx in range(num_chunks):
+        count = base + int(chunk_idx < remainder)
+        chunks.append((start, count))
+        start += count
+    return chunks
+
+
+def _make_eval_progress_bar(total_episodes: int, *, epsilon: float, enabled: bool = True):
+    if not enabled or _tqdm is None or int(total_episodes) <= 0:
+        return None
+    return _tqdm(
+        total=int(total_episodes),
+        desc=f"MF-DSRQ eps={epsilon:g} eval episodes",
+        unit="ep",
+        dynamic_ncols=True,
+        leave=True,
+    )
+
+
+class _LocalProgressQueue:
+    def __init__(self, progress_bar):
+        self.progress_bar = progress_bar
+
+    def put(self, value: int):
+        if self.progress_bar is not None:
+            self.progress_bar.update(int(value))
+
+
+def _drain_progress_queue(progress_queue, progress_bar) -> None:
+    if progress_queue is None or progress_bar is None:
+        return
+    while True:
+        try:
+            progress_bar.update(int(progress_queue.get_nowait()))
+        except Empty:
+            break
+
+
+def _evaluate_mfdsrq_assignment_worker(task: dict[str, Any]) -> dict[str, Any]:
+    return _evaluate_mfdsrq_vs_mfrl_assignment(
+        task["cfg"],
+        task["checkpoint_paths"],
+        task["baseline_folder"],
+        baseline_name=task["baseline"],
+        mfdsrq_team=task["mfdsrq_team"],
+        baseline_team=task["baseline_team"],
+        num_episodes=task["num_episodes"],
+        max_steps=task.get("max_steps"),
+        episode_offset=task.get("episode_offset", 0),
+        progress_queue=task.get("progress_queue"),
+        device=task.get("device"),
+    )
+
+
+def _eval_multiprocessing_context(device) -> mp.context.BaseContext:
+    if _resolve_torch_device(device).type == "cuda":
+        return mp.get_context("spawn")
+    return mp.get_context()
+
+
+def _comparison_payload_from_worker_results(
+    *,
+    epsilon: float,
+    checkpoint_paths: Mapping[str, str | Path],
+    algorithms: tuple[str, ...],
+    baseline_folders: dict[str, Path],
+    worker_results: list[dict[str, Any]],
+    num_episodes_per_side: int,
+    evaluate_both_sides: bool,
+    workers: int,
+    device: str = "cpu",
+) -> dict[str, Any]:
+    rows = []
+    results = {}
+    result_dir = _checkpoint_result_dir(checkpoint_paths)
+    for algorithm in algorithms:
+        baseline_records = [
+            record
+            for result in worker_results
+            if result["baseline"] == algorithm
+            for record in result["records"]
+        ]
+        baseline_records.sort(key=lambda record: (record.get("assignment", ""), int(record.get("episode", 0))))
+        assignment_summaries = {}
+        for record in baseline_records:
+            assignment_summaries.setdefault(record["assignment"], []).append(record)
+        assignment_summaries = {
+            assignment: _summarize_matchup_records(records)
+            for assignment, records in assignment_summaries.items()
+        }
+        summary = _summarize_matchup_records(baseline_records)
+        baseline_checkpoint = next(
+            (
+                result.get("baseline_checkpoint")
+                for result in worker_results
+                if result["baseline"] == algorithm and result.get("baseline_checkpoint") is not None
+            ),
+            None,
         )
-    return sorted(candidates, key=lambda item: item[0])[-1][1]
+        results[algorithm] = {
+            "baseline": algorithm,
+            "baseline_checkpoint": baseline_checkpoint,
+            "checkpoint_dir": _checkpoint_source_payload(checkpoint_paths),
+            "num_episodes_per_assignment": int(num_episodes_per_side),
+            "records": baseline_records,
+            "assignments": assignment_summaries,
+            "summary": summary,
+        }
+        rows.append(
+            {
+                "baseline": algorithm,
+                "mfdsrq_win_rate": summary["mfdsrq_win_rate"],
+                "baseline_win_rate": summary["baseline_win_rate"],
+                "tie_rate": summary["tie_rate"],
+                "mean_mfdsrq_kills": summary["mean_mfdsrq_kills"],
+                "mean_baseline_kills": summary["mean_baseline_kills"],
+                "mean_mfdsrq_reward": summary["mean_mfdsrq_reward"],
+                "mean_baseline_reward": summary["mean_baseline_reward"],
+                "episodes": summary["episodes"],
+                "baseline_folder": str(baseline_folders[algorithm]),
+            }
+        )
+    return {
+        "epsilon": float(epsilon),
+        "checkpoint_dir": str(result_dir),
+        "checkpoint_source": _checkpoint_source_payload(checkpoint_paths),
+        "algorithms": list(algorithms),
+        "num_episodes_per_assignment": int(num_episodes_per_side),
+        "evaluate_both_sides": bool(evaluate_both_sides),
+        "workers": int(workers),
+        "device": str(device),
+        "rows": rows,
+        "results": results,
+    }
+
+
+def evaluate_mfdsrq_torch_epsilon_against_baselines(
+    cfg: dict[str, Any],
+    epsilon: float,
+    checkpoint_paths: Mapping[str, str | Path],
+    *,
+    baseline_root: str | Path = DEFAULT_BASELINE_RUNS_DIR,
+    algorithms: tuple[str, ...] = BASELINE_ALGORITHMS,
+    baseline_folders: dict[str, str | Path] | None = None,
+    num_episodes_per_side: int = 500,
+    max_steps: int | None = None,
+    evaluate_both_sides: bool = True,
+    workers: int = 1,
+    episode_chunk_size: int | None = None,
+    show_progress: bool = True,
+    save: bool = True,
+    device: str | None = None,
+) -> dict[str, Any]:
+    """Evaluate one MF-DSRQ torch epsilon against MFRL baselines, optionally in worker processes."""
+    algorithms = tuple(algorithms)
+    eval_device = _resolve_torch_device(
+        device if device is not None else cfg.get("device"),
+        use_gpu=cfg.get("use_gpu", True),
+    )
+    baseline_folders = {
+        algorithm: Path(folder)
+        for algorithm, folder in (baseline_folders or {}).items()
+    }
+    for algorithm in algorithms:
+        baseline_folders.setdefault(algorithm, find_latest_mfrl_run(algorithm, baseline_root))
+
+    type_names = list(cfg["type_prefixes"].keys())
+    if len(type_names) != 2:
+        raise ValueError("Head-to-head MFRL comparison expects exactly two teams.")
+    assignments = [(type_names[0], type_names[1])]
+    if evaluate_both_sides:
+        assignments.append((type_names[1], type_names[0]))
+
+    workers = max(int(workers), 1)
+    base_units = max(len(algorithms) * len(assignments), 1)
+    if episode_chunk_size is None:
+        chunks_per_assignment = max(1, min(int(num_episodes_per_side), (workers + base_units - 1) // base_units))
+    else:
+        chunk_size = max(int(episode_chunk_size), 1)
+        chunks_per_assignment = max(1, min(int(num_episodes_per_side), (int(num_episodes_per_side) + chunk_size - 1) // chunk_size))
+    chunks = _split_episode_chunks(num_episodes_per_side, chunks_per_assignment)
+    tasks: list[dict[str, Any]] = []
+    for algorithm in algorithms:
+        for mfdsrq_team, baseline_team in assignments:
+            for episode_offset, chunk_size in chunks:
+                tasks.append(
+                    {
+                        "cfg": dict(cfg),
+                        "checkpoint_paths": {team: str(path) for team, path in checkpoint_paths.items()},
+                        "baseline_folder": str(baseline_folders[algorithm]),
+                        "baseline": algorithm,
+                        "mfdsrq_team": mfdsrq_team,
+                        "baseline_team": baseline_team,
+                        "num_episodes": chunk_size,
+                        "episode_offset": episode_offset,
+                        "max_steps": max_steps,
+                        "device": str(eval_device),
+                    }
+                )
+
+    if not tasks:
+        worker_results = []
+    elif workers == 1 or len(tasks) == 1:
+        total_episodes = sum(int(task["num_episodes"]) for task in tasks)
+        progress = _make_eval_progress_bar(total_episodes, epsilon=float(epsilon), enabled=show_progress)
+        worker_results = []
+        try:
+            progress_queue = _LocalProgressQueue(progress)
+            for task in tasks:
+                task_with_progress = dict(task)
+                task_with_progress["progress_queue"] = progress_queue
+                result = _evaluate_mfdsrq_assignment_worker(task_with_progress)
+                worker_results.append(result)
+        finally:
+            if progress is not None:
+                progress.close()
+    else:
+        worker_results = []
+        total_episodes = sum(int(task["num_episodes"]) for task in tasks)
+        progress = _make_eval_progress_bar(total_episodes, epsilon=float(epsilon), enabled=show_progress)
+        mp_context = _eval_multiprocessing_context(eval_device)
+        with mp_context.Manager() as manager:
+            progress_queue = manager.Queue()
+            tasks_with_progress = []
+            for task in tasks:
+                task_with_progress = dict(task)
+                task_with_progress["progress_queue"] = progress_queue
+                tasks_with_progress.append(task_with_progress)
+            with ProcessPoolExecutor(
+                max_workers=min(workers, len(tasks)),
+                mp_context=mp_context,
+            ) as executor:
+                pending = {
+                    executor.submit(_evaluate_mfdsrq_assignment_worker, task)
+                    for task in tasks_with_progress
+                }
+                try:
+                    while pending:
+                        done, pending = wait(pending, timeout=0.5, return_when=FIRST_COMPLETED)
+                        _drain_progress_queue(progress_queue, progress)
+                        for future in done:
+                            worker_results.append(future.result())
+                    _drain_progress_queue(progress_queue, progress)
+                finally:
+                    _drain_progress_queue(progress_queue, progress)
+                    if progress is not None:
+                        progress.close()
+
+    payload = _comparison_payload_from_worker_results(
+        epsilon=float(epsilon),
+        checkpoint_paths=checkpoint_paths,
+        algorithms=algorithms,
+        baseline_folders=baseline_folders,
+        worker_results=worker_results,
+        num_episodes_per_side=int(num_episodes_per_side),
+        evaluate_both_sides=evaluate_both_sides,
+        workers=workers,
+        device=str(eval_device),
+    )
+    if save:
+        out_path = Path(payload["checkpoint_dir"]) / "head_to_head_vs_mfrl_baselines.json"
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2)
+        payload["results_path"] = str(out_path)
+        print(f"Saved head-to-head comparison to {out_path}")
+    return payload
 
 
 def evaluate_mfdsrq_against_baselines(
     cfg: dict[str, Any],
-    checkpoint_dir: str | Path,
+    checkpoint_dir: str | Path | Mapping[str, str | Path],
     *,
-    baseline_root: str | Path = RUNS_DIR / "benchmarl_magent2_notebooks",
-    algorithms: tuple[str, ...] = ("mappo", "ippo", "iql"),
+    baseline_root: str | Path = DEFAULT_BASELINE_RUNS_DIR,
+    algorithms: tuple[str, ...] = BASELINE_ALGORITHMS,
     baseline_folders: dict[str, str | Path] | None = None,
     num_episodes: int = 20,
     max_steps: int | None = None,
     evaluate_both_sides: bool = True,
     save: bool = True,
+    device: str | None = None,
 ) -> dict[str, Any]:
-    """Evaluate MF-DSRQ head-to-head against BenchMARL baseline checkpoints."""
+    """Evaluate MF-DSRQ head-to-head against PyTorch MFRL baseline checkpoints."""
     rows = []
     results = {}
     baseline_folders = baseline_folders or {}
-    task_name = str(cfg.get("env_name", "")).split("_v", 1)[0]
     for algorithm in algorithms:
         if algorithm in baseline_folders:
             baseline_folder = Path(baseline_folders[algorithm])
         else:
-            baseline_folder = find_latest_benchmarl_run(
-                algorithm,
-                baseline_root,
-                task_name=task_name or None,
-            )
-        result = evaluate_mfdsrq_vs_benchmarl(
+            baseline_folder = find_latest_mfrl_run(algorithm, baseline_root)
+        result = evaluate_mfdsrq_vs_mfrl_baseline(
             dict(cfg),
             checkpoint_dir,
             baseline_folder,
@@ -252,6 +670,7 @@ def evaluate_mfdsrq_against_baselines(
             num_episodes=int(num_episodes),
             max_steps=max_steps,
             evaluate_both_sides=evaluate_both_sides,
+            device=device,
         )
         summary = result["summary"]
         rows.append(
@@ -270,19 +689,74 @@ def evaluate_mfdsrq_against_baselines(
         )
         results[algorithm] = result
 
+    result_dir = _checkpoint_result_dir(checkpoint_dir)
     payload = {
-        "checkpoint_dir": str(checkpoint_dir),
+        "checkpoint_dir": str(result_dir),
+        "checkpoint_source": _checkpoint_source_payload(checkpoint_dir),
         "algorithms": list(algorithms),
+        "device": str(
+            _resolve_torch_device(
+                device if device is not None else cfg.get("device"),
+                use_gpu=cfg.get("use_gpu", True),
+            )
+        ),
         "rows": rows,
         "results": results,
     }
     if save:
-        out_path = Path(checkpoint_dir) / "head_to_head_vs_benchmarl.json"
+        out_path = result_dir / "head_to_head_vs_mfrl_baselines.json"
         with open(out_path, "w", encoding="utf-8") as f:
             json.dump(payload, f, indent=2)
         payload["results_path"] = str(out_path)
         print(f"Saved head-to-head comparison to {out_path}")
     return payload
+
+
+def plot_mfdsrq_torch_baseline_bars(
+    comparison: dict[str, Any],
+    *,
+    epsilon: float | None = None,
+    save: bool = True,
+):
+    """Plot MF-DSRQ torch versus baseline win rates and rewards for one epsilon."""
+    import matplotlib.pyplot as plt
+    import pandas as pd
+
+    df = pd.DataFrame(comparison["rows"])
+    if df.empty:
+        raise ValueError("No comparison rows to plot.")
+    epsilon = float(comparison.get("epsilon", epsilon if epsilon is not None else 0.0))
+    x = list(range(len(df)))
+    width = 0.36
+    labels = [f"vs {name.upper()}" for name in df["baseline"]]
+    mf_label = f"MF-DSRQ torch eps={epsilon:g}"
+
+    fig, axes = plt.subplots(1, 2, figsize=(13, 4))
+    axes[0].bar([i - width / 2 for i in x], df["mfdsrq_win_rate"], width, label=mf_label)
+    axes[0].bar([i + width / 2 for i in x], df["baseline_win_rate"], width, label="Baseline")
+    axes[0].set_xticks(x)
+    axes[0].set_xticklabels(labels)
+    axes[0].set_ylim(0, 1.05)
+    axes[0].set_ylabel("Average win rate")
+    axes[0].set_title("Head-to-head win rate")
+    axes[0].legend()
+    axes[0].grid(axis="y", alpha=0.25)
+
+    axes[1].bar([i - width / 2 for i in x], df["mean_mfdsrq_reward"], width, label=mf_label)
+    axes[1].bar([i + width / 2 for i in x], df["mean_baseline_reward"], width, label="Baseline")
+    axes[1].set_xticks(x)
+    axes[1].set_xticklabels(labels)
+    axes[1].set_ylabel("Average total reward")
+    axes[1].set_title("Head-to-head total reward")
+    axes[1].legend()
+    axes[1].grid(axis="y", alpha=0.25)
+
+    fig.tight_layout()
+    if save:
+        out_path = Path(comparison["checkpoint_dir"]) / "head_to_head_win_rate_and_reward.png"
+        fig.savefig(out_path, dpi=150, bbox_inches="tight")
+        print(f"Saved win-rate/reward plot to {out_path}")
+    return fig
 
 
 def plot_mfdsrq_baseline_win_rates(comparison: dict[str, Any], *, save: bool = True):
@@ -322,8 +796,8 @@ def baseline_rollout_video_from_notebook(
     deterministic: bool = True,
     title: str | None = None,
 ):
-    """Reload a trained BenchMARL baseline and display one evaluation rollout."""
-    return sample_benchmarl_rollout_video(
+    """Reload a trained PyTorch MFRL baseline and display one evaluation rollout."""
+    return sample_mfrl_rollout_video(
         result_or_folder,
         max_steps=max_steps,
         fps=fps,

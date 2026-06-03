@@ -5,7 +5,7 @@ Usage:
         --config discrete_action_space/mean_field_dsrq/configs/battle_v4.yaml
 
 Override any config key on the command line:
-    --total_steps 100000 --num_envs 4 --map_size 18
+    --target_episodes 100 --num_envs 4 --map_size 18
 """
 
 import argparse
@@ -24,10 +24,13 @@ _DEFAULT_RUNS_DIR = _THIS_DIR / "runs"
 if str(_DISCRETE_DIR) not in sys.path:
     sys.path.insert(0, str(_DISCRETE_DIR))
 
-from mean_field_dsrq.path_mean_field_dsrq import MFDsrqAgent as PathMFDsrqAgent
 from mean_field_dsrq.solver_free_mean_field_dsrq import SolverFreeMFDsrqAgent
-from mean_field_dsrq.magent_env_wrapper import VectorizedMAgentWrapper
-from mean_field_dsrq.benchmarl_magent2 import make_magent2_parallel_env_factory
+from mean_field_dsrq.torch_robust_mean_field_dsrq import TorchRobustMFDsrqAgent
+from mean_field_dsrq.magent2_env import (
+    DEFAULT_TASK_CONFIG,
+    LowLevelBattleEnv,
+    make_magent2_parallel_env_factory,
+)
 
 try:
     from tqdm.auto import tqdm as _tqdm
@@ -62,14 +65,14 @@ def _reference_explore_schedule(cfg: dict, fraction: float) -> float:
     return _linear_schedule(mid, end, (fraction - mid_frac) / max(1.0 - mid_frac, 1e-6))
 
 
-def _make_progress_bar(total_steps: int, cfg: dict):
+def _make_progress_bar(target_episodes: int, cfg: dict):
     use_progress_bar = bool(cfg.get("use_progress_bar", True))
     if not use_progress_bar or _tqdm is None:
         return None
     return _tqdm(
-        total=total_steps,
-        desc="MF-DSRQ training",
-        unit="step",
+        total=target_episodes,
+        desc="MF-DSRQ episodes",
+        unit="ep",
         dynamic_ncols=True,
         leave=True,
         file=sys.stdout,
@@ -114,7 +117,11 @@ def _episode_win_record(
         }
 
     max_kill = max(kills.values()) if kills else 0
-    wins = {t: int(kills[t] == max_kill) for t in type_names}
+    winner_count = sum(int(kills[t] == max_kill) for t in type_names)
+    wins = {
+        t: int(winner_count == 1 and kills[t] == max_kill)
+        for t in type_names
+    }
     return {
         "episode": int(episode),
         "global_step": int(global_step),
@@ -124,7 +131,7 @@ def _episode_win_record(
         "final_counts": {t: int(final_counts.get(t, 0)) for t in type_names},
         "kills": {t: int(kills.get(t, 0)) for t in type_names},
         "wins": wins,
-        "tie": int(sum(wins.values()) > 1),
+        "tie": int(winner_count != 1),
     }
 
 
@@ -140,8 +147,124 @@ def _summarize_episode_records(records: list[dict], type_names: list[str]) -> di
     }
 
 
+def _low_level_counts(env: LowLevelBattleEnv) -> dict[str, int]:
+    return {"main": env.get_num(0), "opponent": env.get_num(1)}
+
+
+def _role_episode_win_record(episode: int, rewards: dict, initial_counts: dict, final_counts: dict) -> dict:
+    kills = {
+        "main": int(initial_counts["opponent"] - final_counts["opponent"]),
+        "opponent": int(initial_counts["main"] - final_counts["main"]),
+    }
+    if kills["main"] > kills["opponent"]:
+        winner = "main"
+    elif kills["opponent"] > kills["main"]:
+        winner = "opponent"
+    else:
+        winner = "tie"
+    return {
+        "episode": int(episode),
+        "rewards": {k: float(v) for k, v in rewards.items()},
+        "initial_counts": {k: int(v) for k, v in initial_counts.items()},
+        "final_counts": {k: int(v) for k, v in final_counts.items()},
+        "kills": kills,
+        "winner": winner,
+    }
+
+
+def _summarize_role_records(records: list[dict]) -> dict:
+    n = len(records)
+    if n == 0:
+        return {
+            "episodes": 0,
+            "main_win_rate": 0.0,
+            "opponent_win_rate": 0.0,
+            "tie_rate": 0.0,
+        }
+    return {
+        "episodes": n,
+        "main_win_rate": float(np.mean([r["winner"] == "main" for r in records])),
+        "opponent_win_rate": float(np.mean([r["winner"] == "opponent" for r in records])),
+        "tie_rate": float(np.mean([r["winner"] == "tie" for r in records])),
+        "mean_main_reward": float(np.mean([r["rewards"]["main"] for r in records])),
+        "mean_opponent_reward": float(np.mean([r["rewards"]["opponent"] for r in records])),
+        "mean_main_kills": float(np.mean([r["kills"]["main"] for r in records])),
+        "mean_opponent_kills": float(np.mean([r["kills"]["opponent"] for r in records])),
+    }
+
+
+def _view_batch_to_chw(view_batch: np.ndarray) -> np.ndarray:
+    view_batch = np.asarray(view_batch, dtype=np.float32)
+    if view_batch.ndim != 4:
+        raise ValueError(f"Expected batched Battle view observations with rank 4, got {view_batch.shape}.")
+    return np.transpose(view_batch, (0, 3, 1, 2)).astype(np.float32, copy=False)
+
+
+def _feature_batch(feature_batch: np.ndarray, feature_dim: int) -> np.ndarray:
+    feature_batch = np.asarray(feature_batch, dtype=np.float32)
+    if feature_batch.ndim != 2 or feature_batch.shape[1] != int(feature_dim):
+        raise ValueError(
+            f"Expected batched Battle feature observations with shape [N, {int(feature_dim)}], "
+            f"got {feature_batch.shape}."
+        )
+    return feature_batch.astype(np.float32, copy=False)
+
+
+def _zero_mean(num_actions: int) -> np.ndarray:
+    return np.zeros((1, int(num_actions)), dtype=np.float32)
+
+
+def _actions_to_mean(actions: np.ndarray, num_actions: int) -> np.ndarray:
+    actions = np.asarray(actions, dtype=np.int64)
+    if len(actions) == 0:
+        return _zero_mean(num_actions)
+    return np.eye(int(num_actions), dtype=np.float32)[actions].mean(axis=0, keepdims=True)
+
+
+def _soft_copy_agent(main_agent, opponent_agent, tau: float) -> None:
+    tau = float(tau)
+    for left_net_name in ("q_net", "target_net"):
+        main_net = getattr(main_agent, left_net_name)
+        opponent_net = getattr(opponent_agent, left_net_name)
+        for main_param, opponent_param in zip(main_net.parameters(), opponent_net.parameters()):
+            opponent_param.detach().copy_(
+                (1.0 - tau) * main_param.detach() + tau * opponent_param.detach()
+            )
+
+
+def _train_main_agent(agent, max_batches: int | None) -> float | None:
+    if len(agent.buffer) < max(agent.batch_size, agent.learning_starts):
+        return None
+    if max_batches is None:
+        batch_count = len(agent.buffer) // max(int(agent.batch_size), 1)
+    else:
+        batch_count = max(int(max_batches), 0)
+    losses = []
+    for _ in range(batch_count):
+        loss = agent.train_step()
+        if loss is not None:
+            losses.append(float(loss))
+    return float(np.mean(losses)) if losses else None
+
+
 def mfdsrq_algorithm_name(cfg: dict) -> str:
     return str(cfg.get("algorithm", "mf_srq_lp")).lower()
+
+
+def resolve_mean_field_source(cfg: dict) -> str:
+    mean_field_source = str(cfg.get("mean_field_source", "opponent")).lower()
+    if mean_field_source not in {"opponent", "same_team", "self"}:
+        raise ValueError(
+            "mean_field_source must be one of {'opponent', 'same_team', 'self'}, "
+            f"got {mean_field_source!r}."
+        )
+    return mean_field_source
+
+
+def conditioning_group_idx(group_idx: int, mean_field_source: str) -> int:
+    if str(mean_field_source).lower() == "opponent":
+        return 1 - int(group_idx)
+    return int(group_idx)
 
 
 def make_mfdsrq_agent(
@@ -152,6 +275,7 @@ def make_mfdsrq_agent(
     n_own_actions: int,
     n_nbr_actions: int,
     device,
+    feature_dim: int = 0,
 ):
     C, H, W = obs_shape
     common = dict(
@@ -161,6 +285,7 @@ def make_mfdsrq_agent(
         obs_width=W,
         n_own_actions=int(n_own_actions),
         n_nbr_actions=int(n_nbr_actions),
+        feature_dim=int(feature_dim),
         epsilon_robust=cfg.get("epsilon_robust_start", 0.10),
         gamma=cfg.get("gamma", 0.95),
         lr=cfg.get("lr", 1e-4),
@@ -183,22 +308,18 @@ def make_mfdsrq_agent(
             robust_policy_cache_size=cfg.get("robust_policy_cache_size", 4096),
             robust_policy_cache_round_digits=cfg.get("robust_policy_cache_round_digits", 6),
         )
-    if algorithm in {"path_mf_dsrq", "path_mean_field_dsrq"}:
-        return PathMFDsrqAgent(
+    if algorithm in {"mf_srq_torch", "torch_mf_srq", "torch_robust_mfdsrq"}:
+        return TorchRobustMFDsrqAgent(
             **common,
-            pathwrap_path=cfg.get("pathwrap_path", _DISCRETE_DIR / "sre_solvers" / "pathwrap.so"),
-            sre_solver_name=cfg.get("sre_solver_name", "path_c_pool"),
-            sre_solver_workers=cfg.get("sre_solver_workers", 8),
-            sre_solver_start_method=cfg.get("sre_solver_start_method"),
-            sre_num_random_starts=cfg.get("sre_num_random_starts", 5),
-            sre_num_pure_starts=cfg.get("sre_num_pure_starts", 5),
-            sre_policy_cache_enabled=cfg.get("sre_policy_cache_enabled", True),
-            sre_policy_cache_size=cfg.get("sre_policy_cache_size", 4096),
-            sre_policy_cache_round_digits=cfg.get("sre_policy_cache_round_digits", 6),
-            sre_uniform_fallback_on_failure=cfg.get("sre_uniform_fallback_on_failure", True),
+            robust_distance=cfg.get("robust_distance", "tv"),
+            robust_lp_fallback=cfg.get("robust_lp_fallback", "greedy_tv"),
+            robust_policy_cache_enabled=False,
+            robust_policy_cache_size=0,
+            robust_policy_cache_round_digits=cfg.get("robust_policy_cache_round_digits", 6),
+            robust_policy_temperature=cfg.get("robust_policy_temperature", 0.1),
         )
     raise ValueError(
-        "algorithm must be 'mf_srq_lp' or 'path_mf_dsrq', "
+        "algorithm must be 'mf_srq_lp' or 'mf_srq_torch', "
         f"got {cfg.get('algorithm')!r}."
     )
 
@@ -211,39 +332,53 @@ def train(cfg: dict):
     device = torch.device("cuda" if torch.cuda.is_available() and cfg.get("use_gpu", True) else "cpu")
     print(f"Device: {device}")
 
-    env_factory = _make_env_factory(cfg)
     type_prefixes = cfg["type_prefixes"]  # e.g. {"red": "red_", "blue": "blue_"}
     type_names = list(type_prefixes.keys())
-    num_envs = cfg.get("num_envs", 16)
-    ema_momentum = cfg.get("ema_momentum", 1.0)
+    if len(type_names) != 2:
+        raise ValueError("Reference-style MF-DSRQ Battle training expects exactly two teams.")
+    mean_field_source = resolve_mean_field_source(cfg)
+    num_envs = max(int(cfg.get("num_envs", 16)), 1)
+    target_episodes = int(cfg.get("target_episodes", 2000))
+    task_config = {**DEFAULT_TASK_CONFIG, **cfg}
+    max_steps = int(task_config["max_cycles"])
+    envs = [LowLevelBattleEnv(task_config) for _ in range(num_envs)]
+    meta = envs[0].meta()
+    view_h, view_w, view_c = meta.view_space
+    feature_dim = int(meta.feature_space)
+    obs_shape = (int(view_c), int(view_h), int(view_w))
 
-    vec_env = VectorizedMAgentWrapper(env_factory, type_prefixes, num_envs, ema_momentum)
-
-    n_own = vec_env.n_actions
-
-    # One agent per type.
-    agents = {}
-    for type_name in type_prefixes:
-        obs_shape = vec_env.obs_shape[type_name]  # (C, H, W)
-        C, H, W = obs_shape
-        n_own_t = n_own[type_name]
-        n_nbr_t = n_nbr_t_default(n_own, type_name, cfg)
-        agents[type_name] = make_mfdsrq_agent(
+    agents = {
+        "main": make_mfdsrq_agent(
             cfg,
-            type_id=list(type_prefixes.keys()).index(type_name),
-            obs_shape=(C, H, W),
-            n_own_actions=n_own_t,
-            n_nbr_actions=n_nbr_t,
+            type_id=0,
+            obs_shape=obs_shape,
+            n_own_actions=meta.num_actions,
+            n_nbr_actions=meta.num_actions,
+            feature_dim=feature_dim,
             device=device,
-        )
+        ),
+        "opponent": make_mfdsrq_agent(
+            cfg,
+            type_id=1,
+            obs_shape=obs_shape,
+            n_own_actions=meta.num_actions,
+            n_nbr_actions=meta.num_actions,
+            feature_dim=feature_dim,
+            device=device,
+        ),
+    }
 
-    total_steps = cfg.get("total_steps", 1_000_000)
     eps_robust_start = cfg.get("epsilon_robust_start", 0.10)
     eps_robust_end = cfg.get("epsilon_robust_end", 0.02)
     eps_robust_decay_frac = cfg.get("epsilon_robust_decay_frac", 1.0)
+    self_play_tau = float(cfg.get("self_play_tau", 0.01))
+    save_every = int(cfg.get("save_every", 20))
+    max_train_batches_per_update = cfg.get("max_train_batches_per_update")
+    if max_train_batches_per_update is not None:
+        max_train_batches_per_update = int(max_train_batches_per_update)
 
     algorithm = mfdsrq_algorithm_name(cfg)
-    run_dir = Path(cfg.get("output_dir", _DEFAULT_RUNS_DIR)) / cfg["env_name"] / f"{algorithm}_seed{seed}"
+    run_dir = Path(cfg.get("output_dir", _DEFAULT_RUNS_DIR)) / cfg["env_name"] / f"seed{seed}"
     run_dir.mkdir(parents=True, exist_ok=True)
     with open(run_dir / "config.json", "w") as f:
         json.dump(cfg, f, indent=2)
@@ -252,30 +387,36 @@ def train(cfg: dict):
     if _TB and _SummaryWriter is not None:
         writer = _SummaryWriter(log_dir=str(run_dir / "tb"))
 
-    # Reset all envs.
-    env_obs_dicts = []
-    for result in vec_env.reset_all():
-        env_obs_dicts.append(result[0])
-
-    episode_initial_counts = [_team_counts(env, type_prefixes) for env in vec_env.envs]
-    episode_rewards = [{t: [] for t in type_prefixes} for _ in range(num_envs)]
-    ep_reward_accum = [{t: 0.0 for t in type_prefixes} for _ in range(num_envs)]
-    episode_records: list[dict] = []
+    records: list[dict] = []
+    losses: list[dict] = []
     completed_episodes = 0
-    global_step = 0
+    env_steps = 0
     gradient_steps = 0
-    log_interval = cfg.get("log_interval", 1000)
-    save_interval = cfg.get("save_interval", 50_000)
+    best_main_reward = -float("inf")
+    reward_log_interval = int(cfg.get("reward_log_interval", cfg.get("print_every", 100)) or 0)
     t_start = time.perf_counter()
 
-    print(f"Starting {algorithm} training: {total_steps} env steps, {num_envs} envs")
-    progress_bar = _make_progress_bar(total_steps, cfg)
+    checkpoint_paths = {
+        "main": {
+            "best": run_dir / "ckpt_main_best.pt",
+            "final": run_dir / "ckpt_main_final.pt",
+        },
+        "opponent": {
+            "best": run_dir / "ckpt_opponent_best.pt",
+            "final": run_dir / "ckpt_opponent_final.pt",
+        },
+    }
+
+    print(
+        f"Starting {algorithm} training: {target_episodes} episodes, "
+        f"{num_envs} envs, max_cycles={max_steps}"
+    )
+    progress_bar = _make_progress_bar(target_episodes, cfg)
 
     try:
-        while global_step < total_steps:
-            frac = global_step / max(total_steps, 1)
+        while completed_episodes < target_episodes:
+            frac = completed_episodes / max(target_episodes, 1)
 
-            # Anneal hyperparameters.
             eps_robust = _linear_schedule(
                 eps_robust_start,
                 eps_robust_end,
@@ -286,191 +427,266 @@ def train(cfg: dict):
                 agent.epsilon_robust = eps_robust
                 agent.epsilon_explore = eps_explore
 
-            # Collect actions for all alive agents in all envs.
-            actions_per_env = []
-            for env_idx in range(num_envs):
-                obs_dict = env_obs_dicts[env_idx]
-                env_obj = vec_env.envs[env_idx]
-                env_actions = {}
-                for type_name in type_prefixes:
-                    type_agents = env_obj.agents_of_type(type_name)
-                    if not type_agents:
+            active = [True for _ in envs]
+            step_ct = [0 for _ in envs]
+            former_prob = [[_zero_mean(meta.num_actions), _zero_mean(meta.num_actions)] for _ in envs]
+            episode_rewards = [{"main": 0.0, "opponent": 0.0} for _ in envs]
+            initial_counts = []
+            for env in envs:
+                env.reset()
+                initial_counts.append(_low_level_counts(env))
+
+            while any(active):
+                state = [[None, None] for _ in envs]
+                ids = [[None, None] for _ in envs]
+                obs_chw = [[None, None] for _ in envs]
+                features = [[None, None] for _ in envs]
+                pre_prob = [[None, None] for _ in envs]
+                actions = [[None, None] for _ in envs]
+
+                for group_idx, role in ((0, "main"), (1, "opponent")):
+                    batch_obs = []
+                    batch_feature = []
+                    batch_mean = []
+                    splits = []
+                    for env_idx, env in enumerate(envs):
+                        if not active[env_idx]:
+                            splits.append(0)
+                            continue
+                        state[env_idx][group_idx] = env.get_observation(group_idx)
+                        ids[env_idx][group_idx] = np.asarray(env.get_agent_id(group_idx)).copy()
+                        n_agents = len(state[env_idx][group_idx][0])
+                        splits.append(n_agents)
+                        if n_agents:
+                            cond_group_idx = conditioning_group_idx(group_idx, mean_field_source)
+                            prob = np.tile(former_prob[env_idx][cond_group_idx], (n_agents, 1))
+                            pre_prob[env_idx][group_idx] = prob.copy()
+                            group_obs_chw = _view_batch_to_chw(state[env_idx][group_idx][0]).copy()
+                            group_feature = _feature_batch(
+                                state[env_idx][group_idx][1],
+                                feature_dim,
+                            ).copy()
+                            obs_chw[env_idx][group_idx] = group_obs_chw
+                            features[env_idx][group_idx] = group_feature
+                            batch_obs.append(group_obs_chw)
+                            batch_feature.append(group_feature)
+                            batch_mean.append(prob)
+                    if batch_obs:
+                        all_actions = agents[role].act_batch(
+                            np.concatenate(batch_obs, axis=0),
+                            np.concatenate(batch_mean, axis=0),
+                            np.concatenate(batch_feature, axis=0),
+                        )
+                    else:
+                        all_actions = np.array([], dtype=np.int32)
+                    offset = 0
+                    for env_idx, n_agents in enumerate(splits):
+                        if n_agents:
+                            actions[env_idx][group_idx] = all_actions[offset : offset + n_agents]
+                            offset += n_agents
+
+                for env_idx, env in enumerate(envs):
+                    if not active[env_idx]:
                         continue
-                    agent = agents[type_name]
-                    eligible_agents = [aid for aid in type_agents if aid in obs_dict]
-                    if not eligible_agents:
+                    for group_idx in (0, 1):
+                        env.set_action(group_idx, actions[env_idx][group_idx])
+
+                for env_idx, env in enumerate(envs):
+                    if not active[env_idx]:
                         continue
-                    obs_batch = np.stack([obs_dict[aid] for aid in eligible_agents])
-                    mean_a_batch = np.stack([env_obj.get_mean_a(aid) for aid in eligible_agents])
-                    acts = agent.act_batch(obs_batch, mean_a_batch)
-                    for aid, a in zip(eligible_agents, acts):
-                        env_actions[aid] = int(a)
-                actions_per_env.append(env_actions)
+                    done = env.step()
+                    rewards = [env.grid.get_reward(env.handles[0]), env.grid.get_reward(env.handles[1])]
+                    alives = [env.get_alive(0), env.get_alive(1)]
+                    next_prob = [
+                        _actions_to_mean(actions[env_idx][0], meta.num_actions),
+                        _actions_to_mean(actions[env_idx][1], meta.num_actions),
+                    ]
 
-            # Step all envs.
-            results = vec_env.step_all(actions_per_env)
+                    for group_idx, role in ((0, "main"), (1, "opponent")):
+                        episode_rewards[env_idx][role] += float(np.sum(rewards[group_idx]))
 
-            # Process transitions and push to buffers.
-            new_obs_dicts = []
-            for env_idx, (obs_dict_next, rewards, dones, mean_a_t, mean_a_tp1, info) in enumerate(results):
-                env_obj = vec_env.envs[env_idx]
-                obs_dict_prev = env_obs_dicts[env_idx]
-                env_actions = actions_per_env[env_idx]
+                    env.clear_dead()
+                    step_ct[env_idx] += 1
+                    env_steps += 1
+                    episode_done = bool(done or step_ct[env_idx] >= max_steps)
 
-                for aid, action in env_actions.items():
-                    if aid not in obs_dict_prev:
-                        continue
-                    type_name = env_obj.agent_type(aid)
-                    if type_name is None:
-                        continue
-                    agent = agents[type_name]
-                    obs = obs_dict_prev[aid]
-                    next_obs_arr = obs_dict_next.get(aid, np.zeros_like(obs))
-                    reward = rewards.get(aid, 0.0)
-                    done = dones.get(aid, False)
-                    m_a = mean_a_t.get(
-                        aid,
-                        np.full(agent.n_nbr_actions, 1.0 / agent.n_nbr_actions, dtype=np.float32),
-                    )
-                    m_a_next = mean_a_tp1.get(aid, m_a.copy())
-                    valid = True
-
-                    agent.push(obs, action, reward, next_obs_arr, m_a, m_a_next, done, valid)
-                    ep_reward_accum[env_idx][type_name] += reward
-
-                # Check if env is done. Time-limit truncation is an episode
-                # boundary but survivors still count as alive for win/kills.
-                if info.get("episode_done", False) or len(env_obj.alive_agents) == 0:
-                    final_counts = _team_counts(env_obj, type_prefixes)
-                    episode_record = _episode_win_record(
-                        episode=completed_episodes + 1,
-                        global_step=global_step,
-                        env_idx=env_idx,
-                        rewards=ep_reward_accum[env_idx],
-                        initial_counts=episode_initial_counts[env_idx],
-                        final_counts=final_counts,
-                        type_names=type_names,
-                    )
-                    episode_records.append(episode_record)
-                    for type_name in type_prefixes:
-                        episode_rewards[env_idx][type_name].append(ep_reward_accum[env_idx][type_name])
-                        ep_reward_accum[env_idx][type_name] = 0.0
-                    obs_d, _ = env_obj.reset()
-                    episode_initial_counts[env_idx] = _team_counts(env_obj, type_prefixes)
-                    new_obs_dicts.append(obs_d)
-                    completed_episodes += 1
-                else:
-                    new_obs_dicts.append(obs_dict_next)
-
-            env_obs_dicts = new_obs_dicts
-
-            # Train step.
-            for type_name, agent in agents.items():
-                loss = agent.maybe_train()
-                if loss is not None:
-                    gradient_steps += 1
-
-            step_increment = min(num_envs, total_steps - global_step)
-            global_step += step_increment
-            if progress_bar is not None:
-                progress_bar.update(step_increment)
-
-            # Logging.
-            if global_step % log_interval < num_envs:
-                elapsed = time.perf_counter() - t_start
-                sps = global_step / max(elapsed, 1e-6)
-                progress_metrics = {
-                    "episodes": completed_episodes,
-                    "sps": f"{sps:.0f}",
-                    "eps_sre": f"{eps_robust:.3f}",
-                    "eps_exp": f"{eps_explore:.3f}",
-                }
-                log_str = (
-                    f"step={global_step:,}  eps_sre={eps_robust:.3f}  "
-                    f"eps_explore={eps_explore:.3f}  "
-                    f"grad_steps={gradient_steps}  episodes={completed_episodes}  "
-                    f"sps={sps:.0f}"
-                )
-                for type_name, agent in agents.items():
-                    if agent._last_loss is not None:
-                        progress_metrics[f"loss_{type_name}"] = f"{agent._last_loss:.4f}"
-                        log_str += f"  loss_{type_name}={agent._last_loss:.4f}"
-                    path_fallbacks = getattr(agent, "sre_failure_fallbacks", 0)
-                    lp_failures = getattr(agent, "robust_lp_failures", 0)
-                    if path_fallbacks:
-                        progress_metrics[f"sre_fb_{type_name}"] = str(path_fallbacks)
-                        log_str += f"  sre_fb_{type_name}={path_fallbacks}"
-                    if lp_failures:
-                        progress_metrics[f"lp_fb_{type_name}"] = str(lp_failures)
-                        log_str += f"  lp_fb_{type_name}={lp_failures}"
-                    all_ep_r = episode_rewards[0].get(type_name, [])
-                    if all_ep_r:
-                        mean_ep_reward = np.mean(all_ep_r[-20:])
-                        progress_metrics[f"r_{type_name}"] = f"{mean_ep_reward:.2f}"
-                        log_str += f"  ep_r_{type_name}={mean_ep_reward:.2f}"
-                if progress_bar is not None:
-                    progress_bar.set_postfix(progress_metrics)
-                else:
-                    print(log_str)
-
-                if writer is not None:
-                    writer.add_scalar("train/epsilon_robust", eps_robust, global_step)
-                    writer.add_scalar("train/eps_explore", eps_explore, global_step)
-                    writer.add_scalar("train/episodes", completed_episodes, global_step)
-                    for type_name, agent in agents.items():
-                        if agent._last_loss is not None:
-                            writer.add_scalar(f"train/loss_{type_name}", agent._last_loss, global_step)
-                        all_ep_r = episode_rewards[0].get(type_name, [])
-                        if all_ep_r:
-                            writer.add_scalar(
-                                f"train/ep_reward_{type_name}",
-                                np.mean(all_ep_r[-20:]),
-                                global_step,
+                    if actions[env_idx][0] is not None and len(actions[env_idx][0]):
+                        main_cond_group_idx = conditioning_group_idx(0, mean_field_source)
+                        next_state_main = env.get_observation(0) if not episode_done else None
+                        next_obs_by_id = {}
+                        next_feature_by_id = {}
+                        if next_state_main is not None:
+                            next_ids = env.get_agent_id(0)
+                            next_views = _view_batch_to_chw(next_state_main[0])
+                            next_features = _feature_batch(next_state_main[1], feature_dim)
+                            next_obs_by_id = {
+                                int(agent_id): next_views[idx]
+                                for idx, agent_id in enumerate(next_ids)
+                            }
+                            next_feature_by_id = {
+                                int(agent_id): next_features[idx]
+                                for idx, agent_id in enumerate(next_ids)
+                            }
+                        prev_views = obs_chw[env_idx][0]
+                        prev_features = features[env_idx][0]
+                        main_ids = ids[env_idx][0]
+                        main_rewards = rewards[0]
+                        main_alives = alives[0]
+                        n_transitions = min(
+                            len(actions[env_idx][0]),
+                            len(prev_views),
+                            len(prev_features),
+                            len(main_ids),
+                        )
+                        for local_idx, action in enumerate(actions[env_idx][0][:n_transitions]):
+                            obs = prev_views[local_idx]
+                            feature = prev_features[local_idx]
+                            agent_id = int(main_ids[local_idx])
+                            alive = bool(main_alives[local_idx]) if local_idx < len(main_alives) else False
+                            transition_done = bool(episode_done or not alive)
+                            next_obs = next_obs_by_id.get(agent_id, np.zeros_like(obs))
+                            next_feature = next_feature_by_id.get(agent_id, np.zeros_like(feature))
+                            reward = float(main_rewards[local_idx]) if local_idx < len(main_rewards) else 0.0
+                            agents["main"].push(
+                                obs,
+                                int(action),
+                                reward,
+                                next_obs,
+                                pre_prob[env_idx][0][local_idx],
+                                next_prob[main_cond_group_idx][0],
+                                transition_done,
+                                True,
+                                feature=feature,
+                                next_feature=next_feature,
                             )
 
-            # Save checkpoints.
-            if global_step % save_interval < num_envs:
-                for type_name, agent in agents.items():
-                    agent.save_checkpoint(run_dir / f"ckpt_{type_name}_step{global_step}.pt")
+                    former_prob[env_idx] = next_prob
+
+                    if episode_done:
+                        completed_episodes += 1
+                        record = _role_episode_win_record(
+                            completed_episodes,
+                            episode_rewards[env_idx],
+                            initial_counts[env_idx],
+                            _low_level_counts(env),
+                        )
+                        record["env_idx"] = env_idx
+                        record["steps"] = step_ct[env_idx]
+                        record["env_steps"] = int(env_steps)
+                        records.append(record)
+                        if progress_bar is not None:
+                            progress_bar.update(1)
+                        active[env_idx] = False
+                        if completed_episodes >= target_episodes:
+                            active = [False for _ in envs]
+                            break
+
+            loss = _train_main_agent(agents["main"], max_train_batches_per_update)
+            if loss is not None:
+                gradient_steps += 1
+            losses.append({"episode": int(completed_episodes), "loss": loss})
+            recent = records[-num_envs:]
+            main_reward = float(np.mean([r["rewards"]["main"] for r in recent])) if recent else 0.0
+            opponent_reward = float(np.mean([r["rewards"]["opponent"] for r in recent])) if recent else 0.0
+            if main_reward > opponent_reward:
+                _soft_copy_agent(agents["main"], agents["opponent"], self_play_tau)
+
+            if main_reward > best_main_reward:
+                best_main_reward = main_reward
+                agents["main"].save_checkpoint(checkpoint_paths["main"]["best"])
+                agents["opponent"].save_checkpoint(checkpoint_paths["opponent"]["best"])
+            if save_every and completed_episodes % save_every == 0:
+                agents["main"].save_checkpoint(run_dir / f"ckpt_main_ep{completed_episodes}.pt")
+                agents["opponent"].save_checkpoint(run_dir / f"ckpt_opponent_ep{completed_episodes}.pt")
+
+            elapsed = time.perf_counter() - t_start
+            eps = completed_episodes / max(elapsed, 1e-6)
+            progress_metrics = {
+                "main_reward": f"{main_reward:.3f}",
+                "opponent_reward": f"{opponent_reward:.3f}",
+                "loss": "nan" if loss is None else f"{loss:.4f}",
+                "eps_exp": f"{eps_explore:.3f}",
+            }
+            if progress_bar is not None:
+                progress_bar.set_postfix(progress_metrics)
+            if reward_log_interval and (
+                completed_episodes % reward_log_interval == 0
+                or completed_episodes >= target_episodes
+            ):
+                message = (
+                    f"[{algorithm}] episodes={completed_episodes}/{target_episodes} "
+                    f"mean_main_reward={main_reward:.3f} "
+                    f"mean_opponent_reward={opponent_reward:.3f} "
+                    f"loss={'nan' if loss is None else f'{loss:.4f}'} "
+                    f"episodes_per_sec={eps:.2f}"
+                )
+                if progress_bar is not None:
+                    progress_bar.write(message)
+                else:
+                    print(message)
+            if writer is not None:
+                writer.add_scalar("train/epsilon_robust", eps_robust, completed_episodes)
+                writer.add_scalar("train/eps_explore", eps_explore, completed_episodes)
+                writer.add_scalar("train/main_reward", main_reward, completed_episodes)
+                writer.add_scalar("train/opponent_reward", opponent_reward, completed_episodes)
+                if loss is not None:
+                    writer.add_scalar("train/loss_main", loss, completed_episodes)
     finally:
         if progress_bar is not None:
             progress_bar.close()
+        for env in envs:
+            close = getattr(env.env, "close", None)
+            if callable(close):
+                close()
 
-    # Final save.
-    for type_name, agent in agents.items():
-        agent.save_checkpoint(run_dir / f"ckpt_{type_name}_final.pt")
+    agents["main"].save_checkpoint(checkpoint_paths["main"]["final"])
+    agents["opponent"].save_checkpoint(checkpoint_paths["opponent"]["final"])
     if writer is not None:
         writer.close()
     for agent in agents.values():
         agent.close()
 
-    summary = _summarize_episode_records(episode_records, type_names)
+    summary = _summarize_role_records(records)
     stats = {
         "run_dir": str(run_dir),
         "algorithm": algorithm,
         "config": cfg,
-        "total_steps": int(global_step),
+        "target_episodes": int(target_episodes),
         "completed_episodes": int(completed_episodes),
+        "env_steps": int(env_steps),
         "gradient_steps": int(gradient_steps),
-        "type_names": type_names,
-        "episode_records": episode_records,
+        "num_envs": int(num_envs),
+        "device": str(device),
+        "task_config": task_config,
+        "type_names": ["main", "opponent"],
+        "checkpoint_paths": {
+            role: {kind: str(path) for kind, path in paths.items()}
+            for role, paths in checkpoint_paths.items()
+        },
+        "records": records,
+        "episode_records": records,
+        "losses": losses,
+        "best_main_reward": None if best_main_reward == -float("inf") else float(best_main_reward),
+        "max_train_batches_per_update": max_train_batches_per_update,
         "summary": summary,
+        "elapsed_seconds": float(time.perf_counter() - t_start),
     }
     stats_path = run_dir / "training_stats.json"
     with open(stats_path, "w", encoding="utf-8") as f:
         json.dump(stats, f, indent=2)
 
-    print(f"\nTraining complete. {global_step:,} steps, {completed_episodes} episodes.")
+    print(f"\nTraining complete. {completed_episodes} episodes, {env_steps:,} env steps.")
     print(f"Checkpoints saved to {run_dir}")
     print(f"Training stats saved to {stats_path}")
     return {
         "run_dir": str(run_dir),
         "stats_path": str(stats_path),
-        "total_steps": global_step,
+        "target_episodes": target_episodes,
         "completed_episodes": completed_episodes,
-        "episode_records": episode_records,
+        "records": records,
+        "episode_records": records,
         "summary": summary,
-        "team_win_rates": summary["win_rates"],
+        "checkpoint_paths": stats["checkpoint_paths"],
     }
 
 
@@ -486,10 +702,12 @@ def main():
     parser = argparse.ArgumentParser(description="Train MF-DSRQ on MAgent2")
     parser.add_argument("--config", required=True, help="Path to YAML config file")
     for key in [
-        "algorithm", "total_steps", "num_envs", "map_size", "max_cycles", "seed",
+        "algorithm", "target_episodes", "num_envs", "map_size", "max_cycles", "seed",
         "epsilon_robust_start", "epsilon_robust_end",
         "lr", "batch_size", "buffer_capacity", "learning_starts",
-        "output_dir", "log_interval", "robust_distance", "robust_lp_fallback",
+        "output_dir", "reward_log_interval", "save_every", "self_play_tau",
+        "max_train_batches_per_update", "mean_field_source",
+        "robust_distance", "robust_lp_fallback",
         "robust_policy_cache_size", "sre_solver_name", "sre_solver_workers",
         "sre_num_random_starts", "sre_num_pure_starts",
     ]:

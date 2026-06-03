@@ -6,8 +6,6 @@ tqdm
 ipykernel
 pettingzoo[mpe]
 pytest
-torchrl
-benchmarl
 vmas
 magent2
 pandas

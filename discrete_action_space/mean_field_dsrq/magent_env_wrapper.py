@@ -2,13 +2,14 @@
 
 Handles:
 - Per-type observation stacking
-- Neighborhood mean-action computation (EMA of same-team visible neighbors)
+- Neighborhood mean-action computation (EMA of configured conditioning team)
 - Agent death/spawn tracking and replay-buffer valid masks
 - Multi-env vectorisation
 
 Neighborhood definition: for each agent j of team k, the mean action ā^j is
-the EMA of the one-hot actions of all same-team agents (whole-team mean).
-Whole-team mean is a practical fallback when per-agent neighbor radius is not
+the EMA of the one-hot actions of the configured conditioning team. By default
+this is the opponent team, so robustness is centred on opponent behaviour.
+Whole-team means are a practical fallback when per-agent neighbor radius is not
 directly accessible from the PettingZoo API.
 
 When obs_shape is (H, W, C), we convert to (C, H, W) for PyTorch.
@@ -37,11 +38,18 @@ class MAgentMFWrapper:
         type_prefixes: dict,
         ema_momentum: float = 1.0,
         obs_dtype=np.float32,
+        mean_field_source: str = "opponent",
     ):
         self.env_factory = env_factory
         self.type_prefixes = type_prefixes  # {type_name: prefix}
+        self.type_names = list(type_prefixes.keys())
         self.ema_momentum = float(ema_momentum)
         self.obs_dtype = obs_dtype
+        self.mean_field_source = str(mean_field_source).lower()
+        if self.mean_field_source not in {"opponent", "same_team", "self"}:
+            raise ValueError("mean_field_source must be 'opponent', 'same_team', or 'self'.")
+        if self.mean_field_source == "opponent" and len(self.type_names) != 2:
+            raise ValueError("opponent mean-field source currently expects exactly two teams.")
 
         self.env = env_factory()
         self.env.reset()
@@ -80,6 +88,15 @@ class MAgentMFWrapper:
         prefix = self.type_prefixes[type_name]
         return [a for a in self._alive if a.startswith(prefix)]
 
+    def conditioning_type(self, type_name: str) -> str:
+        if self.mean_field_source == "opponent":
+            return self.type_names[1 - self.type_names.index(type_name)]
+        return type_name
+
+    def _uniform_for_type(self, type_name: str) -> np.ndarray:
+        n_a = self.n_actions[type_name]
+        return np.full(n_a, 1.0 / n_a, dtype=np.float32)
+
     # ------------------------------------------------------------------ #
     # Reset / Step                                                         #
     # ------------------------------------------------------------------ #
@@ -105,8 +122,8 @@ class MAgentMFWrapper:
         for agent_id in self._alive:
             type_name = self.agent_type(agent_id)
             if type_name is not None:
-                n_a = self.n_actions[type_name]
-                self._mean_a[agent_id] = np.full(n_a, 1.0 / n_a, dtype=np.float32)
+                cond_type = self.conditioning_type(type_name)
+                self._mean_a[agent_id] = self._uniform_for_type(cond_type)
 
         obs_dict = self._convert_obs(obs_dict_raw)
         self._done = False
@@ -155,25 +172,28 @@ class MAgentMFWrapper:
         episode_done = (not self.env.agents) or (bool(active_agent_ids) and all(dones.values()))
 
         # Update EMAs with empirical one-hot actions from this step.
+        emp_mean_by_type: dict[str, np.ndarray] = {}
         for type_name, prefix in self.type_prefixes.items():
             type_agents = [a for a in self._alive if a.startswith(prefix)]
-            if not type_agents:
-                continue
             n_a = self.n_actions[type_name]
-            # Compute empirical mean: average of one-hot actions of all type agents.
             acted = [a for a in type_agents if a in actions]
             if acted:
                 one_hots = np.zeros((len(acted), n_a), dtype=np.float32)
                 for i, a in enumerate(acted):
                     one_hots[i, actions[a]] = 1.0
-                emp_mean = one_hots.mean(axis=0)
+                emp_mean_by_type[type_name] = one_hots.mean(axis=0)
             else:
-                emp_mean = np.full(n_a, 1.0 / n_a, dtype=np.float32)
+                emp_mean_by_type[type_name] = self._uniform_for_type(type_name)
 
-            mu = self.ema_momentum
-            for aid in type_agents:
-                prev = self._mean_a.get(aid, np.full(n_a, 1.0 / n_a, dtype=np.float32))
-                self._mean_a[aid] = (1.0 - mu) * prev + mu * emp_mean
+        mu = self.ema_momentum
+        for aid in list(self._alive):
+            type_name = self.agent_type(aid)
+            if type_name is None:
+                continue
+            cond_type = self.conditioning_type(type_name)
+            emp_mean = emp_mean_by_type.get(cond_type, self._uniform_for_type(cond_type))
+            prev = self._mean_a.get(aid, self._uniform_for_type(cond_type))
+            self._mean_a[aid] = (1.0 - mu) * prev + mu * emp_mean
 
         # mean_a_tp1 — after EMA update.
         mean_a_tp1 = {aid: self._mean_a[aid].copy() for aid in self._alive if aid in self._mean_a}
@@ -188,8 +208,8 @@ class MAgentMFWrapper:
         for aid in new_agents:
             type_name = self.agent_type(aid)
             if type_name is not None:
-                n_a = self.n_actions[type_name]
-                self._mean_a[aid] = np.full(n_a, 1.0 / n_a, dtype=np.float32)
+                cond_type = self.conditioning_type(type_name)
+                self._mean_a[aid] = self._uniform_for_type(cond_type)
             self._alive.add(aid)
 
         obs_dict = self._convert_obs(obs_raw)
@@ -224,41 +244,3 @@ class MAgentMFWrapper:
     @property
     def alive_agents(self) -> set[str]:
         return set(self._alive)
-
-
-class VectorizedMAgentWrapper:
-    """Runs multiple independent MAgentMFWrapper envs in a single process.
-
-    All envs share the same factory and type configuration. Transitions are
-    returned as flat lists keyed by (env_idx, agent_id) for the caller to
-    sort into per-type batches and push to the replay buffer.
-    """
-
-    def __init__(self, env_factory, type_prefixes: dict, num_envs: int, ema_momentum: float = 1.0):
-        self.num_envs = num_envs
-        self.envs = [
-            MAgentMFWrapper(env_factory, type_prefixes, ema_momentum)
-            for _ in range(num_envs)
-        ]
-        # Expose metadata from first env.
-        self.n_actions = self.envs[0].n_actions
-        self.obs_shape = self.envs[0].obs_shape
-        self.type_prefixes = type_prefixes
-
-    def reset_all(self):
-        """Reset all envs; returns list of (obs_dict, info) per env."""
-        return [env.reset() for env in self.envs]
-
-    def step_all(self, actions_per_env: list[dict]):
-        """Step all envs in lockstep.
-
-        Args:
-            actions_per_env: list of {agent_id: int} dicts, one per env.
-
-        Returns:
-            List of (obs_dict, rewards, dones, mean_a_t, mean_a_tp1, info)
-            tuples, one per env.
-        """
-        return [
-            env.step(acts) for env, acts in zip(self.envs, actions_per_env)
-        ]

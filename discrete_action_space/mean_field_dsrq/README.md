@@ -15,8 +15,10 @@ Q(o_i, a_i, mean_action_i)
 ```
 
 where `o_i` is the local MAgent2 spatial observation and `mean_action_i` is the
-mean action distribution of the agent's population. The default solver-free
-critic uses a pairwise payoff head:
+configured conditioning mean-action distribution. By default
+`mean_field_source: opponent`, so this is the opponent team's previous action
+histogram; set `mean_field_source: same_team` for the old same-population
+ablation. The default solver-free critic uses a pairwise payoff head:
 
 ```text
 M(o_i)[a_i, b]
@@ -30,10 +32,8 @@ max_pi min_nu pi^T M(o_i) nu
 subject to W_TV(nu, mean_action_i) <= epsilon
 ```
 
-This is a local mean-field SRE surrogate: robustness is over the population
-histogram, not over a full joint opponent policy. The older PATH-backed
-representative bimatrix baseline remains available with `algorithm:
-path_mf_dsrq`.
+This is a local mean-field SRE surrogate: robustness is over the conditioning
+team's action histogram, not over a full joint opponent policy.
 
 ## Architecture
 
@@ -47,25 +47,24 @@ obs branch:
   Dense(256, ReLU)
 
 solver-free head:
+  Dense(feature_dim, 32, ReLU) when low-level features are available
+  Concatenate(obs_features, feature_features)
   Dense(128, ReLU)
   Dense(64, ReLU)
   Dense(num_actions * num_mean_actions)
 ```
-
-The original reference code also has a feature-vector branch. The current
-MAgent2 Battle observation exposed here is only `(13, 13, 5)`, so this
-implementation omits that branch.
 
 ## Files
 
 | File | Description |
 |---|---|
 | `solver_free_mean_field_dsrq.py` | Solver-free MF-SRQ network, replay buffer, robust LP operator, training, and checkpoints |
-| `path_mean_field_dsrq.py` | Legacy PATH-backed representative bimatrix baseline |
-| `magent_env_wrapper.py` | PettingZoo/MAgent2 wrapper with per-population mean-action tracking |
+| `torch_robust_mean_field_dsrq.py` | Torch batched robust-action MF-SRQ variant |
+| `magent_env_wrapper.py` | PettingZoo/MAgent2 evaluation wrapper with per-population mean-action tracking |
+| `magent2_env.py` | Shared MAgent2 Battle environment helpers, including the low-level reference trainer adapter |
 | `train_mf_dsrq.py` | CLI and notebook training entrypoint |
 | `eval_mf_dsrq.py` | Checkpoint-backed evaluation and noise sweeps |
-| `benchmarl_magent2.py` | BenchMARL baseline helpers |
+| `mfrl_baselines.py` | Vectorized PyTorch IQL, AC, and MFQ baseline helpers |
 | `notebook_utils.py` | Notebook-facing train/eval helpers |
 | `configs/battle_v4.yaml` | Battle hyperparameters and solver-free robust LP settings |
 
@@ -83,12 +82,13 @@ applicable:
 | `target_tau` | `0.005` |
 | `batch_size` | 64 |
 | `buffer_capacity` | 80,000 |
-| `train_every` | 5 |
 | `epsilon_explore` | `1.0 -> 0.2 -> 0.1` |
 | `algorithm` | `mf_srq_lp` |
 | `robust_distance` | `tv` |
 | `robust_lp_fallback` | `greedy_tv` |
-| `ema_momentum` | 1.0 |
+| `target_episodes` | 2,000 |
+| `num_envs` | 16 |
+| `self_play_tau` | 0.01 |
 
 ## Quick Start
 
@@ -97,7 +97,7 @@ source venv/bin/activate
 
 python -m discrete_action_space.mean_field_dsrq.train_mf_dsrq \
     --config discrete_action_space/mean_field_dsrq/configs/battle_v4.yaml \
-    --total_steps 50000 --num_envs 4 --map_size 18 --max_cycles 400
+    --target_episodes 100 --num_envs 4 --map_size 18 --max_cycles 400
 
 pytest tests/discrete_action_space/test_solver_free_mean_field_dsrq.py -v
 pytest tests/discrete_action_space/test_magent2_notebooks.py -v

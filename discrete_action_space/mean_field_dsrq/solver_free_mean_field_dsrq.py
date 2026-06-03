@@ -31,10 +31,12 @@ class PairwiseMeanFieldQNetwork(nn.Module):
         obs_width: int,
         n_own_actions: int,
         n_mean_actions: int,
+        feature_dim: int = 0,
     ):
         super().__init__()
         self.n_own_actions = int(n_own_actions)
         self.n_mean_actions = int(n_mean_actions)
+        self.feature_dim = int(feature_dim)
         self.conv = nn.Sequential(
             nn.Conv2d(obs_channels, 32, kernel_size=3, padding=1),
             nn.ReLU(),
@@ -46,21 +48,60 @@ class PairwiseMeanFieldQNetwork(nn.Module):
             nn.Linear(32 * obs_height * obs_width, 256),
             nn.ReLU(),
         )
+        if self.feature_dim > 0:
+            self.feature_fc = nn.Sequential(
+                nn.Linear(self.feature_dim, 32),
+                nn.ReLU(),
+            )
+            head_input_dim = 256 + 32
+        else:
+            self.feature_fc = None
+            head_input_dim = 256
         self.head = nn.Sequential(
-            nn.Linear(256, 128),
+            nn.Linear(head_input_dim, 128),
             nn.ReLU(),
             nn.Linear(128, 64),
             nn.ReLU(),
             nn.Linear(64, self.n_own_actions * self.n_mean_actions),
         )
 
-    def payoff_matrix(self, obs: torch.Tensor) -> torch.Tensor:
+    def _feature_tensor(self, obs: torch.Tensor, feature: Optional[torch.Tensor]) -> Optional[torch.Tensor]:
+        if self.feature_dim <= 0:
+            return None
+        if feature is None:
+            return torch.zeros(
+                (obs.shape[0], self.feature_dim),
+                dtype=obs.dtype,
+                device=obs.device,
+            )
+        feature = feature.to(dtype=obs.dtype, device=obs.device)
+        feature = feature.reshape(feature.shape[0], -1)
+        if feature.shape[0] != obs.shape[0] or feature.shape[1] != self.feature_dim:
+            raise ValueError(
+                "Expected feature shape "
+                f"[{obs.shape[0]}, {self.feature_dim}], got {tuple(feature.shape)}."
+            )
+        return feature
+
+    def payoff_matrix(
+        self,
+        obs: torch.Tensor,
+        feature: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
         obs_feat = self.obs_fc(self.conv(obs))
+        feature_t = self._feature_tensor(obs, feature)
+        if feature_t is not None:
+            obs_feat = torch.cat([obs_feat, self.feature_fc(feature_t)], dim=-1)
         payoff = self.head(obs_feat)
         return payoff.reshape(-1, self.n_own_actions, self.n_mean_actions)
 
-    def forward(self, obs: torch.Tensor, mean_action: torch.Tensor) -> torch.Tensor:
-        payoff = self.payoff_matrix(obs)
+    def forward(
+        self,
+        obs: torch.Tensor,
+        mean_action: torch.Tensor,
+        feature: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        payoff = self.payoff_matrix(obs, feature)
         return torch.bmm(payoff, mean_action.unsqueeze(-1)).squeeze(-1)
 
 
@@ -80,13 +121,21 @@ class SolverFreeMFReplayBuffer:
         next_mean_a: np.ndarray,
         done: bool,
         valid: bool = True,
+        feature: Optional[np.ndarray] = None,
+        next_feature: Optional[np.ndarray] = None,
     ) -> None:
+        if feature is None:
+            feature = np.zeros(0, dtype=np.float32)
+        if next_feature is None:
+            next_feature = np.zeros_like(feature, dtype=np.float32)
         self.buffer.append(
             (
                 np.asarray(obs, dtype=np.float32),
+                np.asarray(feature, dtype=np.float32),
                 int(action),
                 float(reward),
                 np.asarray(next_obs, dtype=np.float32),
+                np.asarray(next_feature, dtype=np.float32),
                 _normalize_distribution(mean_a),
                 _normalize_distribution(next_mean_a),
                 float(done),
@@ -97,7 +146,7 @@ class SolverFreeMFReplayBuffer:
     def sample(self, batch_size: int, device: Optional[torch.device] = None) -> dict[str, torch.Tensor]:
         idxs = np.random.randint(0, len(self.buffer), size=int(batch_size))
         batch = [self.buffer[int(i)] for i in idxs]
-        obs, actions, rewards, next_obs, mean_a, next_mean_a, dones, valids = zip(*batch)
+        obs, features, actions, rewards, next_obs, next_features, mean_a, next_mean_a, dones, valids = zip(*batch)
 
         def tensor(values, dtype):
             out = torch.as_tensor(np.stack(values), dtype=dtype)
@@ -105,9 +154,11 @@ class SolverFreeMFReplayBuffer:
 
         return {
             "obs": tensor(obs, torch.float32),
+            "feature": tensor(features, torch.float32),
             "action": tensor(actions, torch.long),
             "reward": tensor(rewards, torch.float32),
             "next_obs": tensor(next_obs, torch.float32),
+            "next_feature": tensor(next_features, torch.float32),
             "mean_a": tensor(mean_a, torch.float32),
             "next_mean_a": tensor(next_mean_a, torch.float32),
             "done": tensor(dones, torch.float32),
@@ -140,12 +191,14 @@ def _normalize_distribution(values: np.ndarray, size: Optional[int] = None) -> n
     return (p / total).astype(np.float32)
 
 
-def _tv_worst_case_value(mu: np.ndarray, values: np.ndarray, epsilon: float) -> float:
+def _tv_worst_case_mean(mu: np.ndarray, values: np.ndarray, epsilon: float) -> np.ndarray:
     p = _normalize_distribution(mu).astype(np.float64)
     v = np.asarray(values, dtype=np.float64).reshape(-1)
+    if p.size != v.size:
+        raise ValueError(f"Expected values length {p.size}, got {v.size}.")
     budget = float(np.clip(epsilon, 0.0, 1.0))
     if budget <= 0.0 or p.size <= 1:
-        return float(p @ v)
+        return p.astype(np.float32)
 
     q = p.copy()
     high_order = np.argsort(-v)
@@ -171,6 +224,12 @@ def _tv_worst_case_value(mu: np.ndarray, values: np.ndarray, epsilon: float) -> 
             high_pos += 1
         if q[lo] >= 1.0 - 1e-12:
             low_pos += 1
+    return _normalize_distribution(q, p.size)
+
+
+def _tv_worst_case_value(mu: np.ndarray, values: np.ndarray, epsilon: float) -> float:
+    v = np.asarray(values, dtype=np.float64).reshape(-1)
+    q = _tv_worst_case_mean(mu, v, epsilon).astype(np.float64)
     return float(q @ v)
 
 
@@ -197,6 +256,29 @@ class RobustMeanFieldSreOperator:
         self.fallback = fallback
         self.cost = np.ones((self.mean_actions, self.mean_actions), dtype=np.float64)
         np.fill_diagonal(self.cost, 0.0)
+        self._lambda_idx = self.num_actions
+        self._beta_start = self.num_actions + 1
+        self._n_vars = self.num_actions + 1 + self.mean_actions
+        self._solve_c_template = np.zeros(self._n_vars, dtype=np.float64)
+        self._solve_a_eq = np.zeros((1, self._n_vars), dtype=np.float64)
+        self._solve_a_eq[0, : self.num_actions] = 1.0
+        self._solve_b_eq = np.array([1.0], dtype=np.float64)
+        self._solve_a_ub_template = np.zeros(
+            (self.mean_actions * self.mean_actions, self._n_vars),
+            dtype=np.float64,
+        )
+        row = 0
+        for b in range(self.mean_actions):
+            for c_idx in range(self.mean_actions):
+                self._solve_a_ub_template[row, self._beta_start + b] = 1.0
+                self._solve_a_ub_template[row, self._lambda_idx] = -self.cost[b, c_idx]
+                row += 1
+        self._solve_b_ub = np.zeros(self.mean_actions * self.mean_actions, dtype=np.float64)
+        self._solve_bounds = (
+            [(0.0, 1.0)] * self.num_actions
+            + [(0.0, None)]
+            + [(None, None)] * self.mean_actions
+        )
         self.solve_calls = 0
         self.solve_failures = 0
 
@@ -217,53 +299,35 @@ class RobustMeanFieldSreOperator:
         eps = float(self.epsilon if epsilon is None else epsilon)
         eps = float(np.clip(eps, 0.0, 1.0))
 
-        # Variables are [pi_0..pi_A, lambda, beta_0..beta_B].
-        a_count = self.num_actions
-        b_count = self.mean_actions
-        lambda_idx = a_count
-        beta_start = a_count + 1
-        n_vars = a_count + 1 + b_count
+        c = self._solve_c_template.copy()
+        c[self._lambda_idx] = eps
+        c[self._beta_start :] = -mu
 
-        c = np.zeros(n_vars, dtype=np.float64)
-        c[lambda_idx] = eps
-        c[beta_start:] = -mu
+        a_ub = self._solve_a_ub_template.copy()
+        payoff_columns = -np.tile(matrix.T, (self.mean_actions, 1))
+        a_ub[:, : self.num_actions] = payoff_columns
 
-        a_eq = np.zeros((1, n_vars), dtype=np.float64)
-        a_eq[0, :a_count] = 1.0
-        b_eq = np.array([1.0], dtype=np.float64)
-
-        a_ub = np.zeros((b_count * b_count, n_vars), dtype=np.float64)
-        b_ub = np.zeros(b_count * b_count, dtype=np.float64)
-        row = 0
-        for b in range(b_count):
-            for c_idx in range(b_count):
-                a_ub[row, beta_start + b] = 1.0
-                a_ub[row, :a_count] = -matrix[:, c_idx]
-                a_ub[row, lambda_idx] = -self.cost[b, c_idx]
-                row += 1
-
-        bounds = [(0.0, 1.0)] * a_count + [(0.0, None)] + [(None, None)] * b_count
         result = linprog(
             c,
             A_ub=a_ub,
-            b_ub=b_ub,
-            A_eq=a_eq,
-            b_eq=b_eq,
-            bounds=bounds,
+            b_ub=self._solve_b_ub,
+            A_eq=self._solve_a_eq,
+            b_eq=self._solve_b_eq,
+            bounds=self._solve_bounds,
             method="highs",
         )
         if not result.success:
             self.solve_failures += 1
             return self._fallback_result(matrix, mu, eps, result.message)
 
-        policy = _normalize_distribution(result.x[:a_count], a_count).astype(np.float64)
+        policy = _normalize_distribution(result.x[: self.num_actions], self.num_actions).astype(np.float64)
         value = float(-result.fun)
         worst_mean = self.worst_case_mean(policy @ matrix, mu, eps)
         return RobustMeanFieldResult(
             policy=policy.astype(np.float32),
             value=value,
             worst_mean=worst_mean.astype(np.float32),
-            lambda_value=float(result.x[lambda_idx]),
+            lambda_value=float(result.x[self._lambda_idx]),
             success=True,
         )
 
@@ -275,30 +339,11 @@ class RobustMeanFieldSreOperator:
     ) -> np.ndarray:
         v = np.asarray(values, dtype=np.float64).reshape(-1)
         mu = _normalize_distribution(mean_action, self.mean_actions).astype(np.float64)
+        if v.size != self.mean_actions:
+            raise ValueError(f"Expected values length {self.mean_actions}, got {v.size}.")
         eps = float(self.epsilon if epsilon is None else epsilon)
         eps = float(np.clip(eps, 0.0, 1.0))
-        if eps <= 0.0:
-            return mu.astype(np.float32)
-
-        c = np.tile(v.reshape(1, -1), (self.mean_actions, 1)).reshape(-1)
-        a_eq = np.zeros((self.mean_actions, self.mean_actions * self.mean_actions), dtype=np.float64)
-        for b in range(self.mean_actions):
-            a_eq[b, b * self.mean_actions : (b + 1) * self.mean_actions] = 1.0
-        cost_row = self.cost.reshape(1, -1)
-        result = linprog(
-            c,
-            A_ub=cost_row,
-            b_ub=np.array([eps], dtype=np.float64),
-            A_eq=a_eq,
-            b_eq=mu,
-            bounds=[(0.0, None)] * c.size,
-            method="highs",
-        )
-        if not result.success:
-            return mu.astype(np.float32)
-        transport = result.x.reshape(self.mean_actions, self.mean_actions)
-        worst = transport.sum(axis=0)
-        return _normalize_distribution(worst, self.mean_actions)
+        return _tv_worst_case_mean(mu, v, eps)
 
     def _fallback_result(
         self,
@@ -350,6 +395,7 @@ class SolverFreeMFDsrqAgent:
         n_own_actions: int,
         n_nbr_actions: int,
         *,
+        feature_dim: int = 0,
         epsilon_robust: float = 0.1,
         gamma: float = 0.95,
         lr: float = 1e-4,
@@ -370,6 +416,7 @@ class SolverFreeMFDsrqAgent:
         self.type_id = int(type_id)
         self.n_own_actions = int(n_own_actions)
         self.n_nbr_actions = int(n_nbr_actions)
+        self.feature_dim = int(feature_dim)
         self.num_actions = self.n_own_actions
         self.epsilon_robust = float(epsilon_robust)
         self.gamma = float(gamma)
@@ -390,10 +437,20 @@ class SolverFreeMFDsrqAgent:
         self.device = device
 
         self.q_net = PairwiseMeanFieldQNetwork(
-            obs_channels, obs_height, obs_width, self.n_own_actions, self.n_nbr_actions
+            obs_channels,
+            obs_height,
+            obs_width,
+            self.n_own_actions,
+            self.n_nbr_actions,
+            self.feature_dim,
         ).to(device)
         self.target_net = PairwiseMeanFieldQNetwork(
-            obs_channels, obs_height, obs_width, self.n_own_actions, self.n_nbr_actions
+            obs_channels,
+            obs_height,
+            obs_width,
+            self.n_own_actions,
+            self.n_nbr_actions,
+            self.feature_dim,
         ).to(device)
         self.target_net.load_state_dict(self.q_net.state_dict())
         self.target_net.eval()
@@ -442,8 +499,13 @@ class SolverFreeMFDsrqAgent:
             self._policy_cache.popitem(last=False)
 
     @torch.no_grad()
-    def _payoff_matrices_from_net(self, net: nn.Module, obs: torch.Tensor) -> np.ndarray:
-        return net.payoff_matrix(obs).detach().cpu().numpy().astype(np.float32, copy=False)
+    def _payoff_matrices_from_net(
+        self,
+        net: nn.Module,
+        obs: torch.Tensor,
+        feature: Optional[torch.Tensor] = None,
+    ) -> np.ndarray:
+        return net.payoff_matrix(obs, feature).detach().cpu().numpy().astype(np.float32, copy=False)
 
     def _solve_policy_batch(
         self,
@@ -478,14 +540,27 @@ class SolverFreeMFDsrqAgent:
         return np.asarray([result.value for result in results], dtype=np.float32)
 
     @torch.no_grad()
-    def act(self, obs: np.ndarray, mean_a: Optional[np.ndarray] = None) -> int:
-        return int(self.act_batch(np.expand_dims(obs, axis=0), None if mean_a is None else np.expand_dims(mean_a, axis=0))[0])
+    def act(
+        self,
+        obs: np.ndarray,
+        mean_a: Optional[np.ndarray] = None,
+        feature: Optional[np.ndarray] = None,
+    ) -> int:
+        feature_batch = None if feature is None else np.expand_dims(feature, axis=0)
+        return int(
+            self.act_batch(
+                np.expand_dims(obs, axis=0),
+                None if mean_a is None else np.expand_dims(mean_a, axis=0),
+                feature_batch,
+            )[0]
+        )
 
     @torch.no_grad()
     def act_batch(
         self,
         obs_batch: np.ndarray,
         mean_a_batch: Optional[np.ndarray] = None,
+        feature_batch: Optional[np.ndarray] = None,
     ) -> np.ndarray:
         batch_size = int(len(obs_batch))
         if mean_a_batch is None:
@@ -501,7 +576,16 @@ class SolverFreeMFDsrqAgent:
             obs_t = torch.as_tensor(
                 obs_batch[pending], dtype=torch.float32, device=self.device
             )
-            matrices = self._payoff_matrices_from_net(self.q_net, obs_t)
+            feature_t = None
+            if self.feature_dim > 0:
+                if feature_batch is None:
+                    feature_batch = np.zeros((batch_size, self.feature_dim), dtype=np.float32)
+                feature_t = torch.as_tensor(
+                    np.asarray(feature_batch)[pending],
+                    dtype=torch.float32,
+                    device=self.device,
+                )
+            matrices = self._payoff_matrices_from_net(self.q_net, obs_t, feature_t)
             results = self._solve_policy_batch(matrices, np.asarray(mean_a_batch)[pending])
             for local_idx, batch_idx in enumerate(pending):
                 policy = results[local_idx].policy
@@ -521,8 +605,26 @@ class SolverFreeMFDsrqAgent:
         next_mean_a: np.ndarray,
         done: bool,
         valid: bool = True,
+        feature: Optional[np.ndarray] = None,
+        next_feature: Optional[np.ndarray] = None,
     ) -> None:
-        self.buffer.push(obs, action, reward, next_obs, mean_a, next_mean_a, done, valid)
+        if self.feature_dim > 0:
+            if feature is None:
+                feature = np.zeros(self.feature_dim, dtype=np.float32)
+            if next_feature is None:
+                next_feature = np.zeros(self.feature_dim, dtype=np.float32)
+        self.buffer.push(
+            obs,
+            action,
+            reward,
+            next_obs,
+            mean_a,
+            next_mean_a,
+            done,
+            valid,
+            feature=feature,
+            next_feature=next_feature,
+        )
         self._update_calls += 1
 
     def maybe_train(self) -> Optional[float]:
@@ -539,15 +641,17 @@ class SolverFreeMFDsrqAgent:
         batch = self.buffer.sample(self.batch_size, self.device)
 
         obs = batch["obs"]
+        feature = batch["feature"]
         actions = batch["action"]
         rewards = batch["reward"]
         next_obs = batch["next_obs"]
+        next_feature = batch["next_feature"]
         mean_a = batch["mean_a"]
         next_mean_a = batch["next_mean_a"]
         dones = batch["done"]
         valid = batch["valid"]
 
-        q_values = self.q_net(obs, mean_a)
+        q_values = self.q_net(obs, mean_a, feature=feature)
         q_taken = q_values.gather(1, actions.unsqueeze(1)).squeeze(1)
 
         with torch.no_grad():
@@ -557,6 +661,7 @@ class SolverFreeMFDsrqAgent:
                 next_policy_payoff = self._payoff_matrices_from_net(
                     self.q_net,
                     next_obs[nonterminal],
+                    next_feature[nonterminal],
                 )
                 policies = self._solve_policy_batch(
                     next_policy_payoff,
@@ -565,6 +670,7 @@ class SolverFreeMFDsrqAgent:
                 next_target_payoff = self._payoff_matrices_from_net(
                     self.target_net,
                     next_obs[nonterminal],
+                    next_feature[nonterminal],
                 )
                 next_mean_np = next_mean_a[nonterminal].detach().cpu().numpy()
                 values = []
@@ -618,6 +724,7 @@ class SolverFreeMFDsrqAgent:
                 "total_train_steps": self._total_train_steps,
                 "n_own_actions": self.n_own_actions,
                 "n_nbr_actions": self.n_nbr_actions,
+                "feature_dim": self.feature_dim,
                 "robust_distance": self.robust_distance,
                 "robust_lp_fallback": self.robust_lp_fallback,
             },

@@ -75,6 +75,78 @@ def test_path_tvc_mcp_nplayer_structure_is_linear_in_opponent_profiles():
     assert tvc_vars == 3492
 
 
+def test_path_mcp_nplayer_stops_after_default_candidate_limit():
+    q_tensor = np.zeros((2, 2, 2, 3), dtype=np.float64)
+    for actions in np.ndindex(q_tensor.shape[:-1]):
+        for player_id, own_action in enumerate(actions):
+            opponent_actions = [
+                action for idx, action in enumerate(actions) if idx != player_id
+            ]
+            q_tensor[actions + (player_id,)] = (
+                1.0 if own_action == (opponent_actions[0] ^ opponent_actions[1]) else -1.0
+            )
+
+    solver = object.__new__(PathMcpNPlayerSreSolver)
+    solver.rng = np.random.default_rng(11)
+    solver._structure_cache = {}
+    solve_calls = []
+
+    def fake_solve_from_start(z0, *_args):
+        solve_calls.append(z0)
+        return 1, z0
+
+    solver._solve_from_start = fake_solve_from_start
+
+    result = solver.solve(
+        q_tensor,
+        epsilon=0.0,
+        num_random_starts=12,
+        num_pure_starts=0,
+        round_digits=None,
+    )
+
+    assert result.success
+    assert len(solve_calls) == 10
+    assert result.metadata["num_starts"] == 12
+    assert result.metadata["num_starts_attempted"] == 10
+    assert result.metadata["num_candidates"] == 10
+    assert result.metadata["max_candidates"] == 10
+    assert result.metadata["stopped_after_max_candidates"] is True
+
+
+def test_path_mcp_nplayer_candidate_limit_can_be_disabled():
+    q_tensor = np.zeros((2, 2, 2, 3), dtype=np.float64)
+    q_tensor[0, 0, 0, :] = 1.0
+    q_tensor[1, 1, 1, :] = 1.0
+
+    solver = object.__new__(PathMcpNPlayerSreSolver)
+    solver.rng = np.random.default_rng(13)
+    solver._structure_cache = {}
+    solve_calls = []
+
+    def fake_solve_from_start(z0, *_args):
+        solve_calls.append(z0)
+        return 1, z0
+
+    solver._solve_from_start = fake_solve_from_start
+
+    result = solver.solve(
+        q_tensor,
+        epsilon=0.0,
+        num_random_starts=12,
+        num_pure_starts=0,
+        round_digits=None,
+        max_candidates=None,
+    )
+
+    assert result.success
+    assert len(solve_calls) == 12
+    assert result.metadata["num_starts_attempted"] == 12
+    assert result.metadata["num_candidates"] == 12
+    assert result.metadata["max_candidates"] is None
+    assert result.metadata["stopped_after_max_candidates"] is False
+
+
 def test_path_tvc_mcp_nplayer_dense_jacobian_matches_finite_difference():
     rng = np.random.default_rng(7)
     q_tensor = rng.normal(size=(2, 3, 2))

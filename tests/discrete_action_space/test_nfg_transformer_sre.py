@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 import torch
 
 from sre_solvers import NfgTransformerConfig, NfgTransformerSreNet, make_sre_solver
@@ -327,3 +328,49 @@ def test_nfg_transformer_solver_torch_batch_matches_numpy_path(tmp_path):
         )
         for torch_policy, numpy_policy in zip(torch_result.policies, numpy_result.policies):
             assert np.allclose(torch_policy, numpy_policy, atol=1e-6)
+
+
+def test_nfg_transformer_solver_splits_mixed_shape_numpy_batches(tmp_path):
+    model = _tiny_model(num_players=3, num_actions=2)
+    checkpoint = tmp_path / "nfg_sre.pt"
+    torch.save(
+        {
+            "config": model.config.to_dict(),
+            "model_state_dict": model.state_dict(),
+        },
+        checkpoint,
+    )
+
+    solver = make_sre_solver(
+        "nfg_transformer_sre",
+        checkpoint_path=checkpoint,
+        device="cpu",
+        fallback_enabled=False,
+    )
+    try:
+        rng = np.random.default_rng(2)
+        q_tensors = [
+            rng.normal(size=(2, 2, 2, 3)).astype(np.float32),
+            rng.normal(size=(2, 3, 2, 3)).astype(np.float32),
+            rng.normal(size=(2, 2, 2, 3)).astype(np.float32),
+        ]
+        results = solver.solve_batch(
+            q_tensors,
+            epsilon=np.asarray([0.1, 0.2, 0.3], dtype=np.float32),
+            round_digits=None,
+        )
+    finally:
+        solver.close()
+
+    assert len(results) == len(q_tensors)
+    assert [tuple(policy.shape[0] for policy in result.policies) for result in results] == [
+        (2, 2, 2),
+        (2, 3, 2),
+        (2, 2, 2),
+    ]
+    assert [result.metadata["epsilon"] for result in results] == [
+        pytest.approx(0.1),
+        pytest.approx(0.2),
+        pytest.approx(0.3),
+    ]
+    assert all(result.metadata["used_fallback"] is False for result in results)

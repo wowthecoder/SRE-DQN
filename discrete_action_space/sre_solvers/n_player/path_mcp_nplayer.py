@@ -26,6 +26,16 @@ from ..nplayer_common import (
 
 DEFAULT_PATHWRAP_PATH = Path(__file__).resolve().parent.parent / "pathwrap.so"
 INF = 1e20
+DEFAULT_MAX_PATH_MCP_CANDIDATES = 10
+
+
+def _normalize_max_candidates(max_candidates):
+    if max_candidates is None:
+        return None
+    max_candidates = int(max_candidates)
+    if max_candidates <= 0:
+        raise ValueError("max_candidates must be positive or None.")
+    return max_candidates
 
 
 @dataclass(frozen=True)
@@ -576,10 +586,12 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
         num_pure_starts=20,
         round_digits=4,
         initial_policies=None,
+        max_candidates=DEFAULT_MAX_PATH_MCP_CANDIDATES,
     ):
         start = time.perf_counter()
         q_tensor = validate_nplayer_q_tensor(q_tensor)
         action_sizes = q_tensor.shape[:-1]
+        max_candidates = _normalize_max_candidates(max_candidates)
         structure = self._structure_for_action_sizes(action_sizes)
         index = structure["index"]
         opponent_data = structure["opponent_data"]
@@ -609,6 +621,8 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
                     "num_pure_starts": int(num_pure_starts),
                     "warm_start_used": bool(initial_policies is not None),
                     "num_candidates": 1,
+                    "max_candidates": max_candidates,
+                    "stopped_after_max_candidates": False,
                 },
             )
 
@@ -661,8 +675,15 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
                     "status": int(status),
                 }
             )
+            if max_candidates is not None and len(candidates) >= max_candidates:
+                break
 
         elapsed = time.perf_counter() - start
+        stopped_after_max_candidates = (
+            max_candidates is not None
+            and len(candidates) >= max_candidates
+            and attempted_starts < len(starts)
+        )
         if not candidates:
             policies = _uniform_nplayer_policies(q_tensor)
             nominal = _expected_nominal_values(q_tensor, policies)
@@ -688,6 +709,8 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
                     "warm_start_used": bool(initial_policies is not None),
                     "num_starts_attempted": int(attempted_starts),
                     "num_candidates": 0,
+                    "max_candidates": max_candidates,
+                    "stopped_after_max_candidates": False,
                     "wall_seconds": float(elapsed),
                     "robust_policy_values": [
                         float(value) for value in robust_policy_values_result
@@ -718,6 +741,8 @@ class PathMcpNPlayerSreSolver(SreStageGameSolver):
                 "warm_start_used": bool(initial_policies is not None),
                 "num_starts_attempted": int(attempted_starts),
                 "num_candidates": int(len(candidates)),
+                "max_candidates": max_candidates,
+                "stopped_after_max_candidates": bool(stopped_after_max_candidates),
                 "path_status": best["status"],
                 "wall_seconds": float(elapsed),
                 "robust_policy_values": best["robust_policy_values"],
@@ -1032,6 +1057,7 @@ def _path_mcp_nplayer_pool_solve_task(payload):
         num_pure_starts,
         round_digits,
         initial_policies,
+        max_candidates,
         task_seed,
     ) = payload
     if task_seed is not None:
@@ -1045,6 +1071,7 @@ def _path_mcp_nplayer_pool_solve_task(payload):
         num_pure_starts=num_pure_starts,
         round_digits=round_digits,
         initial_policies=initial_policies,
+        max_candidates=max_candidates,
     )
     elapsed = time.perf_counter() - start
     result.metadata = dict(result.metadata)
@@ -1103,6 +1130,7 @@ class ProcessPoolPathMcpNPlayerSreSolver(SreStageGameSolver):
         num_pure_starts=20,
         round_digits=4,
         initial_policies=None,
+        max_candidates=DEFAULT_MAX_PATH_MCP_CANDIDATES,
     ):
         return self.solve_batch(
             [q_tensor],
@@ -1111,6 +1139,7 @@ class ProcessPoolPathMcpNPlayerSreSolver(SreStageGameSolver):
             num_pure_starts=num_pure_starts,
             round_digits=round_digits,
             initial_policies_batch=[initial_policies],
+            max_candidates=max_candidates,
         )[0]
 
     def solve_batch(
@@ -1122,6 +1151,7 @@ class ProcessPoolPathMcpNPlayerSreSolver(SreStageGameSolver):
         num_pure_starts=20,
         round_digits=4,
         initial_policies_batch=None,
+        max_candidates=DEFAULT_MAX_PATH_MCP_CANDIDATES,
     ):
         q_tensors = [validate_nplayer_q_tensor(q_tensor) for q_tensor in q_tensors]
         if not q_tensors:
@@ -1141,6 +1171,7 @@ class ProcessPoolPathMcpNPlayerSreSolver(SreStageGameSolver):
                 int(num_pure_starts),
                 round_digits,
                 initial_policies,
+                max_candidates,
                 self._task_seed(batch_offset),
             )
             for batch_offset, (q_tensor, initial_policies) in enumerate(
@@ -1197,6 +1228,7 @@ def _path_tvc_mcp_nplayer_pool_solve_task(payload):
         num_pure_starts,
         round_digits,
         initial_policies,
+        max_candidates,
         task_seed,
     ) = payload
     if task_seed is not None:
@@ -1210,6 +1242,7 @@ def _path_tvc_mcp_nplayer_pool_solve_task(payload):
         num_pure_starts=num_pure_starts,
         round_digits=round_digits,
         initial_policies=initial_policies,
+        max_candidates=max_candidates,
     )
     elapsed = time.perf_counter() - start
     result.metadata = dict(result.metadata)
@@ -1254,6 +1287,7 @@ class ProcessPoolPathTvcMcpNPlayerSreSolver(ProcessPoolPathMcpNPlayerSreSolver):
         num_pure_starts=20,
         round_digits=4,
         initial_policies_batch=None,
+        max_candidates=DEFAULT_MAX_PATH_MCP_CANDIDATES,
     ):
         q_tensors = [validate_nplayer_q_tensor(q_tensor) for q_tensor in q_tensors]
         if not q_tensors:
@@ -1273,6 +1307,7 @@ class ProcessPoolPathTvcMcpNPlayerSreSolver(ProcessPoolPathMcpNPlayerSreSolver):
                 int(num_pure_starts),
                 round_digits,
                 initial_policies,
+                max_candidates,
                 self._task_seed(batch_offset),
             )
             for batch_offset, (q_tensor, initial_policies) in enumerate(
