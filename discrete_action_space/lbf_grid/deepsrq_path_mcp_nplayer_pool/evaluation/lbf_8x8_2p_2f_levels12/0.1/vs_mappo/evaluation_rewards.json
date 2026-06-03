@@ -1,34 +1,34 @@
 {
   "episode_reward_summary": {
-    "episodes": 100,
+    "episodes": 200,
     "per_agent": [
       {
         "agent": "Agent 1\nDeep SRQ",
-        "mean": 0.68,
-        "std": 0.8411896337925236,
+        "mean": 0.6925,
+        "std": 0.9009404808310036,
         "min": 0.0,
-        "max": 3.0
+        "max": 3.5
       },
       {
         "agent": "Agent 2\nMAPPO",
-        "mean": 0.7,
-        "std": 0.9643650760992953,
+        "mean": 0.6075,
+        "std": 0.8319818207148518,
         "min": 0.0,
-        "max": 5.0
+        "max": 4.0
       }
     ],
     "joint": {
-      "mean": 1.38,
-      "std": 1.3622040963086257,
+      "mean": 1.3,
+      "std": 1.2206555615733703,
       "min": 0.0,
-      "max": 6.0
+      "max": 5.0
     }
   },
   "mean_agent_rewards": [
-    0.68,
-    0.7
+    0.6925,
+    0.6075
   ],
-  "mean_joint_reward": 1.38,
+  "mean_joint_reward": 1.3,
   "scenario_key": "lbf_8x8_2p_2f_levels12",
   "scenario_name": "2 agents with levels 1 and 2, 8x8 grid, 10 foods (3 level-3, 2 level-2, 5 level-1), full sight, 50-step episodes",
   "primary_label": "deepsrq_path_mcp_nplayer_pool",
@@ -37,7 +37,7 @@
   "pair_label": "Deep SRQ vs MAPPO",
   "plot_title": "Scenario 1, Deep SRQ vs MAPPO",
   "matchup_note": "Agent 1 uses Deep SRQ; Agents 2-2 use MAPPO.",
-  "n_episodes": 100,
+  "n_episodes": 200,
   "fixed_primary_agent": 1,
   "agent_labels": [
     "Agent 1\nDeep SRQ",
@@ -46,15 +46,15 @@
   "agent_algorithm_counts": [
     {
       "agent": 1,
-      "Deep SRQ": 100
+      "Deep SRQ": 200
     },
     {
       "agent": 2,
-      "MAPPO": 100
+      "MAPPO": 200
     }
   ],
-  "video_episode_index": 11,
-  "video_joint_reward": 6.0,
+  "video_episode_index": 24,
+  "video_joint_reward": 5.0,
   "render_error": null,
   "artifact_dir": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/evaluation/lbf_8x8_2p_2f_levels12/0.1/vs_mappo",
   "rewards_path": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/evaluation/lbf_8x8_2p_2f_levels12/0.1/vs_mappo/evaluation_rewards.json",

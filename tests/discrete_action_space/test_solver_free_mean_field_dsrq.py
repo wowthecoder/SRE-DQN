@@ -229,6 +229,43 @@ def test_replay_buffer_samples_feature_vectors_for_training():
     torch.testing.assert_close(batch["next_feature"][0], torch.as_tensor(next_feature))
 
 
+def test_replay_buffer_owns_pushed_arrays():
+    agent = _make_agent(feature_dim=3)
+    obs = np.arange(18, dtype=np.float32).reshape(2, 3, 3)
+    next_obs = obs + 100.0
+    mean = np.array([0.1, 0.2, 0.3, 0.4], dtype=np.float32)
+    next_mean = np.array([0.4, 0.3, 0.2, 0.1], dtype=np.float32)
+    feature = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+    next_feature = np.array([4.0, 5.0, 6.0], dtype=np.float32)
+    expected = tuple(
+        value.copy()
+        for value in (obs, feature, next_obs, next_feature, mean, next_mean)
+    )
+
+    agent.push(
+        obs,
+        1,
+        0.5,
+        next_obs,
+        mean,
+        next_mean,
+        done=False,
+        feature=feature,
+        next_feature=next_feature,
+    )
+    for value in (obs, next_obs, mean, next_mean, feature, next_feature):
+        value.fill(-999.0)
+
+    stored = agent.buffer.buffer[0]
+
+    np.testing.assert_allclose(stored[0], expected[0])
+    np.testing.assert_allclose(stored[1], expected[1])
+    np.testing.assert_allclose(stored[4], expected[2])
+    np.testing.assert_allclose(stored[5], expected[3])
+    np.testing.assert_allclose(stored[6], expected[4])
+    np.testing.assert_allclose(stored[7], expected[5])
+
+
 def test_checkpoint_round_trip(tmp_path):
     agent = _make_agent()
     ckpt = tmp_path / "agent.pt"

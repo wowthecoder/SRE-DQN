@@ -1,34 +1,34 @@
 {
   "episode_reward_summary": {
-    "episodes": 100,
+    "episodes": 200,
     "per_agent": [
       {
         "agent": "Agent 1\nDeep SRQ",
-        "mean": 1.23,
-        "std": 1.4515853402401113,
+        "mean": 1.185,
+        "std": 1.2974108832594244,
         "min": 0.0,
-        "max": 6.0
+        "max": 7.0
       },
       {
         "agent": "Agent 2\nDeep SRQ",
-        "mean": 1.25,
-        "std": 1.5354152532784087,
+        "mean": 1.235,
+        "std": 1.384656997237944,
         "min": 0.0,
-        "max": 7.0
+        "max": 6.0
       }
     ],
     "joint": {
-      "mean": 2.48,
-      "std": 2.636209399877028,
+      "mean": 2.42,
+      "std": 2.320258606276464,
       "min": 0.0,
-      "max": 10.0
+      "max": 12.0
     }
   },
   "mean_agent_rewards": [
-    1.23,
-    1.25
+    1.185,
+    1.235
   ],
-  "mean_joint_reward": 2.48,
+  "mean_joint_reward": 2.42,
   "scenario_key": "lbf_8x8_2p_2f_force_coop",
   "scenario_name": "2 level-1 agents, 8x8 grid, 10 foods (5 level-1, 5 level-2), full sight, forced cooperation, 50-step episodes",
   "primary_label": "deepsrq_path_mcp_nplayer_pool",
@@ -37,7 +37,7 @@
   "pair_label": "Deep SRQ",
   "plot_title": "Scenario 2, Deep SRQ vs Deep SRQ",
   "matchup_note": "All agent slots use Deep SRQ.",
-  "n_episodes": 100,
+  "n_episodes": 200,
   "fixed_primary_agent": null,
   "agent_labels": [
     "Agent 1\nDeep SRQ",
@@ -46,15 +46,15 @@
   "agent_algorithm_counts": [
     {
       "agent": 1,
-      "Deep SRQ": 100
+      "Deep SRQ": 200
     },
     {
       "agent": 2,
-      "Deep SRQ": 100
+      "Deep SRQ": 200
     }
   ],
-  "video_episode_index": 51,
-  "video_joint_reward": 10.0,
+  "video_episode_index": 49,
+  "video_joint_reward": 12.0,
   "render_error": null,
   "artifact_dir": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/evaluation/lbf_8x8_2p_2f_force_coop/0.1/self_play",
   "rewards_path": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/evaluation/lbf_8x8_2p_2f_force_coop/0.1/self_play/evaluation_rewards.json",

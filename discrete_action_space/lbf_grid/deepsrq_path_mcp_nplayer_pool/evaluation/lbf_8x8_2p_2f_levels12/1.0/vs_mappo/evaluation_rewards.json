@@ -1,0 +1,63 @@
+{
+  "episode_reward_summary": {
+    "episodes": 200,
+    "per_agent": [
+      {
+        "agent": "Agent 1\nDeep SRQ",
+        "mean": 0.8325,
+        "std": 1.1172259171716346,
+        "min": 0.0,
+        "max": 4.5
+      },
+      {
+        "agent": "Agent 2\nMAPPO",
+        "mean": 0.6125,
+        "std": 0.8432637487761465,
+        "min": 0.0,
+        "max": 4.0
+      }
+    ],
+    "joint": {
+      "mean": 1.445,
+      "std": 1.4754575561499559,
+      "min": 0.0,
+      "max": 6.0
+    }
+  },
+  "mean_agent_rewards": [
+    0.8325,
+    0.6125
+  ],
+  "mean_joint_reward": 1.445,
+  "scenario_key": "lbf_8x8_2p_2f_levels12",
+  "scenario_name": "2 agents with levels 1 and 2, 8x8 grid, 10 foods (3 level-3, 2 level-2, 5 level-1), full sight, 50-step episodes",
+  "primary_label": "deepsrq_path_mcp_nplayer_pool",
+  "opponent_label": "mappo",
+  "matchup_label": "deepsrq_path_mcp_nplayer_pool_vs_mappo",
+  "pair_label": "Deep SRQ vs MAPPO",
+  "plot_title": "Scenario 1, Deep SRQ vs MAPPO",
+  "matchup_note": "Agent 1 uses Deep SRQ; Agents 2-2 use MAPPO.",
+  "n_episodes": 200,
+  "fixed_primary_agent": 1,
+  "agent_labels": [
+    "Agent 1\nDeep SRQ",
+    "Agent 2\nMAPPO"
+  ],
+  "agent_algorithm_counts": [
+    {
+      "agent": 1,
+      "Deep SRQ": 200
+    },
+    {
+      "agent": 2,
+      "MAPPO": 200
+    }
+  ],
+  "video_episode_index": 24,
+  "video_joint_reward": 6.0,
+  "render_error": null,
+  "artifact_dir": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/evaluation/lbf_8x8_2p_2f_levels12/1.0/vs_mappo",
+  "rewards_path": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/evaluation/lbf_8x8_2p_2f_levels12/1.0/vs_mappo/evaluation_rewards.json",
+  "boxplot_path": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/evaluation/lbf_8x8_2p_2f_levels12/1.0/vs_mappo/evaluation_boxplot.png",
+  "video_path": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/evaluation/lbf_8x8_2p_2f_levels12/1.0/vs_mappo/sample_rollout.gif"
+}

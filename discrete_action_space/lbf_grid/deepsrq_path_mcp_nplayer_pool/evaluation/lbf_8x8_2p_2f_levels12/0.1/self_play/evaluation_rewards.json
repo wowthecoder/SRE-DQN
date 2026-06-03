@@ -1,34 +1,34 @@
 {
   "episode_reward_summary": {
-    "episodes": 100,
+    "episodes": 200,
     "per_agent": [
       {
         "agent": "Agent 1\nDeep SRQ",
-        "mean": 1.345,
-        "std": 1.583816592917248,
+        "mean": 1.2975,
+        "std": 1.4474956822042684,
         "min": 0.0,
-        "max": 8.0
+        "max": 6.5
       },
       {
         "agent": "Agent 2\nDeep SRQ",
-        "mean": 2.505,
-        "std": 2.6631701034669195,
+        "mean": 2.6125,
+        "std": 2.640756283718738,
         "min": 0.0,
-        "max": 10.0
+        "max": 10.5
       }
     ],
     "joint": {
-      "mean": 3.85,
-      "std": 3.769283751589949,
+      "mean": 3.91,
+      "std": 3.7029582768375886,
       "min": 0.0,
       "max": 16.0
     }
   },
   "mean_agent_rewards": [
-    1.345,
-    2.505
+    1.2975,
+    2.6125
   ],
-  "mean_joint_reward": 3.85,
+  "mean_joint_reward": 3.91,
   "scenario_key": "lbf_8x8_2p_2f_levels12",
   "scenario_name": "2 agents with levels 1 and 2, 8x8 grid, 10 foods (3 level-3, 2 level-2, 5 level-1), full sight, 50-step episodes",
   "primary_label": "deepsrq_path_mcp_nplayer_pool",
@@ -37,7 +37,7 @@
   "pair_label": "Deep SRQ",
   "plot_title": "Scenario 1, Deep SRQ vs Deep SRQ",
   "matchup_note": "All agent slots use Deep SRQ.",
-  "n_episodes": 100,
+  "n_episodes": 200,
   "fixed_primary_agent": null,
   "agent_labels": [
     "Agent 1\nDeep SRQ",
@@ -46,11 +46,11 @@
   "agent_algorithm_counts": [
     {
       "agent": 1,
-      "Deep SRQ": 100
+      "Deep SRQ": 200
     },
     {
       "agent": 2,
-      "Deep SRQ": 100
+      "Deep SRQ": 200
     }
   ],
   "video_episode_index": 17,

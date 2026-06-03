@@ -288,15 +288,20 @@ class TorchRobustMFDsrqAgent(SolverFreeMFDsrqAgent):
                     next_obs[nonterminal],
                     next_feature[nonterminal],
                 )
-                online_robust_q = self._robust_action_values(online_payoff, next_mean)
-                best = online_robust_q.argmax(dim=-1, keepdim=True)
+                online_policy = self._policy_from_payoffs(online_payoff, next_mean)
 
                 target_payoff = self.target_net.payoff_matrix(
                     next_obs[nonterminal],
                     next_feature[nonterminal],
                 )
-                target_robust_q = self._robust_action_values(target_payoff, next_mean)
-                target_values[nonterminal] = target_robust_q.gather(1, best).squeeze(1)
+                target_values_by_mean = (
+                    online_policy.unsqueeze(-1) * target_payoff
+                ).sum(dim=1)
+                target_values[nonterminal] = torch_tv_worst_case_values(
+                    next_mean,
+                    target_values_by_mean.unsqueeze(1),
+                    self.epsilon_robust,
+                ).squeeze(1)
             y = rewards + (1.0 - dones) * self.gamma * target_values
 
         loss_per = nn.functional.mse_loss(q_taken, y, reduction="none")

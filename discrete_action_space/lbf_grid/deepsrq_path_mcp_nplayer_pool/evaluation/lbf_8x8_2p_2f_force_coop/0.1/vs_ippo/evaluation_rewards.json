@@ -1,34 +1,34 @@
 {
   "episode_reward_summary": {
-    "episodes": 100,
+    "episodes": 200,
     "per_agent": [
       {
         "agent": "Agent 1\nDeep SRQ",
-        "mean": 0.79,
-        "std": 1.03,
+        "mean": 0.8525,
+        "std": 1.0556958605583333,
         "min": 0.0,
-        "max": 4.0
+        "max": 5.0
       },
       {
         "agent": "Agent 2\nIPPO",
-        "mean": 0.38,
-        "std": 0.6087692502089769,
+        "mean": 0.4325,
+        "std": 0.6278485087981017,
         "min": 0.0,
         "max": 3.0
       }
     ],
     "joint": {
-      "mean": 1.17,
-      "std": 1.2494398745037714,
+      "mean": 1.285,
+      "std": 1.3052873246913876,
       "min": 0.0,
-      "max": 5.0
+      "max": 7.0
     }
   },
   "mean_agent_rewards": [
-    0.79,
-    0.38
+    0.8525,
+    0.4325
   ],
-  "mean_joint_reward": 1.17,
+  "mean_joint_reward": 1.285,
   "scenario_key": "lbf_8x8_2p_2f_force_coop",
   "scenario_name": "2 level-1 agents, 8x8 grid, 10 foods (5 level-1, 5 level-2), full sight, forced cooperation, 50-step episodes",
   "primary_label": "deepsrq_path_mcp_nplayer_pool",
@@ -37,7 +37,7 @@
   "pair_label": "Deep SRQ vs IPPO",
   "plot_title": "Scenario 2, Deep SRQ vs IPPO",
   "matchup_note": "Agent 1 uses Deep SRQ; Agents 2-2 use IPPO.",
-  "n_episodes": 100,
+  "n_episodes": 200,
   "fixed_primary_agent": 1,
   "agent_labels": [
     "Agent 1\nDeep SRQ",
@@ -46,15 +46,15 @@
   "agent_algorithm_counts": [
     {
       "agent": 1,
-      "Deep SRQ": 100
+      "Deep SRQ": 200
     },
     {
       "agent": 2,
-      "IPPO": 100
+      "IPPO": 200
     }
   ],
-  "video_episode_index": 54,
-  "video_joint_reward": 5.0,
+  "video_episode_index": 16,
+  "video_joint_reward": 7.0,
   "render_error": null,
   "artifact_dir": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/evaluation/lbf_8x8_2p_2f_force_coop/0.1/vs_ippo",
   "rewards_path": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/evaluation/lbf_8x8_2p_2f_force_coop/0.1/vs_ippo/evaluation_rewards.json",

@@ -19,8 +19,12 @@ from .instrumented_env import aggregate_lbf_episode_metrics
 from .notebook_eval import plot_training_reward_curve, plot_training_reward_max_curve
 
 
-EPYMARL_ALGORITHMS = ("iql", "ippo", "mappo", "qmix", "maa2c")
+EPYMARL_ALGORITHMS = ("iql", "ippo", "mappo", "maa2c")
 UNSUPPORTED_EPYMARL_OVERRIDES = frozenset({"env_args.disable_env_checker"})
+SREDQN_TRAIN_UPDATES_PER_ENV_BATCH = "sredqn_train_updates_per_env_batch"
+SREDQN_PARALLEL_BATCH_SIZE = 128
+SREDQN_PARALLEL_MINIBATCH_SIZE = 32
+SREDQN_POLICY_GRADIENT_ALGORITHMS = frozenset({"ippo", "mappo", "maa2c"})
 
 
 def _json_safe(value):
@@ -116,6 +120,54 @@ def _normalize_config_overrides(config_overrides):
         for key, value in config_overrides.items()
         if key not in UNSUPPORTED_EPYMARL_OVERRIDES
     }
+
+
+def _coerce_positive_int(value, *, name: str) -> int:
+    try:
+        coerced = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a positive integer; got {value!r}") from exc
+    if coerced <= 0:
+        raise ValueError(f"{name} must be a positive integer; got {value!r}")
+    return coerced
+
+
+def full_parallel_training_overrides(
+    algorithm: str,
+    *,
+    batch_size_run: int = SREDQN_PARALLEL_BATCH_SIZE,
+    minibatch_size: int = SREDQN_PARALLEL_MINIBATCH_SIZE,
+    use_cuda: bool = True,
+    test_nepisode: int | None = None,
+    save_model: bool = True,
+    save_model_interval: int = 50_000,
+) -> dict[str, object]:
+    """Return EPyMARL overrides for parallel collection with full-batch training.
+
+    EPyMARL normally performs one learner update per ``runner.run`` call. With a
+    parallel runner, that call collects ``batch_size_run`` episodes, so this
+    wrapper asks the patched subprocess to split each collected parallel batch
+    into minibatches and train over all of it before collecting again.
+    """
+    algorithm = str(algorithm).lower()
+    if algorithm not in EPYMARL_ALGORITHMS:
+        raise ValueError(f"Unsupported EPyMARL algorithm: {algorithm}")
+    batch_size_run = _coerce_positive_int(batch_size_run, name="batch_size_run")
+    minibatch_size = _coerce_positive_int(minibatch_size, name="minibatch_size")
+
+    overrides: dict[str, object] = {
+        "runner": "parallel",
+        "batch_size_run": batch_size_run,
+        "batch_size": minibatch_size,
+        "use_cuda": bool(use_cuda),
+        "test_nepisode": int(test_nepisode or batch_size_run),
+        "save_model": bool(save_model),
+        "save_model_interval": int(save_model_interval),
+        SREDQN_TRAIN_UPDATES_PER_ENV_BATCH: "auto",
+    }
+    if algorithm in SREDQN_POLICY_GRADIENT_ALGORITHMS:
+        overrides["buffer_size"] = max(batch_size_run, minibatch_size)
+    return overrides
 
 
 def _series_summary(values) -> dict[str, float | int | None]:
@@ -311,7 +363,7 @@ def build_epymarl_command(
 ) -> list[str]:
     """Build a Python command that registers local LBF IDs then runs EPyMARL."""
     algorithm = str(algorithm).lower()
-    if algorithm not in ("iql", "ippo", "mappo", "qmix", "maa2c"):
+    if algorithm not in EPYMARL_ALGORITHMS:
         raise ValueError(f"Unsupported EPyMARL algorithm: {algorithm}")
 
     epymarl_root = Path(epymarl_root).expanduser().resolve()
@@ -337,6 +389,10 @@ def build_epymarl_command(
         f"local_results_path={str(result_root)}",
     ]
     config_overrides = _normalize_config_overrides(config_overrides)
+    train_updates_per_env_batch = config_overrides.pop(
+        SREDQN_TRAIN_UPDATES_PER_ENV_BATCH,
+        1,
+    )
     for key, value in config_overrides.items():
         overrides.append(f"{key}={_format_epymarl_override_value(value)}")
 
@@ -359,6 +415,11 @@ def build_epymarl_command(
         "    if interval_save not in run_source:\n"
         "        raise RuntimeError('Could not patch EPyMARL interval checkpoint save')\n"
         "    run_source = run_source.replace(interval_save, interval_save.replace('args.save_model', 'False and args.save_model'), 1)\n"
+        "    train_anchor = \"        if buffer.can_sample(args.batch_size):\\n            episode_sample = buffer.sample(args.batch_size)\\n\\n            # Truncate batch to only filled timesteps\\n            max_ep_t = episode_sample.max_t_filled()\\n            episode_sample = episode_sample[:, :max_ep_t]\\n\\n            if episode_sample.device != args.device:\\n                episode_sample.to(args.device)\\n\\n            learner.train(episode_sample, runner.t_env, episode)\"\n"
+        "    train_patch = \"\"\"        sredqn_updates_setting = globals().get(\\\"sredqn_train_updates_per_env_batch\\\", 1)\\n        if isinstance(sredqn_updates_setting, str) and sredqn_updates_setting.lower() == \\\"auto\\\":\\n            sredqn_train_updates = max(1, (episode_batch.batch_size + max(int(args.batch_size), 1) - 1) // max(int(args.batch_size), 1))\\n        else:\\n            sredqn_train_updates = max(1, int(sredqn_updates_setting))\\n\\n        if sredqn_train_updates <= 1:\\n            if buffer.can_sample(args.batch_size):\\n                episode_sample = buffer.sample(args.batch_size)\\n\\n                # Truncate batch to only filled timesteps\\n                max_ep_t = episode_sample.max_t_filled()\\n                episode_sample = episode_sample[:, :max_ep_t]\\n\\n                if episode_sample.device != args.device:\\n                    episode_sample.to(args.device)\\n\\n                learner.train(episode_sample, runner.t_env, episode)\\n        else:\\n            import torch as _sredqn_th\\n\\n            chunk_size = max(int(args.batch_size), 1)\\n            order = _sredqn_th.randperm(episode_batch.batch_size).tolist()\\n            for sredqn_update_idx in range(sredqn_train_updates):\\n                start = (sredqn_update_idx * chunk_size) % episode_batch.batch_size\\n                stop = min(start + chunk_size, episode_batch.batch_size)\\n                batch_indices = order[start:stop]\\n                if not batch_indices:\\n                    batch_indices = order[:min(chunk_size, episode_batch.batch_size)]\\n                episode_sample = episode_batch[batch_indices, :]\\n\\n                # Truncate batch to only filled timesteps\\n                max_ep_t = episode_sample.max_t_filled()\\n                episode_sample = episode_sample[:, :max_ep_t]\\n\\n                if episode_sample.device != args.device:\\n                    episode_sample.to(args.device)\\n\\n                learner.train(episode_sample, runner.t_env, episode + sredqn_update_idx)\"\"\"\n"
+        "    if train_anchor not in run_source:\n"
+        "        raise RuntimeError('Could not patch EPyMARL train-update block')\n"
+        "    run_source = run_source.replace(train_anchor, train_patch, 1)\n"
         "    hook_anchor = \"    last_time = start_time\\n\\n    logger.console_logger.info(\\\"Beginning training for {} timesteps\\\".format(args.t_max))\"\n"
         "    checkpoint_hook = \"\"\"    last_time = start_time\\n\\n    sredqn_model_root = os.path.join(args.local_results_path, \\\"models\\\", args.unique_token)\\n    sredqn_best_score = -float(\\\"inf\\\")\\n\\n    def sredqn_save_checkpoint(kind):\\n        if not args.save_model:\\n            return\\n        kind_root = os.path.join(sredqn_model_root, kind)\\n        if os.path.isdir(kind_root):\\n            shutil.rmtree(kind_root)\\n        step_dir = os.path.join(kind_root, str(runner.t_env))\\n        os.makedirs(step_dir, exist_ok=True)\\n        logger.console_logger.info(\\\"Saving {} model to {}\\\".format(kind, step_dir))\\n        learner.save_models(step_dir)\\n\\n    runner_log_original = runner._log\\n\\n    def sredqn_log_and_maybe_save_best(returns, stats, prefix):\\n        nonlocal sredqn_best_score\\n        if prefix == \\\"test_\\\" and returns and args.save_model:\\n            import numpy as _sredqn_np\\n            arr = _sredqn_np.asarray(returns, dtype=float)\\n            score = float(arr.mean()) if args.common_reward else float(arr.sum(axis=-1).mean())\\n            if score >= sredqn_best_score:\\n                sredqn_best_score = score\\n                sredqn_save_checkpoint(\\\"best\\\")\\n        return runner_log_original(returns, stats, prefix)\\n\\n    runner._log = sredqn_log_and_maybe_save_best\\n\\n    logger.console_logger.info(\\\"Beginning training for {} timesteps\\\".format(args.t_max))\"\"\"\n"
         "    if hook_anchor not in run_source:\n"
@@ -371,6 +432,7 @@ def build_epymarl_command(
         "    run_source = run_source.replace(final_anchor, final_hook, 1)\n"
         "    run_module = types.ModuleType('run')\n"
         "    run_module.__file__ = str(run_path)\n"
+        f"    run_module.sredqn_train_updates_per_env_batch = {train_updates_per_env_batch!r}\n"
         "    sys.modules['run'] = run_module\n"
         "    exec(compile(run_source, str(run_path), 'exec'), run_module.__dict__)\n"
         "from discrete_action_space.lbf_grid.epymarl_lbf_env import "

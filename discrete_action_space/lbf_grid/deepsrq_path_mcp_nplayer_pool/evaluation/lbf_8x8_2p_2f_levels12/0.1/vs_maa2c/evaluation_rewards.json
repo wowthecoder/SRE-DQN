@@ -1,34 +1,34 @@
 {
   "episode_reward_summary": {
-    "episodes": 100,
+    "episodes": 200,
     "per_agent": [
       {
         "agent": "Agent 1\nDeep SRQ",
-        "mean": 0.695,
-        "std": 0.8363462201743964,
+        "mean": 0.7025,
+        "std": 0.9042918500130364,
         "min": 0.0,
-        "max": 3.0
+        "max": 3.5
       },
       {
         "agent": "Agent 2\nMAA2C",
-        "mean": 0.675,
-        "std": 0.8926785535678563,
+        "mean": 0.6125,
+        "std": 0.834322329798262,
         "min": 0.0,
         "max": 4.0
       }
     ],
     "joint": {
-      "mean": 1.37,
-      "std": 1.2857293649909376,
+      "mean": 1.315,
+      "std": 1.2189237055697948,
       "min": 0.0,
       "max": 5.0
     }
   },
   "mean_agent_rewards": [
-    0.695,
-    0.675
+    0.7025,
+    0.6125
   ],
-  "mean_joint_reward": 1.37,
+  "mean_joint_reward": 1.315,
   "scenario_key": "lbf_8x8_2p_2f_levels12",
   "scenario_name": "2 agents with levels 1 and 2, 8x8 grid, 10 foods (3 level-3, 2 level-2, 5 level-1), full sight, 50-step episodes",
   "primary_label": "deepsrq_path_mcp_nplayer_pool",
@@ -37,7 +37,7 @@
   "pair_label": "Deep SRQ vs MAA2C",
   "plot_title": "Scenario 1, Deep SRQ vs MAA2C",
   "matchup_note": "Agent 1 uses Deep SRQ; Agents 2-2 use MAA2C.",
-  "n_episodes": 100,
+  "n_episodes": 200,
   "fixed_primary_agent": 1,
   "agent_labels": [
     "Agent 1\nDeep SRQ",
@@ -46,11 +46,11 @@
   "agent_algorithm_counts": [
     {
       "agent": 1,
-      "Deep SRQ": 100
+      "Deep SRQ": 200
     },
     {
       "agent": 2,
-      "MAA2C": 100
+      "MAA2C": 200
     }
   ],
   "video_episode_index": 24,

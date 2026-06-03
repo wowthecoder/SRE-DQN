@@ -6,7 +6,11 @@ venv/
 
 # BenchMARL / notebook run artifacts
 **/benchmarl_runs/
-/discrete_action_space/mean_field_dsrq/runs/
+mfq_target_*
+mfq_eval_*
+dqn_target_*
+dqn_eval_*
+ac_*
 /iql_simple_tag_*/
 
 **/__pycache__/

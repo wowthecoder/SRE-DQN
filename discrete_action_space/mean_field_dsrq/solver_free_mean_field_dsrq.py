@@ -130,12 +130,12 @@ class SolverFreeMFReplayBuffer:
             next_feature = np.zeros_like(feature, dtype=np.float32)
         self.buffer.append(
             (
-                np.asarray(obs, dtype=np.float32),
-                np.asarray(feature, dtype=np.float32),
+                np.array(obs, dtype=np.float32, copy=True),
+                np.array(feature, dtype=np.float32, copy=True),
                 int(action),
                 float(reward),
-                np.asarray(next_obs, dtype=np.float32),
-                np.asarray(next_feature, dtype=np.float32),
+                np.array(next_obs, dtype=np.float32, copy=True),
+                np.array(next_feature, dtype=np.float32, copy=True),
                 _normalize_distribution(mean_a),
                 _normalize_distribution(next_mean_a),
                 float(done),

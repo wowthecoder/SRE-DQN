@@ -152,11 +152,11 @@ def test_torch_robust_train_step_updates_from_replay():
     assert agent.robust_torch_operator_calls > 0
 
 
-def test_torch_robust_target_uses_online_greedy_action_not_soft_expected_policy():
+def test_torch_robust_target_uses_online_soft_policy_expected_value():
     agent = _make_torch_agent(
         gamma=1.0,
         lr=0.0,
-        robust_policy_temperature=100.0,
+        robust_policy_temperature=1.0,
     )
     mean = np.full(4, 0.25, dtype=np.float32)
 
@@ -185,18 +185,17 @@ def test_torch_robust_target_uses_online_greedy_action_not_soft_expected_policy(
 
         def payoff_matrix(self, obs_t, feature_t=None):
             del feature_t
-            return torch.zeros(obs_t.shape[0], 4, 4, device=obs_t.device) + self.weight
-
-    calls = []
+            values = torch.tensor(
+                [0.0, 10.0, 20.0, 30.0],
+                dtype=torch.float32,
+                device=obs_t.device,
+            )
+            return values.view(1, 4, 1).expand(obs_t.shape[0], 4, 4) + self.weight
 
     def fake_robust_action_values(payoff_matrices, mean_actions):
         del mean_actions
-        calls.append(payoff_matrices.shape[0])
         batch = payoff_matrices.shape[0]
-        if len(calls) == 1:
-            values = [0.0, 1.0, 0.0, 0.0]
-        else:
-            values = [0.0, 10.0, 20.0, 30.0]
+        values = [0.0, 2.0, 0.0, 0.0]
         return torch.tensor([values] * batch, dtype=torch.float32, device=payoff_matrices.device)
 
     agent.q_net = ZeroCurrentQNet()
@@ -206,7 +205,9 @@ def test_torch_robust_target_uses_online_greedy_action_not_soft_expected_policy(
 
     loss = agent.train_step()
 
-    assert loss == pytest.approx(100.0)
+    policy = torch.softmax(torch.tensor([0.0, 2.0, 0.0, 0.0]), dim=-1)
+    expected_target = float(policy @ torch.tensor([0.0, 10.0, 20.0, 30.0]))
+    assert loss == pytest.approx(expected_target**2)
 
 
 def test_torch_robust_agent_passes_features_to_payoff_network():

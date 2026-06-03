@@ -3,6 +3,7 @@ from .deep_srq_lbf import train_lbf_deep_srq_vectorized
 from .epymarl_baselines import (
     EPYMARL_ALGORITHMS,
     build_epymarl_command,
+    full_parallel_training_overrides,
     n_frames_for_episodes,
     run_epymarl_baseline,
 )
@@ -12,6 +13,7 @@ __all__ = [
     "train_lbf_deep_srq_vectorized",
     "EPYMARL_ALGORITHMS",
     "build_epymarl_command",
+    "full_parallel_training_overrides",
     "n_frames_for_episodes",
     "run_epymarl_baseline",
 ]

@@ -1,0 +1,63 @@
+{
+  "episode_reward_summary": {
+    "episodes": 200,
+    "per_agent": [
+      {
+        "agent": "Agent 1\nDeep SRQ",
+        "mean": 0.8875,
+        "std": 1.0936607106411018,
+        "min": 0.0,
+        "max": 6.0
+      },
+      {
+        "agent": "Agent 2\nMAA2C",
+        "mean": 0.3925,
+        "std": 0.5913490931759344,
+        "min": 0.0,
+        "max": 3.0
+      }
+    ],
+    "joint": {
+      "mean": 1.28,
+      "std": 1.2812493902437572,
+      "min": 0.0,
+      "max": 7.0
+    }
+  },
+  "mean_agent_rewards": [
+    0.8875,
+    0.3925
+  ],
+  "mean_joint_reward": 1.28,
+  "scenario_key": "lbf_8x8_2p_2f_force_coop",
+  "scenario_name": "2 level-1 agents, 8x8 grid, 10 foods (5 level-1, 5 level-2), full sight, forced cooperation, 50-step episodes",
+  "primary_label": "deepsrq_path_mcp_nplayer_pool",
+  "opponent_label": "maa2c",
+  "matchup_label": "deepsrq_path_mcp_nplayer_pool_vs_maa2c",
+  "pair_label": "Deep SRQ vs MAA2C",
+  "plot_title": "Scenario 2, Deep SRQ vs MAA2C",
+  "matchup_note": "Agent 1 uses Deep SRQ; Agents 2-2 use MAA2C.",
+  "n_episodes": 200,
+  "fixed_primary_agent": 1,
+  "agent_labels": [
+    "Agent 1\nDeep SRQ",
+    "Agent 2\nMAA2C"
+  ],
+  "agent_algorithm_counts": [
+    {
+      "agent": 1,
+      "Deep SRQ": 200
+    },
+    {
+      "agent": 2,
+      "MAA2C": 200
+    }
+  ],
+  "video_episode_index": 111,
+  "video_joint_reward": 7.0,
+  "render_error": null,
+  "artifact_dir": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/evaluation/lbf_8x8_2p_2f_force_coop/0.5/vs_maa2c",
+  "rewards_path": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/evaluation/lbf_8x8_2p_2f_force_coop/0.5/vs_maa2c/evaluation_rewards.json",
+  "boxplot_path": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/evaluation/lbf_8x8_2p_2f_force_coop/0.5/vs_maa2c/evaluation_boxplot.png",
+  "video_path": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/evaluation/lbf_8x8_2p_2f_force_coop/0.5/vs_maa2c/sample_rollout.gif"
+}

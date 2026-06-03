@@ -1,34 +1,34 @@
 {
   "episode_reward_summary": {
-    "episodes": 100,
+    "episodes": 200,
     "per_agent": [
       {
         "agent": "Agent 1\nDeep SRQ",
-        "mean": 0.71,
-        "std": 0.9438749917229505,
+        "mean": 0.6175,
+        "std": 0.895792247119833,
         "min": 0.0,
         "max": 5.0
       },
       {
         "agent": "Agent 2\nMAPPO",
-        "mean": 0.66,
-        "std": 0.9052071586106686,
+        "mean": 0.5875,
+        "std": 0.8267972847076847,
         "min": 0.0,
         "max": 4.0
       }
     ],
     "joint": {
-      "mean": 1.37,
-      "std": 1.2621806526801145,
+      "mean": 1.205,
+      "std": 1.180243618919416,
       "min": 0.0,
       "max": 5.0
     }
   },
   "mean_agent_rewards": [
-    0.71,
-    0.66
+    0.6175,
+    0.5875
   ],
-  "mean_joint_reward": 1.37,
+  "mean_joint_reward": 1.205,
   "scenario_key": "lbf_8x8_2p_2f_levels12",
   "scenario_name": "2 agents with levels 1 and 2, 8x8 grid, 10 foods (3 level-3, 2 level-2, 5 level-1), full sight, 50-step episodes",
   "primary_label": "deepsrq_path_mcp_nplayer_pool",
@@ -37,7 +37,7 @@
   "pair_label": "Deep SRQ vs MAPPO",
   "plot_title": "Scenario 1, Deep SRQ vs MAPPO",
   "matchup_note": "Agent 1 uses Deep SRQ; Agents 2-2 use MAPPO.",
-  "n_episodes": 100,
+  "n_episodes": 200,
   "fixed_primary_agent": 1,
   "agent_labels": [
     "Agent 1\nDeep SRQ",
@@ -46,11 +46,11 @@
   "agent_algorithm_counts": [
     {
       "agent": 1,
-      "Deep SRQ": 100
+      "Deep SRQ": 200
     },
     {
       "agent": 2,
-      "MAPPO": 100
+      "MAPPO": 200
     }
   ],
   "video_episode_index": 9,
