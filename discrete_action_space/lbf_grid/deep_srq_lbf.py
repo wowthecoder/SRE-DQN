@@ -25,8 +25,6 @@ from dueling_double_dqn_sre import (
 from sre_solvers import (
     LemkeLcpBimatrixSreSolver,
     LemkeLcpBimatrixSreSolverConfig,
-    LogitQreHomotopySreSolverConfig,
-    LogitQreHomotopySreSolver,
     NfgTransformerSreSolver,
     NfgTransformerSreSolverConfig,
     PathCBimatrixSreSolver,
@@ -114,9 +112,6 @@ class DeepSrqLbfHyperparams:
         default_factory=lambda: ProcessPoolPathMcpNPlayerSreSolverConfig(
             max_workers=8,
         )
-    )
-    logit_qre: LogitQreHomotopySreSolverConfig = field(
-        default_factory=LogitQreHomotopySreSolverConfig
     )
     nfg_transformer: NfgTransformerSreSolverConfig = field(
         default_factory=NfgTransformerSreSolverConfig
@@ -452,8 +447,6 @@ def _evaluate_agent_rewards(
 def _make_solver(solver_name, hp, seed):
     if not isinstance(hp, DeepSrqLbfHyperparams):
         hp = deep_srq_lbf_hyperparams(hp)
-    if solver_name in {"logit_qre_sre", "qre_homotopy_sre", "logit_qre"}:
-        return LogitQreHomotopySreSolver(config=replace(hp.logit_qre, random_seed=seed))
     if solver_name in {"nfg_transformer_sre", "nfg_sre"}:
         return NfgTransformerSreSolver(config=hp.nfg_transformer)
     if solver_name in {"path_mcp_nplayer_pool", "path_nplayer_pool", "path_mcp_pool"}:

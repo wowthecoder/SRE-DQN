@@ -54,14 +54,12 @@ BASELINE_ALGORITHMS = ("iql", "ippo", "mappo", "maa2c")
 DEFAULT_EVAL_EPISODES = 500
 DEFAULT_EVAL_VIDEO_FPS = 4
 DEEPSRQ_PATH_MCP_NPLAYER_POOL_FAMILY = "deepsrq_path_mcp_nplayer_pool"
-DEEPSRQ_LOGIT_QRE_FAMILY = "deepsrq_logit_qre_homotopy"
 DEEPSRQ_NFG_TRANSFORMER_FAMILY = "deepsrq_nfg_transformer"
 SRAC_FAMILY = "srac"
 SRA2C_FAMILY = "sra2c"
 PATH_C_POOL_SOLVER = "path_c_pool"
 PATH_MCP_NPLAYER_POOL_SOLVER = "path_mcp_nplayer_pool"
 PATH_TVC_MCP_NPLAYER_POOL_SOLVER = "path_tvc_mcp_nplayer_pool"
-LOGIT_QRE_SOLVER = "logit_qre_sre"
 NFG_TRANSFORMER_SOLVER = "nfg_transformer_sre"
 DEFAULT_PATH_POOL_NPLAYER_SOLVER = PATH_MCP_NPLAYER_POOL_SOLVER
 DEFAULT_PATH_MCP_NPLAYER_POOL_WORKERS = 8
@@ -72,12 +70,6 @@ DEEPSRQ_PATH_MCP_POOL_HYPERPARAMETER_OVERRIDES = {
         "target_equilibrium_update_steps": 4,
         "sre_policy_cache_enabled": True,
         "sre_policy_cache_size": 8192,
-    },
-}
-DEEPSRQ_LOGIT_QRE_HYPERPARAMETER_OVERRIDES = {
-    "agent": {
-        "target_equilibrium_update_steps": 4,
-        "sre_policy_cache_enabled": False,
     },
 }
 DEEPSRQ_NFG_TRANSFORMER_HYPERPARAMETER_OVERRIDES = {
@@ -187,7 +179,6 @@ def _algorithm_display_label(label: str | None) -> str:
     label = str(label or "").strip()
     display_names = {
         DEEPSRQ_PATH_MCP_NPLAYER_POOL_FAMILY: "Deep SRQ",
-        DEEPSRQ_LOGIT_QRE_FAMILY: "Deep SRQ Logit QRE",
         DEEPSRQ_NFG_TRANSFORMER_FAMILY: "Deep SRQ NfgTransformer",
         SRAC_FAMILY: "SRAC",
         SRA2C_FAMILY: "SR-A2C",
@@ -785,40 +776,6 @@ def train_deepsrq_solver_for_epsilon(
         drop_episode_lengths=True,
     )
     return results
-
-
-def train_deepsrq_logit_qre_for_epsilon(
-    epsilon: float,
-    *,
-    n_episodes: int,
-    scenarios: tuple[LbfNotebookScenario, ...] | None = None,
-    base_seed: int = BASE_SEED,
-    use_gpu: bool = True,
-    eval_interval: int | None = 100,
-    eval_episodes: int = 5,
-    num_envs: int = 2,
-    eval_num_envs: int | None = None,
-    hyperparameter_overrides: dict | None = None,
-    repo_root: str | Path | None = None,
-    skip_existing: bool = False,
-) -> dict[str, dict]:
-    return train_deepsrq_solver_for_epsilon(
-        epsilon,
-        family=DEEPSRQ_LOGIT_QRE_FAMILY,
-        solver_name=LOGIT_QRE_SOLVER,
-        n_episodes=n_episodes,
-        scenarios=scenarios,
-        base_seed=base_seed,
-        use_gpu=use_gpu,
-        eval_interval=eval_interval,
-        eval_episodes=eval_episodes,
-        num_envs=num_envs,
-        eval_num_envs=eval_num_envs,
-        hyperparameter_overrides=hyperparameter_overrides,
-        default_hyperparameter_overrides=DEEPSRQ_LOGIT_QRE_HYPERPARAMETER_OVERRIDES,
-        repo_root=repo_root,
-        skip_existing=skip_existing,
-    )
 
 
 def train_deepsrq_nfg_transformer_for_epsilon(
@@ -1568,11 +1525,6 @@ def _make_deepsrq_eval_solver(
     seed: int = BASE_SEED,
     sre_solver_workers: int | None = None,
 ):
-    if solver_name in {"logit_qre_sre", "qre_homotopy_sre", "logit_qre"}:
-        return make_sre_solver(
-            solver_name,
-            config=replace(current_hp.logit_qre, random_seed=seed),
-        )
     if solver_name in {"nfg_transformer_sre", "nfg_sre"}:
         return make_sre_solver(solver_name, config=current_hp.nfg_transformer)
     if solver_name in {"path_mcp_nplayer_pool", "path_nplayer_pool", "path_mcp_pool"}:
@@ -2171,30 +2123,6 @@ def evaluate_deepsrq_solver_suite_for_epsilon(
         drop_episode_lengths=True,
     )
     return results
-
-
-def evaluate_deepsrq_logit_qre_suite_for_epsilon(
-    epsilon: float,
-    *,
-    scenarios: tuple[LbfNotebookScenario, ...] | None = None,
-    n_episodes: int = DEFAULT_EVAL_EPISODES,
-    repo_root: str | Path | None = None,
-    use_gpu: bool = True,
-    num_envs: int = 1,
-    hyperparameter_overrides: dict | None = None,
-) -> dict[str, dict]:
-    return evaluate_deepsrq_solver_suite_for_epsilon(
-        epsilon,
-        family=DEEPSRQ_LOGIT_QRE_FAMILY,
-        solver_name=LOGIT_QRE_SOLVER,
-        scenarios=scenarios,
-        n_episodes=n_episodes,
-        repo_root=repo_root,
-        use_gpu=use_gpu,
-        num_envs=num_envs,
-        hyperparameter_overrides=hyperparameter_overrides,
-        default_hyperparameter_overrides=DEEPSRQ_LOGIT_QRE_HYPERPARAMETER_OVERRIDES,
-    )
 
 
 def evaluate_deepsrq_nfg_transformer_suite_for_epsilon(

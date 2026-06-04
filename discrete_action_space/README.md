@@ -1,8 +1,7 @@
 # Discrete-Action Deep SRQ
 
 This folder extends tabular Strategically Robust Q-learning (SRQ) to deep
-discrete-action stage games. The DQN produces a normal-form Q tensor and an SRE
-stage-game solver turns that tensor into one mixed policy per agent.
+discrete-action stage games. The DQN produces a normal-form Q tensor and an SRE stage-game solver turns that tensor into one mixed policy per agent.
 
 ## PATH Solver Integration
 

@@ -9,10 +9,6 @@ from .lemkelcp import (
     ProcessPoolLemkeLcpBimatrixSreSolver,
     ProcessPoolLemkeLcpBimatrixSreSolverConfig,
 )
-from .logit_qre_homotopy import (
-    LogitQreHomotopySreSolver,
-    LogitQreHomotopySreSolverConfig,
-)
 from .n_player.path_mcp_nplayer import (
     PathMcpNPlayerSreSolver,
     PathMcpNPlayerSreSolverConfig,
@@ -41,8 +37,6 @@ from .path_c import (
     ProcessPoolPathCBimatrixSreSolver,
     ProcessPoolPathCBimatrixSreSolverConfig,
 )
-from .sr_adidas import SrAdidasSreSolver, SrAdidasSreSolverConfig
-from .sred_gradient import SredGradientSreSolver, SredGradientSreSolverConfig
 
 
 def make_sre_solver(
@@ -142,33 +136,6 @@ def make_sre_solver(
             kwargs = {}
         return NfgTransformerSreSolver(config=config, **kwargs)
 
-    if solver_name in {"sr_adidas_sre", "sr_adidas"}:
-        if config is None:
-            solver_kwargs = dict(kwargs)
-            if random_seed is not None and "random_seed" not in solver_kwargs:
-                solver_kwargs["random_seed"] = random_seed
-            config = SrAdidasSreSolverConfig(**solver_kwargs)
-            kwargs = {}
-        return SrAdidasSreSolver(config=config, **kwargs)
-
-    if solver_name in {"sred_gradient_sre", "sred_gd_sre", "sred_gd"}:
-        if config is None:
-            solver_kwargs = dict(kwargs)
-            if random_seed is not None and "random_seed" not in solver_kwargs:
-                solver_kwargs["random_seed"] = random_seed
-            config = SredGradientSreSolverConfig(**solver_kwargs)
-            kwargs = {}
-        return SredGradientSreSolver(config=config, **kwargs)
-
-    if solver_name in {"logit_qre_sre", "qre_homotopy_sre", "logit_qre"}:
-        if config is None:
-            solver_kwargs = dict(kwargs)
-            if random_seed is not None and "random_seed" not in solver_kwargs:
-                solver_kwargs["random_seed"] = random_seed
-            config = LogitQreHomotopySreSolverConfig(**solver_kwargs)
-            kwargs = {}
-        return LogitQreHomotopySreSolver(config=config, **kwargs)
-
     raise ValueError(f"Unknown SRE solver: {solver_name}")
 
 
@@ -196,12 +163,6 @@ __all__ = [
     "NfgTransformerSreNet",
     "NfgTransformerSreSolver",
     "NfgTransformerSreSolverConfig",
-    "SrAdidasSreSolver",
-    "SrAdidasSreSolverConfig",
-    "SredGradientSreSolver",
-    "SredGradientSreSolverConfig",
-    "LogitQreHomotopySreSolver",
-    "LogitQreHomotopySreSolverConfig",
     "LemkeLcpBimatrixSreSolver",
     "LemkeLcpBimatrixSreSolverConfig",
     "ProcessPoolLemkeLcpBimatrixSreSolver",

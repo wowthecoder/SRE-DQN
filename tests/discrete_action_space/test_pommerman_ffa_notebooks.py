@@ -214,8 +214,6 @@ def test_pommerman_split_notebook_artifact_paths(tmp_path):
     from discrete_action_space.pommerman_ffa.notebook_utils import (
         deepsrq_path_tvc_pool_evaluation_dir,
         deepsrq_path_tvc_pool_training_dir,
-        sr_adidas_evaluation_dir,
-        sr_adidas_training_dir,
     )
 
     assert deepsrq_path_tvc_pool_training_dir(0.01, repo_root=tmp_path) == (
@@ -225,12 +223,6 @@ def test_pommerman_split_notebook_artifact_paths(tmp_path):
     assert deepsrq_path_tvc_pool_evaluation_dir(1.0, repo_root=tmp_path) == (
         tmp_path
         / "discrete_action_space/pommerman_ffa/deepsrq_path_tvc_mcp_nplayer_pool/evaluation/1.0"
-    )
-    assert sr_adidas_training_dir(0.5, repo_root=tmp_path) == (
-        tmp_path / "discrete_action_space/pommerman_ffa/sr_adidas/training/0.5"
-    )
-    assert sr_adidas_evaluation_dir(0.1, repo_root=tmp_path) == (
-        tmp_path / "discrete_action_space/pommerman_ffa/sr_adidas/evaluation/0.1"
     )
 
 

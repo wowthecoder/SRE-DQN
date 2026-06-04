@@ -255,18 +255,6 @@ hyperparameters
     max_workers
     start_method
     random_seed
-  logit_qre
-    precision_max
-    precision_growth
-    max_homotopy_steps
-    corrector_max_iters
-    qre_tol
-    exploitability_tol
-    damping
-    min_prob
-    random_seed
-    device
-    pure_start_logit
 
 lbf_config
   players
