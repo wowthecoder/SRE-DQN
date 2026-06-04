@@ -222,11 +222,12 @@ def test_resolve_epymarl_checkpoint_prefers_best_over_final(tmp_path):
 @pytest.mark.parametrize(
     ("available_checkpoints", "expected_checkpoint"),
     [
-        (("shared_deepsrq_final.pt", "shared_deepsrq_best.pt"), "shared_deepsrq_final.pt"),
+        (("shared_deepsrq_final.pt", "shared_deepsrq_best.pt"), "shared_deepsrq_best.pt"),
         (("shared_deepsrq_best.pt",), "shared_deepsrq_best.pt"),
+        (("shared_deepsrq_final.pt",), "shared_deepsrq_final.pt"),
     ],
 )
-def test_load_deepsrq_path_mcp_pool_policy_prefers_final_then_best(
+def test_load_deepsrq_path_mcp_pool_policy_prefers_best_then_final(
     tmp_path,
     monkeypatch,
     available_checkpoints,
@@ -323,7 +324,7 @@ def test_load_deepsrq_path_mcp_pool_policy_prefers_final_then_best(
         adapter.close()
 
 
-def test_load_deepsrq_path_mcp_pool_policy_skips_incompatible_final(
+def test_load_deepsrq_path_mcp_pool_policy_skips_incompatible_best(
     tmp_path,
     monkeypatch,
 ):
@@ -378,7 +379,7 @@ def test_load_deepsrq_path_mcp_pool_policy_skips_incompatible_final(
 
         def load_checkpoint(self, path, map_location=None):
             del map_location
-            if Path(path).name == "shared_deepsrq_final.pt":
+            if Path(path).name == "shared_deepsrq_best.pt":
                 raise RuntimeError("size mismatch for feature.0.weight")
             self.loaded_checkpoint = Path(path)
 
@@ -409,7 +410,7 @@ def test_load_deepsrq_path_mcp_pool_policy_skips_incompatible_final(
     )
 
     try:
-        assert adapter.agent.loaded_checkpoint == run_dir / "shared_deepsrq_best.pt"
+        assert adapter.agent.loaded_checkpoint == run_dir / "shared_deepsrq_final.pt"
         assert FakeAgent.instances[0].closed is True
         assert FakeAgent.instances[1] is adapter.agent
         assert adapter.agent.closed is False
@@ -498,6 +499,71 @@ def test_load_deepsrq_path_mcp_pool_policy_uses_checkpoint_model_config(
         assert adapter.agent.config.obs_dim == 63
         assert adapter.agent.config.num_agents == 3
         assert adapter.agent.config.network_type == "joint_output"
+    finally:
+        adapter.close()
+
+
+def test_load_deepsrq_solver_policy_prefers_best_then_final(tmp_path, monkeypatch):
+    torch = pytest.importorskip("torch")
+    from lbf_grid import robust_notebook_utils as utils
+
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    checkpoint_payload = {
+        "config": {
+            "obs_dim": 4,
+            "num_agents": 2,
+            "num_actions": 3,
+            "network_type": "joint_output",
+            "q_hidden_dims": (128, 128),
+        },
+    }
+    torch.save(checkpoint_payload, run_dir / "shared_deepsrq_final.pt")
+    torch.save(checkpoint_payload, run_dir / "shared_deepsrq_best.pt")
+
+    class FakeSolver:
+        name = "fake_solver"
+
+        def close(self):
+            pass
+
+    class FakeAgent:
+        def __init__(self, config):
+            self.config = config
+            self.loaded_checkpoint = None
+
+        def load_checkpoint(self, path, map_location=None):
+            del map_location
+            self.loaded_checkpoint = Path(path)
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(utils, "deepsrq_solver_training_dir", lambda *args, **kwargs: run_dir)
+    monkeypatch.setattr(utils, "_make_deepsrq_eval_solver", lambda *args, **kwargs: FakeSolver())
+    monkeypatch.setattr(utils, "DuelingDoubleDqnSreAgent", FakeAgent)
+
+    scenario = utils.LbfNotebookScenario(
+        key="scenario_a",
+        name="Scenario A",
+        gym_id="fake",
+        time_limit=1,
+        config={"players": 2},
+    )
+
+    adapter = utils.load_deepsrq_solver_policy(
+        scenario,
+        0.5,
+        family="fake_family",
+        solver_name="fake_solver",
+        repo_root=tmp_path,
+        use_gpu=False,
+    )
+
+    try:
+        assert adapter.agent.loaded_checkpoint == run_dir / "shared_deepsrq_best.pt"
+        assert adapter.agent.config.epsilon_explore == 0.0
+        assert adapter.agent.config.epsilon_robust == 0.5
     finally:
         adapter.close()
 

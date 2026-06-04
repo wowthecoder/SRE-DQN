@@ -23,15 +23,21 @@ if str(_DISCRETE_DIR) not in sys.path:
     sys.path.insert(0, str(_DISCRETE_DIR))
 
 from mean_field_dsrq.magent_env_wrapper import MAgentMFWrapper
+from mean_field_dsrq.magent2_env import DEFAULT_TASK_CONFIG, LowLevelBattleEnv
 from mean_field_dsrq.mfrl_baselines import MFRLPolicyAdapter
 from mean_field_dsrq.train_mf_dsrq import (
+    _actions_to_mean,
     _episode_win_record,
+    _feature_batch,
     _load_config,
     _make_env_factory,
     _summarize_episode_records,
     _team_counts,
+    _view_batch_to_chw,
+    conditioning_group_idx,
     make_mfdsrq_agent,
     n_nbr_t_default,
+    resolve_mean_field_source,
 )
 
 
@@ -257,6 +263,155 @@ def _mfdsrq_actions(
     return {aid: int(action) for aid, action in zip(type_agents, acts)}
 
 
+def _low_level_type_counts(env: LowLevelBattleEnv, type_names: list[str]) -> dict[str, int]:
+    return {type_name: int(env.get_num(group_idx)) for group_idx, type_name in enumerate(type_names)}
+
+
+def _load_low_level_mfdsrq_agent(
+    cfg: dict,
+    checkpoint_source: str | Path | Mapping[str, str | Path],
+    env: LowLevelBattleEnv,
+    *,
+    device,
+    role: str = "main",
+):
+    meta = env.meta()
+    view_h, view_w, view_c = meta.view_space
+    role = str(role).lower()
+    if role not in {"main", "opponent"}:
+        raise ValueError(f"MF-DSRQ checkpoint role must be 'main' or 'opponent', got {role!r}.")
+    type_idx = 0 if role == "main" else 1
+    ckpt_path = _mfdsrq_checkpoint_path(
+        checkpoint_source,
+        role,
+        type_idx=type_idx,
+        prefer_main=role == "main",
+    )
+    feature_dim = _checkpoint_feature_dim(ckpt_path, int(meta.feature_space))
+    eval_cfg = dict(cfg)
+    eval_cfg["epsilon_robust_start"] = cfg.get(
+        "epsilon_robust_end",
+        cfg.get("epsilon_robust_start", 0.1),
+    )
+    agent = make_mfdsrq_agent(
+        eval_cfg,
+        type_id=type_idx,
+        obs_shape=(int(view_c), int(view_h), int(view_w)),
+        n_own_actions=int(meta.num_actions),
+        n_nbr_actions=int(meta.num_actions),
+        device=device,
+        feature_dim=feature_dim,
+    )
+    if ckpt_path.exists():
+        agent.load_checkpoint(ckpt_path, map_location=device)
+        print(f"Loaded {ckpt_path}")
+    else:
+        print(f"Warning: no checkpoint at {ckpt_path}, using random weights")
+    agent.epsilon_explore = 0.0
+    return agent
+
+
+def _load_low_level_tournament_policy(
+    *,
+    algorithm: str,
+    role: str,
+    cfg: dict,
+    checkpoint_paths: Mapping[str, str | Path],
+    baseline_folders: Mapping[str, str | Path],
+    env: LowLevelBattleEnv,
+    device,
+) -> dict:
+    algorithm = str(algorithm).lower()
+    role = str(role).lower()
+    if algorithm in {"mfdsrq", "mf-dsrq", "mf_srq_torch"}:
+        agent = _load_low_level_mfdsrq_agent(
+            cfg,
+            checkpoint_paths,
+            env,
+            device=device,
+            role=role,
+        )
+        return {
+            "kind": "mfdsrq",
+            "algorithm": "mfdsrq",
+            "role": role,
+            "agent": agent,
+            "checkpoint": str(
+                _mfdsrq_checkpoint_path(
+                    checkpoint_paths,
+                    role,
+                    type_idx=0 if role == "main" else 1,
+                    prefer_main=role == "main",
+                )
+            ),
+        }
+
+    if algorithm not in baseline_folders:
+        raise KeyError(f"No baseline folder supplied for tournament algorithm {algorithm!r}.")
+    adapter = MFRLPolicyAdapter(baseline_folders[algorithm], side=role, map_location=device)
+    return {
+        "kind": "mfrl",
+        "algorithm": algorithm,
+        "role": role,
+        "adapter": adapter,
+        "checkpoint": adapter.checkpoint,
+    }
+
+
+def _close_low_level_tournament_policy(policy: dict | None) -> None:
+    if not policy:
+        return
+    target = policy.get("agent") or policy.get("adapter")
+    close = getattr(target, "close", None)
+    if callable(close):
+        close()
+
+
+def _low_level_tournament_actions(
+    *,
+    policy: dict,
+    cfg: dict,
+    env: LowLevelBattleEnv,
+    group_idx: int,
+    former_prob: list[np.ndarray],
+) -> np.ndarray:
+    if policy["kind"] == "mfdsrq":
+        mean_field_source = resolve_mean_field_source(cfg)
+        cond_group_idx = conditioning_group_idx(group_idx, mean_field_source)
+        agent = policy["agent"]
+        return _low_level_mfdsrq_actions(
+            agent=agent,
+            env=env,
+            group_idx=group_idx,
+            mean_action=former_prob[cond_group_idx],
+            feature_dim=int(agent.feature_dim),
+        )
+
+    adapter = policy["adapter"]
+    n_agents = env.get_num(group_idx)
+    prob = np.tile(former_prob[group_idx], (n_agents, 1))
+    return adapter.act_low_level(env, group_idx, prob=prob)
+
+
+def _low_level_mfdsrq_actions(
+    *,
+    agent,
+    env: LowLevelBattleEnv,
+    group_idx: int,
+    mean_action: np.ndarray,
+    feature_dim: int,
+) -> np.ndarray:
+    state = env.get_observation(group_idx)
+    n_agents = len(state[0])
+    if n_agents == 0:
+        return np.array([], dtype=np.int32)
+    obs_batch = _view_batch_to_chw(state[0]).copy()
+    feature = _feature_batch(state[1], feature_dim).copy()
+    mean_batch = np.tile(mean_action, (n_agents, 1))
+    actions = agent.act_batch(obs_batch, mean_batch, feature)
+    return np.asarray(actions, dtype=np.int32)
+
+
 def _summarize_matchup_records(records: list[dict]) -> dict:
     n = len(records)
     if n == 0:
@@ -282,8 +437,187 @@ def _summarize_matchup_records(records: list[dict]) -> dict:
     }
 
 
+def _summarize_fixed_side_records(records: list[dict]) -> dict:
+    n = len(records)
+    if n == 0:
+        return {
+            "episodes": 0,
+            "main_win_rate": 0.0,
+            "opponent_win_rate": 0.0,
+            "tie_rate": 0.0,
+            "mean_main_reward": 0.0,
+            "mean_opponent_reward": 0.0,
+            "mean_main_kills": 0.0,
+            "mean_opponent_kills": 0.0,
+        }
+    return {
+        "episodes": n,
+        "main_win_rate": float(np.mean([r["main_win"] for r in records])),
+        "opponent_win_rate": float(np.mean([r["opponent_win"] for r in records])),
+        "tie_rate": float(np.mean([r["tie"] for r in records])),
+        "mean_main_reward": float(np.mean([r["main_reward"] for r in records])),
+        "mean_opponent_reward": float(np.mean([r["opponent_reward"] for r in records])),
+        "mean_main_kills": float(np.mean([r["main_kills"] for r in records])),
+        "mean_opponent_kills": float(np.mean([r["opponent_kills"] for r in records])),
+    }
+
+
 def _matchup_assignment_name(mfdsrq_team: str, baseline_team: str) -> str:
     return f"mfdsrq_{mfdsrq_team}_vs_baseline_{baseline_team}"
+
+
+def _fixed_side_matchup_name(main_algorithm: str, opponent_algorithm: str) -> str:
+    return f"{main_algorithm}_main_vs_{opponent_algorithm}_opponent"
+
+
+def _evaluate_fixed_side_tournament_matchup(
+    cfg: dict,
+    checkpoint_paths: Mapping[str, str | Path],
+    baseline_folders: Mapping[str, str | Path],
+    *,
+    main_algorithm: str,
+    opponent_algorithm: str,
+    num_episodes: int = 20,
+    max_steps: int | None = None,
+    episode_offset: int = 0,
+    progress_queue=None,
+    device=None,
+) -> dict:
+    type_prefixes = cfg["type_prefixes"]
+    type_names = list(type_prefixes.keys())
+    if len(type_names) != 2:
+        raise ValueError("Fixed-side tournament evaluation expects exactly two teams.")
+
+    main_algorithm = str(main_algorithm).lower()
+    opponent_algorithm = str(opponent_algorithm).lower()
+    task_config = {**DEFAULT_TASK_CONFIG, **cfg}
+    env = LowLevelBattleEnv(task_config)
+    meta = env.meta()
+    device = _resolve_torch_device(
+        device if device is not None else cfg.get("device"),
+        use_gpu=cfg.get("use_gpu", True),
+    )
+    main_policy = None
+    opponent_policy = None
+    max_steps = int(max_steps or cfg.get("max_cycles", env.max_steps))
+    main_team = type_names[0]
+    opponent_team = type_names[1]
+    matchup = _fixed_side_matchup_name(main_algorithm, opponent_algorithm)
+
+    try:
+        main_policy = _load_low_level_tournament_policy(
+            algorithm=main_algorithm,
+            role="main",
+            cfg=cfg,
+            checkpoint_paths=checkpoint_paths,
+            baseline_folders=baseline_folders,
+            env=env,
+            device=device,
+        )
+        opponent_policy = _load_low_level_tournament_policy(
+            algorithm=opponent_algorithm,
+            role="opponent",
+            cfg=cfg,
+            checkpoint_paths=checkpoint_paths,
+            baseline_folders=baseline_folders,
+            env=env,
+            device=device,
+        )
+
+        records = []
+        for ep_idx in range(num_episodes):
+            env.reset()
+            initial_counts = _low_level_type_counts(env, type_names)
+            ep_rewards = {t: 0.0 for t in type_names}
+            former_prob = [
+                np.zeros((1, int(meta.num_actions)), dtype=np.float32),
+                np.zeros((1, int(meta.num_actions)), dtype=np.float32),
+            ]
+
+            for step_idx in range(max_steps):
+                actions = [
+                    _low_level_tournament_actions(
+                        policy=main_policy,
+                        cfg=cfg,
+                        env=env,
+                        group_idx=0,
+                        former_prob=former_prob,
+                    ),
+                    _low_level_tournament_actions(
+                        policy=opponent_policy,
+                        cfg=cfg,
+                        env=env,
+                        group_idx=1,
+                        former_prob=former_prob,
+                    ),
+                ]
+                if actions[0] is None:
+                    actions[0] = np.array([], dtype=np.int32)
+                if actions[1] is None:
+                    actions[1] = np.array([], dtype=np.int32)
+                if len(actions[0]) == 0 and len(actions[1]) == 0:
+                    break
+
+                env.set_action(0, actions[0])
+                env.set_action(1, actions[1])
+                done = env.step()
+                rewards = [
+                    env.grid.get_reward(env.handles[0]),
+                    env.grid.get_reward(env.handles[1]),
+                ]
+                for group_idx, type_name in enumerate(type_names):
+                    ep_rewards[type_name] += float(np.sum(rewards[group_idx]))
+                former_prob = [
+                    _actions_to_mean(actions[0], int(meta.num_actions)),
+                    _actions_to_mean(actions[1], int(meta.num_actions)),
+                ]
+                env.clear_dead()
+                if bool(done or step_idx + 1 >= max_steps):
+                    break
+
+            record = _episode_win_record(
+                episode=int(episode_offset) + ep_idx + 1,
+                global_step=int(episode_offset) + ep_idx + 1,
+                env_idx=0,
+                rewards=ep_rewards,
+                initial_counts=initial_counts,
+                final_counts=_low_level_type_counts(env, type_names),
+                type_names=type_names,
+            )
+            record["matchup"] = matchup
+            record["main_algorithm"] = main_algorithm
+            record["opponent_algorithm"] = opponent_algorithm
+            record["main_team"] = main_team
+            record["opponent_team"] = opponent_team
+            record["main_win"] = int(record["wins"].get(main_team, 0))
+            record["opponent_win"] = int(record["wins"].get(opponent_team, 0))
+            record["main_reward"] = float(record["rewards"].get(main_team, 0.0))
+            record["opponent_reward"] = float(record["rewards"].get(opponent_team, 0.0))
+            record["main_kills"] = int(record["kills"].get(main_team, 0))
+            record["opponent_kills"] = int(record["kills"].get(opponent_team, 0))
+            records.append(record)
+            if progress_queue is not None:
+                progress_queue.put(1)
+    finally:
+        _close_low_level_tournament_policy(main_policy)
+        _close_low_level_tournament_policy(opponent_policy)
+        close = getattr(env.env, "close", None)
+        if callable(close):
+            close()
+
+    return {
+        "main_algorithm": main_algorithm,
+        "opponent_algorithm": opponent_algorithm,
+        "main_checkpoint": main_policy.get("checkpoint") if main_policy else None,
+        "opponent_checkpoint": opponent_policy.get("checkpoint") if opponent_policy else None,
+        "checkpoint_dir": _checkpoint_source_repr(checkpoint_paths),
+        "device": str(device),
+        "num_episodes": int(num_episodes),
+        "episode_offset": int(episode_offset),
+        "matchup": matchup,
+        "records": records,
+        "summary": _summarize_fixed_side_records(records),
+    }
 
 
 def _evaluate_mfdsrq_vs_mfrl_assignment(
@@ -300,7 +634,6 @@ def _evaluate_mfdsrq_vs_mfrl_assignment(
     progress_queue=None,
     device=None,
 ) -> dict:
-    env_factory = _make_env_factory(cfg)
     type_prefixes = cfg["type_prefixes"]
     type_names = list(type_prefixes.keys())
     if len(type_names) != 2:
@@ -311,63 +644,77 @@ def _evaluate_mfdsrq_vs_mfrl_assignment(
             f"expected teams from {type_names!r}."
         )
 
-    env = MAgentMFWrapper(
-        env_factory,
-        type_prefixes,
-        ema_momentum=cfg.get("ema_momentum", 1.0),
-        mean_field_source=cfg.get("mean_field_source", "opponent"),
-    )
+    task_config = {**DEFAULT_TASK_CONFIG, **cfg}
+    env = LowLevelBattleEnv(task_config)
+    meta = env.meta()
     device = _resolve_torch_device(
         device if device is not None else cfg.get("device"),
         use_gpu=cfg.get("use_gpu", True),
     )
-    mf_agents = {}
+    mf_agent = None
     baseline = None
-    mf_agents = load_mfdsrq_agents(
-        cfg,
-        checkpoint_dir,
-        env,
-        device=device,
-        prefer_main_for_all=True,
-    )
+    mean_field_source = resolve_mean_field_source(cfg)
+    max_steps = int(max_steps or cfg.get("max_cycles", env.max_steps))
+    mf_group_idx = type_names.index(mfdsrq_team)
+    baseline_group_idx = type_names.index(baseline_team)
+    mf_agent = _load_low_level_mfdsrq_agent(cfg, checkpoint_dir, env, device=device)
     baseline = MFRLPolicyAdapter(baseline_checkpoint_or_folder, map_location=device)
-    max_steps = int(max_steps or cfg.get("max_cycles", 400))
     assignment = _matchup_assignment_name(mfdsrq_team, baseline_team)
 
     records = []
     try:
         for ep_idx in range(num_episodes):
-            obs_dict, _ = env.reset()
-            initial_counts = _team_counts(env, type_prefixes)
+            env.reset()
+            initial_counts = _low_level_type_counts(env, type_names)
             ep_rewards = {t: 0.0 for t in type_names}
+            former_prob = [
+                np.zeros((1, int(meta.num_actions)), dtype=np.float32),
+                np.zeros((1, int(meta.num_actions)), dtype=np.float32),
+            ]
 
-            for _ in range(max_steps):
-                if not env.alive_agents:
-                    break
-                env_actions = {}
-                env_actions.update(
-                    _mfdsrq_actions(
-                        agent=mf_agents[mfdsrq_team],
-                        env=env,
-                        obs_dict=obs_dict,
-                        type_name=mfdsrq_team,
-                    )
+            for step_idx in range(max_steps):
+                actions = [None, None]
+                cond_group_idx = conditioning_group_idx(mf_group_idx, mean_field_source)
+                actions[mf_group_idx] = _low_level_mfdsrq_actions(
+                    agent=mf_agent,
+                    env=env,
+                    group_idx=mf_group_idx,
+                    mean_action=former_prob[cond_group_idx],
+                    feature_dim=int(mf_agent.feature_dim),
                 )
-                env_actions.update(
-                    baseline.act_mf_wrapper(
-                        env=env,
-                        type_prefixes=type_prefixes,
-                        controlled_type=baseline_team,
-                    )
+                baseline_n = env.get_num(baseline_group_idx)
+                baseline_prob = np.tile(
+                    former_prob[baseline_group_idx],
+                    (baseline_n, 1),
                 )
-                if not env_actions:
+                actions[baseline_group_idx] = baseline.act_low_level(
+                    env,
+                    baseline_group_idx,
+                    prob=baseline_prob,
+                )
+                if actions[0] is None:
+                    actions[0] = np.array([], dtype=np.int32)
+                if actions[1] is None:
+                    actions[1] = np.array([], dtype=np.int32)
+                if len(actions[0]) == 0 and len(actions[1]) == 0:
                     break
-                obs_dict, rewards, _, _, _, info = env.step(env_actions)
-                for aid, reward in rewards.items():
-                    type_name = env.agent_type(aid)
-                    if type_name in ep_rewards:
-                        ep_rewards[type_name] += reward
-                if info.get("episode_done", False):
+
+                env.set_action(0, actions[0])
+                env.set_action(1, actions[1])
+                done = env.step()
+                rewards = [
+                    env.grid.get_reward(env.handles[0]),
+                    env.grid.get_reward(env.handles[1]),
+                ]
+                for group_idx, type_name in enumerate(type_names):
+                    ep_rewards[type_name] += float(np.sum(rewards[group_idx]))
+                next_prob = [
+                    _actions_to_mean(actions[0], int(meta.num_actions)),
+                    _actions_to_mean(actions[1], int(meta.num_actions)),
+                ]
+                env.clear_dead()
+                former_prob = next_prob
+                if bool(done or step_idx + 1 >= max_steps):
                     break
 
             record = _episode_win_record(
@@ -376,7 +723,7 @@ def _evaluate_mfdsrq_vs_mfrl_assignment(
                 env_idx=0,
                 rewards=ep_rewards,
                 initial_counts=initial_counts,
-                final_counts=_team_counts(env, type_prefixes),
+                final_counts=_low_level_type_counts(env, type_names),
                 type_names=type_names,
             )
             record["assignment"] = assignment
@@ -395,8 +742,11 @@ def _evaluate_mfdsrq_vs_mfrl_assignment(
     finally:
         if baseline is not None:
             baseline.close()
-        for agent in mf_agents.values():
-            agent.close()
+        if mf_agent is not None:
+            mf_agent.close()
+        close = getattr(env.env, "close", None)
+        if callable(close):
+            close()
 
     return {
         "baseline": baseline_name,

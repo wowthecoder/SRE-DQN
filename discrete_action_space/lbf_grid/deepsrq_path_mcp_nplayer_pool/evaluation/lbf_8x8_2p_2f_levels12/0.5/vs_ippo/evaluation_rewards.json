@@ -4,31 +4,31 @@
     "per_agent": [
       {
         "agent": "Agent 1\nDeep SRQ",
-        "mean": 0.7175,
-        "std": 1.02051151389879,
+        "mean": 0.985,
+        "std": 1.244899594344861,
         "min": 0.0,
         "max": 5.5
       },
       {
         "agent": "Agent 2\nIPPO",
-        "mean": 0.6175,
-        "std": 0.8336328628359129,
+        "mean": 1.145,
+        "std": 1.484579064920424,
         "min": 0.0,
-        "max": 4.0
+        "max": 7.5
       }
     ],
     "joint": {
-      "mean": 1.335,
-      "std": 1.3463933303459283,
+      "mean": 2.13,
+      "std": 2.1801605445471215,
       "min": 0.0,
-      "max": 7.0
+      "max": 11.0
     }
   },
   "mean_agent_rewards": [
-    0.7175,
-    0.6175
+    0.985,
+    1.145
   ],
-  "mean_joint_reward": 1.335,
+  "mean_joint_reward": 2.13,
   "scenario_key": "lbf_8x8_2p_2f_levels12",
   "scenario_name": "2 agents with levels 1 and 2, 8x8 grid, 10 foods (3 level-3, 2 level-2, 5 level-1), full sight, 50-step episodes",
   "primary_label": "deepsrq_path_mcp_nplayer_pool",
@@ -53,8 +53,8 @@
       "IPPO": 200
     }
   ],
-  "video_episode_index": 121,
-  "video_joint_reward": 7.0,
+  "video_episode_index": 54,
+  "video_joint_reward": 11.0,
   "render_error": null,
   "artifact_dir": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/evaluation/lbf_8x8_2p_2f_levels12/0.5/vs_ippo",
   "rewards_path": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/evaluation/lbf_8x8_2p_2f_levels12/0.5/vs_ippo/evaluation_rewards.json",

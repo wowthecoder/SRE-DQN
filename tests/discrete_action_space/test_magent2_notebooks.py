@@ -75,15 +75,16 @@ def test_notebooks_use_shared_helpers_not_cli_scripts():
     assert "plot_mfrl_baseline_training_curves" in baseline_source
     assert "baseline_rollout_video_from_notebook" in baseline_source
     assert "train_mfdsrq_from_notebook" in mfdsrq_source
-    assert "evaluate_mfdsrq_torch_epsilon_against_baselines" in mfdsrq_source
-    assert "plot_mfdsrq_torch_baseline_bars" in mfdsrq_source
+    assert "evaluate_mfdsrq_torch_epsilon_fixed_side_tournament" in mfdsrq_source
+    assert "plot_fixed_side_tournament_bars" in mfdsrq_source
+    assert "EVALUATE_BOTH_SIDES" not in mfdsrq_source
     assert "subprocess" not in baseline_source + mfdsrq_source
     assert "python -m discrete_action_space.mean_field_dsrq.train_mf_dsrq" not in mfdsrq_source
     old_framework_name = "bench" + "marl"
     assert old_framework_name not in baseline_source.lower()
 
 
-def test_evaluation_notebook_has_three_torch_epsilon_cells():
+def test_evaluation_notebook_has_torch_model_cells_for_training_configs():
     notebook = json.loads((_MF_DIR / "magent2_mf_dsrq_evaluation.ipynb").read_text(encoding="utf-8"))
     code_cells = [
         "".join(cell.get("source", []))
@@ -91,17 +92,63 @@ def test_evaluation_notebook_has_three_torch_epsilon_cells():
         if cell.get("cell_type") == "code"
     ]
 
-    epsilon_cells = [
+    model_cells = [
         source for source in code_cells
-        if "evaluate_and_plot_epsilon(" in source
-        and "def evaluate_and_plot_epsilon" not in source
+        if "evaluate_and_plot_model(" in source
+        and "def evaluate_and_plot_model" not in source
     ]
+    expected_model_keys = {
+        "fixed_0_01",
+        "fixed_0_1",
+        "fixed_0_5",
+        "fixed_1_0",
+        "decay_0_5_to_0",
+        "decay_0_75_to_0",
+        "decay_1_0_to_0",
+        "ramp_0_01_to_0_5",
+        "ramp_0_01_to_1_0",
+        "ramp_0_1_to_0_5",
+        "ramp_0_1_to_1_0",
+    }
 
-    assert len(epsilon_cells) == 3
-    assert any("evaluate_and_plot_epsilon(0.01)" in source for source in epsilon_cells)
-    assert any("evaluate_and_plot_epsilon(0.1)" in source for source in epsilon_cells)
-    assert any("evaluate_and_plot_epsilon(0.5)" in source for source in epsilon_cells)
-    assert not any("evaluate_and_plot_epsilon(1.0)" in source for source in epsilon_cells)
+    assert len(model_cells) == len(expected_model_keys)
+    for model_key in expected_model_keys:
+        assert any(f'evaluate_and_plot_model("{model_key}")' in source for source in model_cells)
+
+    history_cells = [
+        source for source in code_cells
+        if "plot_training_history_group(" in source
+        and "def plot_training_history_group" not in source
+    ]
+    assert len(history_cells) == len(expected_model_keys)
+    for model_key in expected_model_keys:
+        assert any(f'("{model_key}",)' in source for source in history_cells)
+    notebook_source = "\n".join(code_cells)
+    assert "TRAINING_PLOT_SMOOTHING_WINDOW = 50" in notebook_source
+    assert "baseline_training_history_frame" in notebook_source
+    assert "for algorithm in BASELINE_ALGORITHMS" in notebook_source
+    assert 'df["reward_main"].rolling(smoothing_window' in notebook_source
+    assert 'df["reward_opponent"].rolling(smoothing_window' in notebook_source
+
+
+def test_mfdsrq_mfrl_comparison_uses_low_level_battle_shapes():
+    from mean_field_dsrq import eval_mf_dsrq
+
+    source = inspect.getsource(eval_mf_dsrq._evaluate_mfdsrq_vs_mfrl_assignment)
+
+    assert "LowLevelBattleEnv" in source
+    assert "MAgentMFWrapper" not in source
+
+
+def test_fixed_side_tournament_uses_main_vs_opponent_roles():
+    from mean_field_dsrq import eval_mf_dsrq
+
+    source = inspect.getsource(eval_mf_dsrq._evaluate_fixed_side_tournament_matchup)
+
+    assert 'role="main"' in source
+    assert 'role="opponent"' in source
+    assert "main_algorithm" in source
+    assert "opponent_algorithm" in source
 
 
 def test_mfrl_helper_imports_without_magent2():

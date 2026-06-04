@@ -30,8 +30,10 @@ from .mfrl_baselines import (
     train_mfrl_baseline,
 )
 from .eval_mf_dsrq import (
+    _evaluate_fixed_side_tournament_matchup,
     _evaluate_mfdsrq_vs_mfrl_assignment,
     _resolve_torch_device,
+    _summarize_fixed_side_records,
     _summarize_matchup_records,
     evaluate,
     evaluate_mfdsrq_vs_mfrl_baseline,
@@ -426,6 +428,21 @@ def _evaluate_mfdsrq_assignment_worker(task: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def _evaluate_fixed_side_tournament_worker(task: dict[str, Any]) -> dict[str, Any]:
+    return _evaluate_fixed_side_tournament_matchup(
+        task["cfg"],
+        task["checkpoint_paths"],
+        task["baseline_folders"],
+        main_algorithm=task["main_algorithm"],
+        opponent_algorithm=task["opponent_algorithm"],
+        num_episodes=task["num_episodes"],
+        max_steps=task.get("max_steps"),
+        episode_offset=task.get("episode_offset", 0),
+        progress_queue=task.get("progress_queue"),
+        device=task.get("device"),
+    )
+
+
 def _eval_multiprocessing_context(device) -> mp.context.BaseContext:
     if _resolve_torch_device(device).type == "cuda":
         return mp.get_context("spawn")
@@ -640,6 +657,213 @@ def evaluate_mfdsrq_torch_epsilon_against_baselines(
     return payload
 
 
+def _fixed_side_tournament_payload_from_worker_results(
+    *,
+    epsilon: float,
+    checkpoint_paths: Mapping[str, str | Path],
+    algorithms: tuple[str, ...],
+    baseline_folders: dict[str, Path],
+    worker_results: list[dict[str, Any]],
+    num_episodes_per_matchup: int,
+    workers: int,
+    device: str = "cpu",
+    experiment_label: str | None = None,
+) -> dict[str, Any]:
+    rows = []
+    matchups = {}
+    result_dir = _checkpoint_result_dir(checkpoint_paths)
+    for main_algorithm in algorithms:
+        matchups[main_algorithm] = {}
+        for opponent_algorithm in algorithms:
+            matchup_records = [
+                record
+                for result in worker_results
+                if result["main_algorithm"] == main_algorithm
+                and result["opponent_algorithm"] == opponent_algorithm
+                for record in result["records"]
+            ]
+            matchup_records.sort(key=lambda record: int(record.get("episode", 0)))
+            summary = _summarize_fixed_side_records(matchup_records)
+            result_for_pair = next(
+                (
+                    result
+                    for result in worker_results
+                    if result["main_algorithm"] == main_algorithm
+                    and result["opponent_algorithm"] == opponent_algorithm
+                ),
+                {},
+            )
+            matchups[main_algorithm][opponent_algorithm] = {
+                "main_algorithm": main_algorithm,
+                "opponent_algorithm": opponent_algorithm,
+                "main_checkpoint": result_for_pair.get("main_checkpoint"),
+                "opponent_checkpoint": result_for_pair.get("opponent_checkpoint"),
+                "num_episodes": summary["episodes"],
+                "records": matchup_records,
+                "summary": summary,
+            }
+            rows.append(
+                {
+                    "main_algorithm": main_algorithm,
+                    "opponent_algorithm": opponent_algorithm,
+                    "main_win_rate": summary["main_win_rate"],
+                    "opponent_win_rate": summary["opponent_win_rate"],
+                    "tie_rate": summary["tie_rate"],
+                    "mean_main_kills": summary["mean_main_kills"],
+                    "mean_opponent_kills": summary["mean_opponent_kills"],
+                    "mean_main_reward": summary["mean_main_reward"],
+                    "mean_opponent_reward": summary["mean_opponent_reward"],
+                    "episodes": summary["episodes"],
+                }
+            )
+    return {
+        "epsilon": float(epsilon),
+        "experiment_label": experiment_label,
+        "checkpoint_dir": str(result_dir),
+        "checkpoint_source": _checkpoint_source_payload(checkpoint_paths),
+        "algorithms": list(algorithms),
+        "baseline_folders": {algorithm: str(path) for algorithm, path in baseline_folders.items()},
+        "num_episodes_per_matchup": int(num_episodes_per_matchup),
+        "evaluate_both_sides": False,
+        "workers": int(workers),
+        "device": str(device),
+        "rows": rows,
+        "matchups": matchups,
+    }
+
+
+def evaluate_mfdsrq_torch_epsilon_fixed_side_tournament(
+    cfg: dict[str, Any],
+    epsilon: float,
+    checkpoint_paths: Mapping[str, str | Path],
+    *,
+    baseline_root: str | Path = DEFAULT_BASELINE_RUNS_DIR,
+    algorithms: tuple[str, ...] = ("mfdsrq", *BASELINE_ALGORITHMS),
+    baseline_folders: dict[str, str | Path] | None = None,
+    num_episodes_per_matchup: int = 25,
+    max_steps: int | None = None,
+    workers: int = 1,
+    episode_chunk_size: int | None = None,
+    show_progress: bool = True,
+    save: bool = True,
+    device: str | None = None,
+    experiment_label: str | None = None,
+) -> dict[str, Any]:
+    """Evaluate fixed-side main-vs-opponent tournament for one MF-DSRQ epsilon."""
+    algorithms = tuple(str(algorithm).lower() for algorithm in algorithms)
+    eval_device = _resolve_torch_device(
+        device if device is not None else cfg.get("device"),
+        use_gpu=cfg.get("use_gpu", True),
+    )
+    baseline_folders = {
+        algorithm: Path(folder)
+        for algorithm, folder in (baseline_folders or {}).items()
+    }
+    for algorithm in algorithms:
+        if algorithm == "mfdsrq":
+            continue
+        baseline_folders.setdefault(algorithm, find_latest_mfrl_run(algorithm, baseline_root))
+
+    workers = max(int(workers), 1)
+    base_units = max(len(algorithms) * len(algorithms), 1)
+    if episode_chunk_size is None:
+        chunks_per_matchup = max(1, min(int(num_episodes_per_matchup), (workers + base_units - 1) // base_units))
+    else:
+        chunk_size = max(int(episode_chunk_size), 1)
+        chunks_per_matchup = max(
+            1,
+            min(
+                int(num_episodes_per_matchup),
+                (int(num_episodes_per_matchup) + chunk_size - 1) // chunk_size,
+            ),
+        )
+    chunks = _split_episode_chunks(num_episodes_per_matchup, chunks_per_matchup)
+
+    tasks: list[dict[str, Any]] = []
+    for main_algorithm in algorithms:
+        for opponent_algorithm in algorithms:
+            for episode_offset, chunk_size in chunks:
+                tasks.append(
+                    {
+                        "cfg": dict(cfg),
+                        "checkpoint_paths": {team: str(path) for team, path in checkpoint_paths.items()},
+                        "baseline_folders": {algorithm: str(path) for algorithm, path in baseline_folders.items()},
+                        "main_algorithm": main_algorithm,
+                        "opponent_algorithm": opponent_algorithm,
+                        "num_episodes": chunk_size,
+                        "episode_offset": episode_offset,
+                        "max_steps": max_steps,
+                        "device": str(eval_device),
+                    }
+                )
+
+    if not tasks:
+        worker_results = []
+    elif workers == 1 or len(tasks) == 1:
+        total_episodes = sum(int(task["num_episodes"]) for task in tasks)
+        progress = _make_eval_progress_bar(total_episodes, epsilon=float(epsilon), enabled=show_progress)
+        worker_results = []
+        try:
+            progress_queue = _LocalProgressQueue(progress)
+            for task in tasks:
+                task_with_progress = dict(task)
+                task_with_progress["progress_queue"] = progress_queue
+                worker_results.append(_evaluate_fixed_side_tournament_worker(task_with_progress))
+        finally:
+            if progress is not None:
+                progress.close()
+    else:
+        worker_results = []
+        total_episodes = sum(int(task["num_episodes"]) for task in tasks)
+        progress = _make_eval_progress_bar(total_episodes, epsilon=float(epsilon), enabled=show_progress)
+        mp_context = _eval_multiprocessing_context(eval_device)
+        with mp_context.Manager() as manager:
+            progress_queue = manager.Queue()
+            tasks_with_progress = []
+            for task in tasks:
+                task_with_progress = dict(task)
+                task_with_progress["progress_queue"] = progress_queue
+                tasks_with_progress.append(task_with_progress)
+            with ProcessPoolExecutor(
+                max_workers=min(workers, len(tasks)),
+                mp_context=mp_context,
+            ) as executor:
+                pending = {
+                    executor.submit(_evaluate_fixed_side_tournament_worker, task)
+                    for task in tasks_with_progress
+                }
+                try:
+                    while pending:
+                        done, pending = wait(pending, timeout=0.5, return_when=FIRST_COMPLETED)
+                        _drain_progress_queue(progress_queue, progress)
+                        for future in done:
+                            worker_results.append(future.result())
+                    _drain_progress_queue(progress_queue, progress)
+                finally:
+                    _drain_progress_queue(progress_queue, progress)
+                    if progress is not None:
+                        progress.close()
+
+    payload = _fixed_side_tournament_payload_from_worker_results(
+        epsilon=float(epsilon),
+        checkpoint_paths=checkpoint_paths,
+        algorithms=algorithms,
+        baseline_folders=baseline_folders,
+        worker_results=worker_results,
+        num_episodes_per_matchup=int(num_episodes_per_matchup),
+        workers=workers,
+        device=str(eval_device),
+        experiment_label=experiment_label,
+    )
+    if save:
+        out_path = Path(payload["checkpoint_dir"]) / "fixed_side_tournament.json"
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2)
+        payload["results_path"] = str(out_path)
+        print(f"Saved fixed-side tournament to {out_path}")
+    return payload
+
+
 def evaluate_mfdsrq_against_baselines(
     cfg: dict[str, Any],
     checkpoint_dir: str | Path | Mapping[str, str | Path],
@@ -710,6 +934,106 @@ def evaluate_mfdsrq_against_baselines(
         payload["results_path"] = str(out_path)
         print(f"Saved head-to-head comparison to {out_path}")
     return payload
+
+
+def _algorithm_display_name(algorithm: str) -> str:
+    labels = {
+        "mfdsrq": "MF-DSRQ",
+        "iql": "IQL",
+        "ac": "AC",
+        "mfq": "MFQ",
+    }
+    return labels.get(str(algorithm).lower(), str(algorithm).upper())
+
+
+def _plot_fixed_side_tournament_metric(
+    tournament: dict[str, Any],
+    *,
+    metric: str,
+    ylabel: str,
+    title: str,
+    filename: str,
+    save: bool = True,
+):
+    import matplotlib.pyplot as plt
+    import pandas as pd
+
+    df = pd.DataFrame(tournament["rows"])
+    if df.empty:
+        raise ValueError("No tournament rows to plot.")
+    algorithms = [str(algorithm).lower() for algorithm in tournament["algorithms"]]
+    matrix = (
+        df.pivot(index="main_algorithm", columns="opponent_algorithm", values=metric)
+        .reindex(index=algorithms, columns=algorithms)
+        .fillna(0.0)
+    )
+    labels = [_algorithm_display_name(algorithm) for algorithm in algorithms]
+    x = list(range(len(algorithms)))
+    width = min(0.18, 0.75 / max(len(algorithms), 1))
+    offsets = [
+        (idx - (len(algorithms) - 1) / 2.0) * width
+        for idx in range(len(algorithms))
+    ]
+
+    fig, ax = plt.subplots(figsize=(11, 4.8))
+    for col_idx, opponent_algorithm in enumerate(algorithms):
+        values = matrix[opponent_algorithm].to_numpy(dtype=float)
+        ax.bar(
+            [pos + offsets[col_idx] for pos in x],
+            values,
+            width,
+            label=f"vs {_algorithm_display_name(opponent_algorithm)}",
+        )
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels)
+    ax.set_ylabel(ylabel)
+    ax.set_title(title)
+    if metric.endswith("win_rate"):
+        ax.set_ylim(0, 1.05)
+    ax.legend(ncols=min(len(algorithms), 4), fontsize=9)
+    ax.grid(axis="y", alpha=0.25)
+    fig.tight_layout()
+    if save:
+        out_path = Path(tournament["checkpoint_dir"]) / filename
+        fig.savefig(out_path, dpi=150, bbox_inches="tight")
+        print(f"Saved {title.lower()} plot to {out_path}")
+    return fig
+
+
+def plot_fixed_side_tournament_win_rates(tournament: dict[str, Any], *, save: bool = True):
+    """Plot fixed-side tournament main win rates grouped by main algorithm."""
+    epsilon = float(tournament.get("epsilon", 0.0))
+    label = tournament.get("experiment_label") or f"eps={epsilon:g}"
+    return _plot_fixed_side_tournament_metric(
+        tournament,
+        metric="main_win_rate",
+        ylabel="Main-side win rate",
+        title=f"Fixed-side tournament win rates, {label}",
+        filename="fixed_side_tournament_win_rates.png",
+        save=save,
+    )
+
+
+def plot_fixed_side_tournament_rewards(tournament: dict[str, Any], *, save: bool = True):
+    """Plot fixed-side tournament main average rewards grouped by main algorithm."""
+    epsilon = float(tournament.get("epsilon", 0.0))
+    label = tournament.get("experiment_label") or f"eps={epsilon:g}"
+    return _plot_fixed_side_tournament_metric(
+        tournament,
+        metric="mean_main_reward",
+        ylabel="Main-side average total reward",
+        title=f"Fixed-side tournament rewards, {label}",
+        filename="fixed_side_tournament_rewards.png",
+        save=save,
+    )
+
+
+def plot_fixed_side_tournament_bars(tournament: dict[str, Any], *, save: bool = True):
+    """Plot fixed-side tournament win-rate and reward bar charts."""
+    return (
+        plot_fixed_side_tournament_win_rates(tournament, save=save),
+        plot_fixed_side_tournament_rewards(tournament, save=save),
+    )
 
 
 def plot_mfdsrq_torch_baseline_bars(

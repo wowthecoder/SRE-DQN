@@ -265,7 +265,7 @@ def save_resume_checkpoint(
 
     torch.save(checkpoint, os.path.join(checkpoint_dir, 'checkpoint.pt'))
 
-    eval_reward_history = checkpoint['extra_state'].get('eval_reward_history', [])
+    training_reward_history = checkpoint['extra_state'].get('training_reward_history', [])
 
     with open(os.path.join(checkpoint_dir, 'training_state.txt'), 'w', encoding='utf-8') as state_file:
         state_file.write("iteration: {}\n".format(int(iteration)))
@@ -275,23 +275,22 @@ def save_resume_checkpoint(
         state_file.write("best_loss: {}\n".format("None" if best_loss is None else "{:.8f}".format(float(best_loss))))
         state_file.write("best_idx: {}\n".format("None" if best_idx is None else int(best_idx)))
         state_file.write("improvement_counter: {}\n".format(int(impv_counter)))
-        state_file.write("eval_reward_count: {}\n".format(len(eval_reward_history)))
-        if eval_reward_history:
-            state_file.write("eval_rewards:\n")
-            for item in eval_reward_history:
-                agent_means = np.asarray(item.get('agent_mean_rewards', []), dtype=float)
-                agent_text = np.array2string(agent_means, precision=6, separator=', ')
-                state_file.write(
-                    "  iteration: {iteration} | eps_b: {eps_b:.8g} | "
-                    "mean_reward: {mean_reward:.8f} | std_reward: {std_reward:.8f} | "
-                    "agent_mean_rewards: {agent_text}\n".format(
-                        iteration=int(item.get('iteration', -1)),
-                        eps_b=float(item.get('eps_b', 0.0)),
-                        mean_reward=float(item.get('mean_reward', float('nan'))),
-                        std_reward=float(item.get('std_reward', float('nan'))),
-                        agent_text=agent_text,
-                    )
+        state_file.write("training_reward_count: {}\n".format(len(training_reward_history)))
+        if training_reward_history:
+            item = training_reward_history[-1]
+            agent_means = np.asarray(item.get('agent_mean_rewards', []), dtype=float)
+            agent_text = np.array2string(agent_means, precision=6, separator=', ')
+            state_file.write(
+                "latest_training_reward: iteration: {iteration} | eps_b: {eps_b:.8g} | "
+                "mean_reward: {mean_reward:.8f} | std_reward: {std_reward:.8f} | "
+                "agent_mean_rewards: {agent_text}\n".format(
+                    iteration=int(item.get('iteration', -1)),
+                    eps_b=float(item.get('eps_b', 0.0)),
+                    mean_reward=float(item.get('mean_reward', float('nan'))),
+                    std_reward=float(item.get('std_reward', float('nan'))),
+                    agent_text=agent_text,
                 )
+            )
 
 
 def _build_checkpoint_extra_state(
@@ -313,7 +312,7 @@ def _build_checkpoint_extra_state(
     diagnostic_batch_size,
     AN_file_name,
     VN_file_name,
-    eval_reward_history,
+    training_reward_history,
 ):
     extra_state = dict(checkpoint_metadata or {})
     extra_state.update({
@@ -334,7 +333,7 @@ def _build_checkpoint_extra_state(
         'diagnostic_batch_size': None if diagnostic_batch_size is None else int(diagnostic_batch_size),
         'an_file_name': AN_file_name,
         'vn_file_name': VN_file_name,
-        'eval_reward_history': list(eval_reward_history),
+        'training_reward_history': list(training_reward_history),
     })
     return extra_state
 
@@ -388,9 +387,10 @@ def run_training_loop(
     :param checkpoint_metadata: Static fields to store in the best-checkpoint extra_state.
     :param loss_log_every:   Print scalar loss every N iterations. Use None or 0 to disable.
     :param eval_reward_every:
-                             Evaluate the current deterministic policy every N iterations.
-                             Defaults to loss_log_every when None.
-    :param eval_episodes:    Number of parallel evaluation episodes. Defaults to mini_batch.
+                             Deprecated compatibility argument. Periodic training-time
+                             evaluation is disabled; rewards are logged from the
+                             training rollouts instead.
+    :param eval_episodes:    Deprecated compatibility argument.
     :param action_update_every:
                              Update the action/actor network every N iterations.
                              Value/critic network is still updated every iteration.
@@ -436,15 +436,11 @@ def run_training_loop(
     last_action_loss_item = 0.0
 
     sum_loss = np.zeros(num_sim)
-    eval_reward_history = []
+    training_reward_history = []
 
     slow_update_every = 50
     if log_best_every is None:
         log_best_every = loss_log_every
-    if eval_reward_every is None:
-        eval_reward_every = loss_log_every
-    if eval_episodes is None:
-        eval_episodes = mini_batch
     best_checkpoint_dir = os.path.join(path, "best_checkpoint")
     final_checkpoint_dir = os.path.join(path, "final_checkpoint")
 
@@ -464,12 +460,6 @@ def run_training_loop(
             log_best_every is not None
             and log_best_every > 0
             and (k % log_best_every == 0)
-            and k > 0
-        )
-        eval_reward_flag = (
-            eval_reward_every is not None
-            and eval_reward_every > 0
-            and (k % eval_reward_every == 0)
             and k > 0
         )
         diagnostic_log_flag = (
@@ -510,6 +500,21 @@ def run_training_loop(
             device=next(agent.action_net.parameters()).device,
         )
 
+        with torch.no_grad():
+            rollout_rewards = replay_sample[5].view(max_T, mini_batch, sim_obj.N)
+            episode_rewards = rollout_rewards.sum(dim=0)
+            mean_reward = episode_rewards.mean().item()
+            std_reward = episode_rewards.reshape(-1).std(unbiased=False).item()
+            agent_mean_rewards = episode_rewards.mean(dim=0).detach().cpu().numpy()
+        training_reward_history.append({
+            'iteration': int(k),
+            'eps_b': float(eps_b),
+            'noise_std': float(noise_std),
+            'mean_reward': float(mean_reward),
+            'std_reward': float(std_reward),
+            'agent_mean_rewards': agent_mean_rewards.copy(),
+        })
+
         # Update value network (action network fixed)
         agent.value_net.train()
         agent.action_net.eval()
@@ -547,36 +552,6 @@ def run_training_loop(
                 desc, k, total_loss_item, vloss.item(), aloss.item()))
         if best_log_flag and best_loss is not None and best_idx is not None:
             tqdm.write("{} Best so far | Episode {} | Loss {:.4f}".format(desc, best_idx, best_loss))
-        if eval_reward_flag:
-            eval_action_fn = make_action_fn(agent, eps_b, 0.0)
-            with torch.no_grad():
-                eval_sample = collect_parallel_rollouts(
-                    sim_obj=sim_obj,
-                    max_steps=max_T,
-                    mini_batch=eval_episodes,
-                    norm_mean=norm_mean,
-                    norm_std=norm_std,
-                    action_fn=eval_action_fn,
-                    device=next(agent.action_net.parameters()).device,
-                )
-            eval_rewards = eval_sample[5].view(max_T, eval_episodes, sim_obj.N)
-            episode_rewards = eval_rewards.sum(dim=0)
-            mean_reward = episode_rewards.mean().item()
-            std_reward = episode_rewards.reshape(-1).std(unbiased=False).item()
-            agent_mean_rewards = episode_rewards.mean(dim=0).detach().cpu().numpy()
-            eval_reward_history.append({
-                'iteration': int(k),
-                'eps_b': float(eps_b),
-                'mean_reward': float(mean_reward),
-                'std_reward': float(std_reward),
-                'agent_mean_rewards': agent_mean_rewards.copy(),
-            })
-            agent_reward_text = np.array2string(agent_mean_rewards, precision=3, separator=', ')
-            tqdm.write(
-                "{} Eval rewards | Episode {} | Mean {:.4f} | Std {:.4f} | Agent means {}".format(
-                    desc, k, mean_reward, std_reward, agent_reward_text
-                )
-            )
         if diagnostic_log_flag:
             try:
                 diagnostics = agent.compute_training_diagnostics(
@@ -618,7 +593,7 @@ def run_training_loop(
                 diagnostic_batch_size=diagnostic_batch_size,
                 AN_file_name=AN_file_name,
                 VN_file_name=VN_file_name,
-                eval_reward_history=eval_reward_history,
+                training_reward_history=training_reward_history,
             )
 
             if log_best_updates:
@@ -664,7 +639,7 @@ def run_training_loop(
                     diagnostic_batch_size=diagnostic_batch_size,
                     AN_file_name=AN_file_name,
                     VN_file_name=VN_file_name,
-                    eval_reward_history=eval_reward_history,
+                    training_reward_history=training_reward_history,
                 )
                 save_resume_checkpoint(
                     agent=agent,
@@ -681,7 +656,7 @@ def run_training_loop(
                     good_value_net_w=good_value_net_w,
                     extra_state=final_extra_state,
                 )
-                agent.eval_reward_history = eval_reward_history
+                agent.training_reward_history = training_reward_history
                 progress_bar.close()
                 return agent, sum_loss
 
@@ -713,7 +688,7 @@ def run_training_loop(
             diagnostic_batch_size=diagnostic_batch_size,
             AN_file_name=AN_file_name,
             VN_file_name=VN_file_name,
-            eval_reward_history=eval_reward_history,
+            training_reward_history=training_reward_history,
         )
         save_resume_checkpoint(
             agent=agent,
@@ -731,5 +706,5 @@ def run_training_loop(
             extra_state=final_extra_state,
         )
 
-    agent.eval_reward_history = eval_reward_history
+    agent.training_reward_history = training_reward_history
     return agent, sum_loss

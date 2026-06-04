@@ -1,0 +1,5586 @@
+{
+  "epsilon": 0.1,
+  "checkpoint_dir": "/home/wowthecoder/SRE-DQN/discrete_action_space/mean_field_dsrq/runs/mf_srq_torch_epsilon_training/eps_0_1/battle_v4/seed42",
+  "checkpoint_source": {
+    "main": "/home/wowthecoder/SRE-DQN/discrete_action_space/mean_field_dsrq/runs/mf_srq_torch_epsilon_training/eps_0_1/battle_v4/seed42/ckpt_main_best.pt",
+    "opponent": "/home/wowthecoder/SRE-DQN/discrete_action_space/mean_field_dsrq/runs/mf_srq_torch_epsilon_training/eps_0_1/battle_v4/seed42/ckpt_opponent_best.pt"
+  },
+  "algorithms": [
+    "iql",
+    "ac",
+    "mfq"
+  ],
+  "num_episodes_per_assignment": 25,
+  "evaluate_both_sides": true,
+  "workers": 1,
+  "device": "cuda",
+  "rows": [
+    {
+      "baseline": "iql",
+      "mfdsrq_win_rate": 0.5,
+      "baseline_win_rate": 0.5,
+      "tie_rate": 0.0,
+      "mean_mfdsrq_kills": 34.74,
+      "mean_baseline_kills": 44.94,
+      "mean_mfdsrq_reward": 132.49309129303322,
+      "mean_baseline_reward": 203.5118838430196,
+      "episodes": 50,
+      "baseline_folder": "/home/wowthecoder/SRE-DQN/discrete_action_space/mean_field_dsrq/runs/mfrl_baselines/iql_battle_v4_seed42_26_06_03-02_14_06"
+    },
+    {
+      "baseline": "ac",
+      "mfdsrq_win_rate": 1.0,
+      "baseline_win_rate": 0.0,
+      "tie_rate": 0.0,
+      "mean_mfdsrq_kills": 64.0,
+      "mean_baseline_kills": 0.02,
+      "mean_mfdsrq_reward": 208.0048770170659,
+      "mean_baseline_reward": -63.59619965475053,
+      "episodes": 50,
+      "baseline_folder": "/home/wowthecoder/SRE-DQN/discrete_action_space/mean_field_dsrq/runs/mfrl_baselines/ac_battle_v4_seed42_26_06_03-02_38_22"
+    },
+    {
+      "baseline": "mfq",
+      "mfdsrq_win_rate": 0.5,
+      "baseline_win_rate": 0.5,
+      "tie_rate": 0.0,
+      "mean_mfdsrq_kills": 37.92,
+      "mean_baseline_kills": 38.88,
+      "mean_mfdsrq_reward": 152.529986402113,
+      "mean_baseline_reward": 151.22918855577709,
+      "episodes": 50,
+      "baseline_folder": "/home/wowthecoder/SRE-DQN/discrete_action_space/mean_field_dsrq/runs/mfrl_baselines/mfq_battle_v4_seed42_26_06_03-03_00_45"
+    }
+  ],
+  "results": {
+    "iql": {
+      "baseline": "iql",
+      "baseline_checkpoint": "/home/wowthecoder/SRE-DQN/discrete_action_space/mean_field_dsrq/runs/mfrl_baselines/iql_battle_v4_seed42_26_06_03-02_14_06/models/main",
+      "checkpoint_dir": {
+        "main": "/home/wowthecoder/SRE-DQN/discrete_action_space/mean_field_dsrq/runs/mf_srq_torch_epsilon_training/eps_0_1/battle_v4/seed42/ckpt_main_best.pt",
+        "opponent": "/home/wowthecoder/SRE-DQN/discrete_action_space/mean_field_dsrq/runs/mf_srq_torch_epsilon_training/eps_0_1/battle_v4/seed42/ckpt_opponent_best.pt"
+      },
+      "num_episodes_per_assignment": 25,
+      "records": [
+        {
+          "episode": 1,
+          "global_step": 1,
+          "env_idx": 0,
+          "rewards": {
+            "red": 322.8249859511852,
+            "blue": -12.44500220566988
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 61,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 3
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "iql",
+          "mfdsrq_win": 0,
+          "baseline_win": 1,
+          "mfdsrq_reward": -12.44500220566988,
+          "baseline_reward": 322.8249859511852,
+          "mfdsrq_kills": 3,
+          "baseline_kills": 64
+        },
+        {
+          "episode": 2,
+          "global_step": 2,
+          "env_idx": 0,
+          "rewards": {
+            "red": 325.31497083231807,
+            "blue": 28.404993793927133
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 54,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 10
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "iql",
+          "mfdsrq_win": 0,
+          "baseline_win": 1,
+          "mfdsrq_reward": 28.404993793927133,
+          "baseline_reward": 325.31497083231807,
+          "mfdsrq_kills": 10,
+          "baseline_kills": 64
+        },
+        {
+          "episode": 3,
+          "global_step": 3,
+          "env_idx": 0,
+          "rewards": {
+            "red": 324.1999804675579,
+            "blue": 6.294994182884693
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 58,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 6
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "iql",
+          "mfdsrq_win": 0,
+          "baseline_win": 1,
+          "mfdsrq_reward": 6.294994182884693,
+          "baseline_reward": 324.1999804675579,
+          "mfdsrq_kills": 6,
+          "baseline_kills": 64
+        },
+        {
+          "episode": 4,
+          "global_step": 4,
+          "env_idx": 0,
+          "rewards": {
+            "red": 313.01498387008905,
+            "blue": -1.610003761947155
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 59,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 5
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "iql",
+          "mfdsrq_win": 0,
+          "baseline_win": 1,
+          "mfdsrq_reward": -1.610003761947155,
+          "baseline_reward": 313.01498387008905,
+          "mfdsrq_kills": 5,
+          "baseline_kills": 64
+        },
+        {
+          "episode": 5,
+          "global_step": 5,
+          "env_idx": 0,
+          "rewards": {
+            "red": 320.57998545467854,
+            "blue": -9.045002614147961
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 61,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 3
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "iql",
+          "mfdsrq_win": 0,
+          "baseline_win": 1,
+          "mfdsrq_reward": -9.045002614147961,
+          "baseline_reward": 320.57998545467854,
+          "mfdsrq_kills": 3,
+          "baseline_kills": 64
+        },
+        {
+          "episode": 6,
+          "global_step": 6,
+          "env_idx": 0,
+          "rewards": {
+            "red": 324.9799802675843,
+            "blue": -8.760003278031945
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 60,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 4
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "iql",
+          "mfdsrq_win": 0,
+          "baseline_win": 1,
+          "mfdsrq_reward": -8.760003278031945,
+          "baseline_reward": 324.9799802675843,
+          "mfdsrq_kills": 4,
+          "baseline_kills": 64
+        },
+        {
+          "episode": 7,
+          "global_step": 7,
+          "env_idx": 0,
+          "rewards": {
+            "red": 323.7849887907505,
+            "blue": -4.290001131594181
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 60,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 4
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "iql",
+          "mfdsrq_win": 0,
+          "baseline_win": 1,
+          "mfdsrq_reward": -4.290001131594181,
+          "baseline_reward": 323.7849887907505,
+          "mfdsrq_kills": 4,
+          "baseline_kills": 64
+        },
+        {
+          "episode": 8,
+          "global_step": 8,
+          "env_idx": 0,
+          "rewards": {
+            "red": 319.6699773520231,
+            "blue": 10.04499447811395
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 57,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 7
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "iql",
+          "mfdsrq_win": 0,
+          "baseline_win": 1,
+          "mfdsrq_reward": 10.04499447811395,
+          "baseline_reward": 319.6699773520231,
+          "mfdsrq_kills": 7,
+          "baseline_kills": 64
+        },
+        {
+          "episode": 9,
+          "global_step": 9,
+          "env_idx": 0,
+          "rewards": {
+            "red": 321.9549893066287,
+            "blue": 12.149995970539749
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 56,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 8
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "iql",
+          "mfdsrq_win": 0,
+          "baseline_win": 1,
+          "mfdsrq_reward": 12.149995970539749,
+          "baseline_reward": 321.9549893066287,
+          "mfdsrq_kills": 8,
+          "baseline_kills": 64
+        },
+        {
+          "episode": 10,
+          "global_step": 10,
+          "env_idx": 0,
+          "rewards": {
+            "red": 322.56998317688704,
+            "blue": 1.6049963533878326
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 59,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 5
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "iql",
+          "mfdsrq_win": 0,
+          "baseline_win": 1,
+          "mfdsrq_reward": 1.6049963533878326,
+          "baseline_reward": 322.56998317688704,
+          "mfdsrq_kills": 5,
+          "baseline_kills": 64
+        },
+        {
+          "episode": 11,
+          "global_step": 11,
+          "env_idx": 0,
+          "rewards": {
+            "red": 322.01498188078403,
+            "blue": -0.6700020879507065
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 58,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 6
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "iql",
+          "mfdsrq_win": 0,
+          "baseline_win": 1,
+          "mfdsrq_reward": -0.6700020879507065,
+          "baseline_reward": 322.01498188078403,
+          "mfdsrq_kills": 6,
+          "baseline_kills": 64
+        },
+        {
+          "episode": 12,
+          "global_step": 12,
+          "env_idx": 0,
+          "rewards": {
+            "red": 316.2499769181013,
+            "blue": 7.444999933242798
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 57,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 7
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "iql",
+          "mfdsrq_win": 0,
+          "baseline_win": 1,
+          "mfdsrq_reward": 7.444999933242798,
+          "baseline_reward": 316.2499769181013,
+          "mfdsrq_kills": 7,
+          "baseline_kills": 64
+        },
+        {
+          "episode": 13,
+          "global_step": 13,
+          "env_idx": 0,
+          "rewards": {
+            "red": 323.7549841552973,
+            "blue": 5.004995482042432
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 56,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 8
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "iql",
+          "mfdsrq_win": 0,
+          "baseline_win": 1,
+          "mfdsrq_reward": 5.004995482042432,
+          "baseline_reward": 323.7549841552973,
+          "mfdsrq_kills": 8,
+          "baseline_kills": 64
+        },
+        {
+          "episode": 14,
+          "global_step": 14,
+          "env_idx": 0,
+          "rewards": {
+            "red": 323.4999774694443,
+            "blue": -14.105001471936703
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 62,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 2
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "iql",
+          "mfdsrq_win": 0,
+          "baseline_win": 1,
+          "mfdsrq_reward": -14.105001471936703,
+          "baseline_reward": 323.4999774694443,
+          "mfdsrq_kills": 2,
+          "baseline_kills": 64
+        },
+        {
+          "episode": 15,
+          "global_step": 15,
+          "env_idx": 0,
+          "rewards": {
+            "red": 320.6049780547619,
+            "blue": 1.6099976133555174
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 59,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 5
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "iql",
+          "mfdsrq_win": 0,
+          "baseline_win": 1,
+          "mfdsrq_reward": 1.6099976133555174,
+          "baseline_reward": 320.6049780547619,
+          "mfdsrq_kills": 5,
+          "baseline_kills": 64
+        },
+        {
+          "episode": 16,
+          "global_step": 16,
+          "env_idx": 0,
+          "rewards": {
+            "red": 321.66498148813844,
+            "blue": 3.2199959540739655
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 58,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 6
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "iql",
+          "mfdsrq_win": 0,
+          "baseline_win": 1,
+          "mfdsrq_reward": 3.2199959540739655,
+          "baseline_reward": 321.66498148813844,
+          "mfdsrq_kills": 6,
+          "baseline_kills": 64
+        },
+        {
+          "episode": 17,
+          "global_step": 17,
+          "env_idx": 0,
+          "rewards": {
+            "red": 325.91998041421175,
+            "blue": 12.019995918497443
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 55,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 9
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "iql",
+          "mfdsrq_win": 0,
+          "baseline_win": 1,
+          "mfdsrq_reward": 12.019995918497443,
+          "baseline_reward": 325.91998041421175,
+          "mfdsrq_kills": 9,
+          "baseline_kills": 64
+        },
+        {
+          "episode": 18,
+          "global_step": 18,
+          "env_idx": 0,
+          "rewards": {
+            "red": 322.9049836732447,
+            "blue": 10.704993261024356
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 56,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 8
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "iql",
+          "mfdsrq_win": 0,
+          "baseline_win": 1,
+          "mfdsrq_reward": 10.704993261024356,
+          "baseline_reward": 322.9049836732447,
+          "mfdsrq_kills": 8,
+          "baseline_kills": 64
+        },
+        {
+          "episode": 19,
+          "global_step": 19,
+          "env_idx": 0,
+          "rewards": {
+            "red": 319.2399837523699,
+            "blue": 5.79999671317637
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 57,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 7
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "iql",
+          "mfdsrq_win": 0,
+          "baseline_win": 1,
+          "mfdsrq_reward": 5.79999671317637,
+          "baseline_reward": 319.2399837523699,
+          "mfdsrq_kills": 7,
+          "baseline_kills": 64
+        },
+        {
+          "episode": 20,
+          "global_step": 20,
+          "env_idx": 0,
+          "rewards": {
+            "red": 322.5049873078242,
+            "blue": -0.7750021759420633
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 59,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 5
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "iql",
+          "mfdsrq_win": 0,
+          "baseline_win": 1,
+          "mfdsrq_reward": -0.7750021759420633,
+          "baseline_reward": 322.5049873078242,
+          "mfdsrq_kills": 5,
+          "baseline_kills": 64
+        },
+        {
+          "episode": 21,
+          "global_step": 21,
+          "env_idx": 0,
+          "rewards": {
+            "red": 324.1749843135476,
+            "blue": -9.7700031157583
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 61,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 3
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "iql",
+          "mfdsrq_win": 0,
+          "baseline_win": 1,
+          "mfdsrq_reward": -9.7700031157583,
+          "baseline_reward": 324.1749843135476,
+          "mfdsrq_kills": 3,
+          "baseline_kills": 64
+        },
+        {
+          "episode": 22,
+          "global_step": 22,
+          "env_idx": 0,
+          "rewards": {
+            "red": 325.4949885606766,
+            "blue": -9.520001575350761
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 61,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 3
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "iql",
+          "mfdsrq_win": 0,
+          "baseline_win": 1,
+          "mfdsrq_reward": -9.520001575350761,
+          "baseline_reward": 325.4949885606766,
+          "mfdsrq_kills": 3,
+          "baseline_kills": 64
+        },
+        {
+          "episode": 23,
+          "global_step": 23,
+          "env_idx": 0,
+          "rewards": {
+            "red": 325.3549862578511,
+            "blue": -12.590001616626978
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 61,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 3
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "iql",
+          "mfdsrq_win": 0,
+          "baseline_win": 1,
+          "mfdsrq_reward": -12.590001616626978,
+          "baseline_reward": 325.3549862578511,
+          "mfdsrq_kills": 3,
+          "baseline_kills": 64
+        },
+        {
+          "episode": 24,
+          "global_step": 24,
+          "env_idx": 0,
+          "rewards": {
+            "red": 307.0549801662564,
+            "blue": -4.335003406740725
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 60,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 4
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "iql",
+          "mfdsrq_win": 0,
+          "baseline_win": 1,
+          "mfdsrq_reward": -4.335003406740725,
+          "baseline_reward": 307.0549801662564,
+          "mfdsrq_kills": 4,
+          "baseline_kills": 64
+        },
+        {
+          "episode": 25,
+          "global_step": 25,
+          "env_idx": 0,
+          "rewards": {
+            "red": 322.8899841243401,
+            "blue": 6.074997620657086
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 58,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 6
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "iql",
+          "mfdsrq_win": 0,
+          "baseline_win": 1,
+          "mfdsrq_reward": 6.074997620657086,
+          "baseline_reward": 322.8899841243401,
+          "mfdsrq_kills": 6,
+          "baseline_kills": 64
+        },
+        {
+          "episode": 1,
+          "global_step": 1,
+          "env_idx": 0,
+          "rewards": {
+            "red": 277.59999334812164,
+            "blue": 82.79998467862606
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 40,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 24
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "iql",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 277.59999334812164,
+          "baseline_reward": 82.79998467862606,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 24
+        },
+        {
+          "episode": 2,
+          "global_step": 2,
+          "env_idx": 0,
+          "rewards": {
+            "red": 267.1249850280583,
+            "blue": 135.7299855509773
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 27,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 37
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "iql",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 267.1249850280583,
+          "baseline_reward": 135.7299855509773,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 37
+        },
+        {
+          "episode": 3,
+          "global_step": 3,
+          "env_idx": 0,
+          "rewards": {
+            "red": 264.71498782467097,
+            "blue": 138.54998280853033
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 28,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 36
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "iql",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 264.71498782467097,
+          "baseline_reward": 138.54998280853033,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 36
+        },
+        {
+          "episode": 4,
+          "global_step": 4,
+          "env_idx": 0,
+          "rewards": {
+            "red": 235.79998580366373,
+            "blue": 42.469987276010215
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 47,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 17
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "iql",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 235.79998580366373,
+          "baseline_reward": 42.469987276010215,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 17
+        },
+        {
+          "episode": 5,
+          "global_step": 5,
+          "env_idx": 0,
+          "rewards": {
+            "red": 233.17498602718115,
+            "blue": 107.32998478226364
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 34,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 30
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "iql",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 233.17498602718115,
+          "baseline_reward": 107.32998478226364,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 30
+        },
+        {
+          "episode": 6,
+          "global_step": 6,
+          "env_idx": 0,
+          "rewards": {
+            "red": 263.65998086333275,
+            "blue": 66.50998720899224
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 44,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 20
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "iql",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 263.65998086333275,
+          "baseline_reward": 66.50998720899224,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 20
+        },
+        {
+          "episode": 7,
+          "global_step": 7,
+          "env_idx": 0,
+          "rewards": {
+            "red": 281.8199842274189,
+            "blue": 72.67998318560421
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 41,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 23
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "iql",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 281.8199842274189,
+          "baseline_reward": 72.67998318560421,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 23
+        },
+        {
+          "episode": 8,
+          "global_step": 8,
+          "env_idx": 0,
+          "rewards": {
+            "red": 271.6199866347015,
+            "blue": 49.87498414050788
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 42,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 22
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "iql",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 271.6199866347015,
+          "baseline_reward": 49.87498414050788,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 22
+        },
+        {
+          "episode": 9,
+          "global_step": 9,
+          "env_idx": 0,
+          "rewards": {
+            "red": 278.26498816907406,
+            "blue": 68.76998623181134
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 41,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 23
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "iql",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 278.26498816907406,
+          "baseline_reward": 68.76998623181134,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 23
+        },
+        {
+          "episode": 10,
+          "global_step": 10,
+          "env_idx": 0,
+          "rewards": {
+            "red": 268.75499200820923,
+            "blue": 103.89998501166701
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 37,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 27
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "iql",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 268.75499200820923,
+          "baseline_reward": 103.89998501166701,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 27
+        },
+        {
+          "episode": 11,
+          "global_step": 11,
+          "env_idx": 0,
+          "rewards": {
+            "red": 242.28998458385468,
+            "blue": 78.97498379647732
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 40,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 24
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "iql",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 242.28998458385468,
+          "baseline_reward": 78.97498379647732,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 24
+        },
+        {
+          "episode": 12,
+          "global_step": 12,
+          "env_idx": 0,
+          "rewards": {
+            "red": 252.7749824002385,
+            "blue": 55.26998569909483
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 41,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 23
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "iql",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 252.7749824002385,
+          "baseline_reward": 55.26998569909483,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 23
+        },
+        {
+          "episode": 13,
+          "global_step": 13,
+          "env_idx": 0,
+          "rewards": {
+            "red": 266.8249833388254,
+            "blue": 60.079985588788986
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 44,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 20
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "iql",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 266.8249833388254,
+          "baseline_reward": 60.079985588788986,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 20
+        },
+        {
+          "episode": 14,
+          "global_step": 14,
+          "env_idx": 0,
+          "rewards": {
+            "red": 255.21999194473028,
+            "blue": 91.77498441562057
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 35,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 29
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "iql",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 255.21999194473028,
+          "baseline_reward": 91.77498441562057,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 29
+        },
+        {
+          "episode": 15,
+          "global_step": 15,
+          "env_idx": 0,
+          "rewards": {
+            "red": 257.0499860048294,
+            "blue": 113.78498290944844
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 34,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 30
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "iql",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 257.0499860048294,
+          "baseline_reward": 113.78498290944844,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 30
+        },
+        {
+          "episode": 16,
+          "global_step": 16,
+          "env_idx": 0,
+          "rewards": {
+            "red": 273.8199806511402,
+            "blue": 100.53498107753694
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 38,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 26
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "iql",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 273.8199806511402,
+          "baseline_reward": 100.53498107753694,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 26
+        },
+        {
+          "episode": 17,
+          "global_step": 17,
+          "env_idx": 0,
+          "rewards": {
+            "red": 247.10999122820795,
+            "blue": 113.02498783543706
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 34,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 30
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "iql",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 247.10999122820795,
+          "baseline_reward": 113.02498783543706,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 30
+        },
+        {
+          "episode": 18,
+          "global_step": 18,
+          "env_idx": 0,
+          "rewards": {
+            "red": 253.5349768474698,
+            "blue": 70.43998503684998
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 44,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 20
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "iql",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 253.5349768474698,
+          "baseline_reward": 70.43998503684998,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 20
+        },
+        {
+          "episode": 19,
+          "global_step": 19,
+          "env_idx": 0,
+          "rewards": {
+            "red": 276.37498569488525,
+            "blue": 123.40998714976013
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 33,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 31
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "iql",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 276.37498569488525,
+          "baseline_reward": 123.40998714976013,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 31
+        },
+        {
+          "episode": 20,
+          "global_step": 20,
+          "env_idx": 0,
+          "rewards": {
+            "red": 270.53999023884535,
+            "blue": 70.69498612824827
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 39,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 25
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "iql",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 270.53999023884535,
+          "baseline_reward": 70.69498612824827,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 25
+        },
+        {
+          "episode": 21,
+          "global_step": 21,
+          "env_idx": 0,
+          "rewards": {
+            "red": 263.5749853551388,
+            "blue": 50.0449878340587
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 42,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 22
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "iql",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 263.5749853551388,
+          "baseline_reward": 50.0449878340587,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 22
+        },
+        {
+          "episode": 22,
+          "global_step": 22,
+          "env_idx": 0,
+          "rewards": {
+            "red": 276.7749870894477,
+            "blue": 85.97998541872948
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 36,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 28
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "iql",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 276.7749870894477,
+          "baseline_reward": 85.97998541872948,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 28
+        },
+        {
+          "episode": 23,
+          "global_step": 23,
+          "env_idx": 0,
+          "rewards": {
+            "red": 278.81498131901026,
+            "blue": 78.10498719848692
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 40,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 24
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "iql",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 278.81498131901026,
+          "baseline_reward": 78.10498719848692,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 24
+        },
+        {
+          "episode": 24,
+          "global_step": 24,
+          "env_idx": 0,
+          "rewards": {
+            "red": 265.0899803638458,
+            "blue": 93.12998133152723
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 36,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 28
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "iql",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 265.0899803638458,
+          "baseline_reward": 93.12998133152723,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 28
+        },
+        {
+          "episode": 25,
+          "global_step": 25,
+          "env_idx": 0,
+          "rewards": {
+            "red": 279.85998882353306,
+            "blue": 79.50498584937304
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 36,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 28
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "iql",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 279.85998882353306,
+          "baseline_reward": 79.50498584937304,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 28
+        }
+      ],
+      "assignments": {
+        "mfdsrq_blue_vs_baseline_red": {
+          "episodes": 25,
+          "mfdsrq_win_rate": 0.0,
+          "baseline_win_rate": 1.0,
+          "tie_rate": 0.0,
+          "mean_mfdsrq_reward": 0.8985967533290387,
+          "mean_baseline_reward": 321.6889825602621,
+          "mean_mfdsrq_kills": 5.48,
+          "mean_baseline_kills": 64.0
+        },
+        "mfdsrq_red_vs_baseline_blue": {
+          "episodes": 25,
+          "mfdsrq_win_rate": 1.0,
+          "baseline_win_rate": 0.0,
+          "tie_rate": 0.0,
+          "mean_mfdsrq_reward": 264.0875858327374,
+          "mean_baseline_reward": 85.33478512577713,
+          "mean_mfdsrq_kills": 64.0,
+          "mean_baseline_kills": 25.88
+        }
+      },
+      "summary": {
+        "episodes": 50,
+        "mfdsrq_win_rate": 0.5,
+        "baseline_win_rate": 0.5,
+        "tie_rate": 0.0,
+        "mean_mfdsrq_reward": 132.49309129303322,
+        "mean_baseline_reward": 203.5118838430196,
+        "mean_mfdsrq_kills": 34.74,
+        "mean_baseline_kills": 44.94
+      }
+    },
+    "ac": {
+      "baseline": "ac",
+      "baseline_checkpoint": "/home/wowthecoder/SRE-DQN/discrete_action_space/mean_field_dsrq/runs/mfrl_baselines/ac_battle_v4_seed42_26_06_03-02_38_22/models/main",
+      "checkpoint_dir": {
+        "main": "/home/wowthecoder/SRE-DQN/discrete_action_space/mean_field_dsrq/runs/mf_srq_torch_epsilon_training/eps_0_1/battle_v4/seed42/ckpt_main_best.pt",
+        "opponent": "/home/wowthecoder/SRE-DQN/discrete_action_space/mean_field_dsrq/runs/mf_srq_torch_epsilon_training/eps_0_1/battle_v4/seed42/ckpt_opponent_best.pt"
+      },
+      "num_episodes_per_assignment": 25,
+      "records": [
+        {
+          "episode": 1,
+          "global_step": 1,
+          "env_idx": 0,
+          "rewards": {
+            "red": -68.20499967504293,
+            "blue": 223.29997078329325
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 0,
+            "blue": 64
+          },
+          "kills": {
+            "red": 0,
+            "blue": 64
+          },
+          "wins": {
+            "red": 0,
+            "blue": 1
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "ac",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 223.29997078329325,
+          "baseline_reward": -68.20499967504293,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 0
+        },
+        {
+          "episode": 2,
+          "global_step": 2,
+          "env_idx": 0,
+          "rewards": {
+            "red": -70.14500014018267,
+            "blue": 201.57996885478497
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 0,
+            "blue": 64
+          },
+          "kills": {
+            "red": 0,
+            "blue": 64
+          },
+          "wins": {
+            "red": 0,
+            "blue": 1
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "ac",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 201.57996885478497,
+          "baseline_reward": -70.14500014018267,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 0
+        },
+        {
+          "episode": 3,
+          "global_step": 3,
+          "env_idx": 0,
+          "rewards": {
+            "red": -83.68999951053411,
+            "blue": 189.1599659472704
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 0,
+            "blue": 64
+          },
+          "kills": {
+            "red": 0,
+            "blue": 64
+          },
+          "wins": {
+            "red": 0,
+            "blue": 1
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "ac",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 189.1599659472704,
+          "baseline_reward": -83.68999951053411,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 0
+        },
+        {
+          "episode": 4,
+          "global_step": 4,
+          "env_idx": 0,
+          "rewards": {
+            "red": -84.44999971427023,
+            "blue": 129.07996712252498
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 0,
+            "blue": 64
+          },
+          "kills": {
+            "red": 0,
+            "blue": 64
+          },
+          "wins": {
+            "red": 0,
+            "blue": 1
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "ac",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 129.07996712252498,
+          "baseline_reward": -84.44999971427023,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 0
+        },
+        {
+          "episode": 5,
+          "global_step": 5,
+          "env_idx": 0,
+          "rewards": {
+            "red": -75.14999987371266,
+            "blue": 209.67996886372566
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 0,
+            "blue": 64
+          },
+          "kills": {
+            "red": 0,
+            "blue": 64
+          },
+          "wins": {
+            "red": 0,
+            "blue": 1
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "ac",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 209.67996886372566,
+          "baseline_reward": -75.14999987371266,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 0
+        },
+        {
+          "episode": 6,
+          "global_step": 6,
+          "env_idx": 0,
+          "rewards": {
+            "red": -79.95499920472503,
+            "blue": 191.4199649989605
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 0,
+            "blue": 64
+          },
+          "kills": {
+            "red": 0,
+            "blue": 64
+          },
+          "wins": {
+            "red": 0,
+            "blue": 1
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "ac",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 191.4199649989605,
+          "baseline_reward": -79.95499920472503,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 0
+        },
+        {
+          "episode": 7,
+          "global_step": 7,
+          "env_idx": 0,
+          "rewards": {
+            "red": -79.09999858494848,
+            "blue": 199.83997154980898
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 0,
+            "blue": 64
+          },
+          "kills": {
+            "red": 0,
+            "blue": 64
+          },
+          "wins": {
+            "red": 0,
+            "blue": 1
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "ac",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 199.83997154980898,
+          "baseline_reward": -79.09999858494848,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 0
+        },
+        {
+          "episode": 8,
+          "global_step": 8,
+          "env_idx": 0,
+          "rewards": {
+            "red": -67.33999991882592,
+            "blue": 221.5599699318409
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 0,
+            "blue": 64
+          },
+          "kills": {
+            "red": 0,
+            "blue": 64
+          },
+          "wins": {
+            "red": 0,
+            "blue": 1
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "ac",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 221.5599699318409,
+          "baseline_reward": -67.33999991882592,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 0
+        },
+        {
+          "episode": 9,
+          "global_step": 9,
+          "env_idx": 0,
+          "rewards": {
+            "red": -75.81999920401722,
+            "blue": 192.91996769234538
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 0,
+            "blue": 64
+          },
+          "kills": {
+            "red": 0,
+            "blue": 64
+          },
+          "wins": {
+            "red": 0,
+            "blue": 1
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "ac",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 192.91996769234538,
+          "baseline_reward": -75.81999920401722,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 0
+        },
+        {
+          "episode": 10,
+          "global_step": 10,
+          "env_idx": 0,
+          "rewards": {
+            "red": -81.5049995565787,
+            "blue": 94.83996941149235
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 0,
+            "blue": 64
+          },
+          "kills": {
+            "red": 0,
+            "blue": 64
+          },
+          "wins": {
+            "red": 0,
+            "blue": 1
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "ac",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 94.83996941149235,
+          "baseline_reward": -81.5049995565787,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 0
+        },
+        {
+          "episode": 11,
+          "global_step": 11,
+          "env_idx": 0,
+          "rewards": {
+            "red": -71.05499929375947,
+            "blue": 189.51997251808643
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 0,
+            "blue": 64
+          },
+          "kills": {
+            "red": 0,
+            "blue": 64
+          },
+          "wins": {
+            "red": 0,
+            "blue": 1
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "ac",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 189.51997251808643,
+          "baseline_reward": -71.05499929375947,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 0
+        },
+        {
+          "episode": 12,
+          "global_step": 12,
+          "env_idx": 0,
+          "rewards": {
+            "red": -80.31999873183668,
+            "blue": 172.6599728614092
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 0,
+            "blue": 64
+          },
+          "kills": {
+            "red": 0,
+            "blue": 64
+          },
+          "wins": {
+            "red": 0,
+            "blue": 1
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "ac",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 172.6599728614092,
+          "baseline_reward": -80.31999873183668,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 0
+        },
+        {
+          "episode": 13,
+          "global_step": 13,
+          "env_idx": 0,
+          "rewards": {
+            "red": -73.59999993536621,
+            "blue": 160.0649567246437
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 0,
+            "blue": 63
+          },
+          "kills": {
+            "red": 1,
+            "blue": 64
+          },
+          "wins": {
+            "red": 0,
+            "blue": 1
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "ac",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 160.0649567246437,
+          "baseline_reward": -73.59999993536621,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 1
+        },
+        {
+          "episode": 14,
+          "global_step": 14,
+          "env_idx": 0,
+          "rewards": {
+            "red": -85.64499900396913,
+            "blue": 186.91996547579765
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 0,
+            "blue": 64
+          },
+          "kills": {
+            "red": 0,
+            "blue": 64
+          },
+          "wins": {
+            "red": 0,
+            "blue": 1
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "ac",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 186.91996547579765,
+          "baseline_reward": -85.64499900396913,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 0
+        },
+        {
+          "episode": 15,
+          "global_step": 15,
+          "env_idx": 0,
+          "rewards": {
+            "red": -63.939999523572624,
+            "blue": 172.55997413396835
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 0,
+            "blue": 64
+          },
+          "kills": {
+            "red": 0,
+            "blue": 64
+          },
+          "wins": {
+            "red": 0,
+            "blue": 1
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "ac",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 172.55997413396835,
+          "baseline_reward": -63.939999523572624,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 0
+        },
+        {
+          "episode": 16,
+          "global_step": 16,
+          "env_idx": 0,
+          "rewards": {
+            "red": -77.05499852448702,
+            "blue": 166.57997593283653
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 0,
+            "blue": 64
+          },
+          "kills": {
+            "red": 0,
+            "blue": 64
+          },
+          "wins": {
+            "red": 0,
+            "blue": 1
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "ac",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 166.57997593283653,
+          "baseline_reward": -77.05499852448702,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 0
+        },
+        {
+          "episode": 17,
+          "global_step": 17,
+          "env_idx": 0,
+          "rewards": {
+            "red": -71.88999983295798,
+            "blue": 218.45997139811516
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 0,
+            "blue": 64
+          },
+          "kills": {
+            "red": 0,
+            "blue": 64
+          },
+          "wins": {
+            "red": 0,
+            "blue": 1
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "ac",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 218.45997139811516,
+          "baseline_reward": -71.88999983295798,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 0
+        },
+        {
+          "episode": 18,
+          "global_step": 18,
+          "env_idx": 0,
+          "rewards": {
+            "red": -85.714999220334,
+            "blue": 146.33996967971325
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 0,
+            "blue": 64
+          },
+          "kills": {
+            "red": 0,
+            "blue": 64
+          },
+          "wins": {
+            "red": 0,
+            "blue": 1
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "ac",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 146.33996967971325,
+          "baseline_reward": -85.714999220334,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 0
+        },
+        {
+          "episode": 19,
+          "global_step": 19,
+          "env_idx": 0,
+          "rewards": {
+            "red": -79.87999932467937,
+            "blue": 186.47997175902128
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 0,
+            "blue": 64
+          },
+          "kills": {
+            "red": 0,
+            "blue": 64
+          },
+          "wins": {
+            "red": 0,
+            "blue": 1
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "ac",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 186.47997175902128,
+          "baseline_reward": -79.87999932467937,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 0
+        },
+        {
+          "episode": 20,
+          "global_step": 20,
+          "env_idx": 0,
+          "rewards": {
+            "red": -91.01999927870929,
+            "blue": 208.07996970415115
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 0,
+            "blue": 64
+          },
+          "kills": {
+            "red": 0,
+            "blue": 64
+          },
+          "wins": {
+            "red": 0,
+            "blue": 1
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "ac",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 208.07996970415115,
+          "baseline_reward": -91.01999927870929,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 0
+        },
+        {
+          "episode": 21,
+          "global_step": 21,
+          "env_idx": 0,
+          "rewards": {
+            "red": -79.36999933514744,
+            "blue": 133.79996913671494
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 0,
+            "blue": 64
+          },
+          "kills": {
+            "red": 0,
+            "blue": 64
+          },
+          "wins": {
+            "red": 0,
+            "blue": 1
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "ac",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 133.79996913671494,
+          "baseline_reward": -79.36999933514744,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 0
+        },
+        {
+          "episode": 22,
+          "global_step": 22,
+          "env_idx": 0,
+          "rewards": {
+            "red": -66.84999896865338,
+            "blue": 200.0399708300829
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 0,
+            "blue": 64
+          },
+          "kills": {
+            "red": 0,
+            "blue": 64
+          },
+          "wins": {
+            "red": 0,
+            "blue": 1
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "ac",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 200.0399708300829,
+          "baseline_reward": -66.84999896865338,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 0
+        },
+        {
+          "episode": 23,
+          "global_step": 23,
+          "env_idx": 0,
+          "rewards": {
+            "red": -66.1149991620332,
+            "blue": 195.63996732234955
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 0,
+            "blue": 64
+          },
+          "kills": {
+            "red": 0,
+            "blue": 64
+          },
+          "wins": {
+            "red": 0,
+            "blue": 1
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "ac",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 195.63996732234955,
+          "baseline_reward": -66.1149991620332,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 0
+        },
+        {
+          "episode": 24,
+          "global_step": 24,
+          "env_idx": 0,
+          "rewards": {
+            "red": -76.13499927893281,
+            "blue": 214.69997514784336
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 0,
+            "blue": 64
+          },
+          "kills": {
+            "red": 0,
+            "blue": 64
+          },
+          "wins": {
+            "red": 0,
+            "blue": 1
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "ac",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 214.69997514784336,
+          "baseline_reward": -76.13499927893281,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 0
+        },
+        {
+          "episode": 25,
+          "global_step": 25,
+          "env_idx": 0,
+          "rewards": {
+            "red": -76.40499957464635,
+            "blue": 214.77997244894505
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 0,
+            "blue": 64
+          },
+          "kills": {
+            "red": 0,
+            "blue": 64
+          },
+          "wins": {
+            "red": 0,
+            "blue": 1
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "ac",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 214.77997244894505,
+          "baseline_reward": -76.40499957464635,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 0
+        },
+        {
+          "episode": 1,
+          "global_step": 1,
+          "env_idx": 0,
+          "rewards": {
+            "red": 214.93998531997204,
+            "blue": -48.96999958343804
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 64,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 0
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "ac",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 214.93998531997204,
+          "baseline_reward": -48.96999958343804,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 0
+        },
+        {
+          "episode": 2,
+          "global_step": 2,
+          "env_idx": 0,
+          "rewards": {
+            "red": 204.0799897313118,
+            "blue": -46.16499997768551
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 64,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 0
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "ac",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 204.0799897313118,
+          "baseline_reward": -46.16499997768551,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 0
+        },
+        {
+          "episode": 3,
+          "global_step": 3,
+          "env_idx": 0,
+          "rewards": {
+            "red": 249.2599912211299,
+            "blue": -51.239999829791486
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 64,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 0
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "ac",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 249.2599912211299,
+          "baseline_reward": -51.239999829791486,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 0
+        },
+        {
+          "episode": 4,
+          "global_step": 4,
+          "env_idx": 0,
+          "rewards": {
+            "red": 199.37998147308826,
+            "blue": -50.41500014346093
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 64,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 0
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "ac",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 199.37998147308826,
+          "baseline_reward": -50.41500014346093,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 0
+        },
+        {
+          "episode": 5,
+          "global_step": 5,
+          "env_idx": 0,
+          "rewards": {
+            "red": 234.05998513102531,
+            "blue": -52.359999782405794
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 64,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 0
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "ac",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 234.05998513102531,
+          "baseline_reward": -52.359999782405794,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 0
+        },
+        {
+          "episode": 6,
+          "global_step": 6,
+          "env_idx": 0,
+          "rewards": {
+            "red": 217.03998308628798,
+            "blue": -54.85499982535839
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 64,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 0
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "ac",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 217.03998308628798,
+          "baseline_reward": -54.85499982535839,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 0
+        },
+        {
+          "episode": 7,
+          "global_step": 7,
+          "env_idx": 0,
+          "rewards": {
+            "red": 241.2999822050333,
+            "blue": -49.10500020068139
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 64,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 0
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "ac",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 241.2999822050333,
+          "baseline_reward": -49.10500020068139,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 0
+        },
+        {
+          "episode": 8,
+          "global_step": 8,
+          "env_idx": 0,
+          "rewards": {
+            "red": 192.81998751312494,
+            "blue": -55.21000010985881
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 64,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 0
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "ac",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 192.81998751312494,
+          "baseline_reward": -55.21000010985881,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 0
+        },
+        {
+          "episode": 9,
+          "global_step": 9,
+          "env_idx": 0,
+          "rewards": {
+            "red": 224.89998456835747,
+            "blue": -47.779999727383256
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 64,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 0
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "ac",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 224.89998456835747,
+          "baseline_reward": -47.779999727383256,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 0
+        },
+        {
+          "episode": 10,
+          "global_step": 10,
+          "env_idx": 0,
+          "rewards": {
+            "red": 220.4799826145172,
+            "blue": -51.88500000257045
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 64,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 0
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "ac",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 220.4799826145172,
+          "baseline_reward": -51.88500000257045,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 0
+        },
+        {
+          "episode": 11,
+          "global_step": 11,
+          "env_idx": 0,
+          "rewards": {
+            "red": 206.25998333096504,
+            "blue": -54.97999973874539
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 64,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 0
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "ac",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 206.25998333096504,
+          "baseline_reward": -54.97999973874539,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 0
+        },
+        {
+          "episode": 12,
+          "global_step": 12,
+          "env_idx": 0,
+          "rewards": {
+            "red": 229.79998786002398,
+            "blue": -47.78499988745898
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 64,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 0
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "ac",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 229.79998786002398,
+          "baseline_reward": -47.78499988745898,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 0
+        },
+        {
+          "episode": 13,
+          "global_step": 13,
+          "env_idx": 0,
+          "rewards": {
+            "red": 247.719982765615,
+            "blue": -48.72500032186508
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 64,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 0
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "ac",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 247.719982765615,
+          "baseline_reward": -48.72500032186508,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 0
+        },
+        {
+          "episode": 14,
+          "global_step": 14,
+          "env_idx": 0,
+          "rewards": {
+            "red": 251.25998570397496,
+            "blue": -50.05999937094748
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 64,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 0
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "ac",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 251.25998570397496,
+          "baseline_reward": -50.05999937094748,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 0
+        },
+        {
+          "episode": 15,
+          "global_step": 15,
+          "env_idx": 0,
+          "rewards": {
+            "red": 258.79998445510864,
+            "blue": -48.015000162646174
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 64,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 0
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "ac",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 258.79998445510864,
+          "baseline_reward": -48.015000162646174,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 0
+        },
+        {
+          "episode": 16,
+          "global_step": 16,
+          "env_idx": 0,
+          "rewards": {
+            "red": 263.0199795290828,
+            "blue": -46.95499989949167
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 64,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 0
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "ac",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 263.0199795290828,
+          "baseline_reward": -46.95499989949167,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 0
+        },
+        {
+          "episode": 17,
+          "global_step": 17,
+          "env_idx": 0,
+          "rewards": {
+            "red": 259.4599854648113,
+            "blue": -50.54499996267259
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 64,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 0
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "ac",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 259.4599854648113,
+          "baseline_reward": -50.54499996267259,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 0
+        },
+        {
+          "episode": 18,
+          "global_step": 18,
+          "env_idx": 0,
+          "rewards": {
+            "red": 206.6199820637703,
+            "blue": -51.31000057794154
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 64,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 0
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "ac",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 206.6199820637703,
+          "baseline_reward": -51.31000057794154,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 0
+        },
+        {
+          "episode": 19,
+          "global_step": 19,
+          "env_idx": 0,
+          "rewards": {
+            "red": 209.41998395696282,
+            "blue": -52.71999964863062
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 64,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 0
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "ac",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 209.41998395696282,
+          "baseline_reward": -52.71999964863062,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 0
+        },
+        {
+          "episode": 20,
+          "global_step": 20,
+          "env_idx": 0,
+          "rewards": {
+            "red": 248.87998578324914,
+            "blue": -53.99499978404492
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 64,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 0
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "ac",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 248.87998578324914,
+          "baseline_reward": -53.99499978404492,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 0
+        },
+        {
+          "episode": 21,
+          "global_step": 21,
+          "env_idx": 0,
+          "rewards": {
+            "red": 220.67998188734055,
+            "blue": -52.23499988485128
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 64,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 0
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "ac",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 220.67998188734055,
+          "baseline_reward": -52.23499988485128,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 0
+        },
+        {
+          "episode": 22,
+          "global_step": 22,
+          "env_idx": 0,
+          "rewards": {
+            "red": 263.37998424470425,
+            "blue": -49.47499967738986
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 64,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 0
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "ac",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 263.37998424470425,
+          "baseline_reward": -49.47499967738986,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 0
+        },
+        {
+          "episode": 23,
+          "global_step": 23,
+          "env_idx": 0,
+          "rewards": {
+            "red": 248.1399784386158,
+            "blue": -49.300000184215605
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 64,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 0
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "ac",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 248.1399784386158,
+          "baseline_reward": -49.300000184215605,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 0
+        },
+        {
+          "episode": 24,
+          "global_step": 24,
+          "env_idx": 0,
+          "rewards": {
+            "red": 219.9599860161543,
+            "blue": -50.8949995264411
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 64,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 0
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "ac",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 219.9599860161543,
+          "baseline_reward": -50.8949995264411,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 0
+        },
+        {
+          "episode": 25,
+          "global_step": 25,
+          "env_idx": 0,
+          "rewards": {
+            "red": 248.57998625934124,
+            "blue": -54.47500055562705
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 64,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 0
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "ac",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 248.57998625934124,
+          "baseline_reward": -54.47500055562705,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 0
+        }
+      ],
+      "assignments": {
+        "mfdsrq_blue_vs_baseline_red": {
+          "episodes": 25,
+          "mfdsrq_win_rate": 1.0,
+          "baseline_win_rate": 0.0,
+          "tie_rate": 0.0,
+          "mean_mfdsrq_reward": 184.80016960918903,
+          "mean_baseline_reward": -76.41419937487692,
+          "mean_mfdsrq_kills": 64.0,
+          "mean_baseline_kills": 0.04
+        },
+        "mfdsrq_red_vs_baseline_blue": {
+          "episodes": 25,
+          "mfdsrq_win_rate": 1.0,
+          "baseline_win_rate": 0.0,
+          "tie_rate": 0.0,
+          "mean_mfdsrq_reward": 231.20958442494273,
+          "mean_baseline_reward": -50.77819993462413,
+          "mean_mfdsrq_kills": 64.0,
+          "mean_baseline_kills": 0.0
+        }
+      },
+      "summary": {
+        "episodes": 50,
+        "mfdsrq_win_rate": 1.0,
+        "baseline_win_rate": 0.0,
+        "tie_rate": 0.0,
+        "mean_mfdsrq_reward": 208.0048770170659,
+        "mean_baseline_reward": -63.59619965475053,
+        "mean_mfdsrq_kills": 64.0,
+        "mean_baseline_kills": 0.02
+      }
+    },
+    "mfq": {
+      "baseline": "mfq",
+      "baseline_checkpoint": "/home/wowthecoder/SRE-DQN/discrete_action_space/mean_field_dsrq/runs/mfrl_baselines/mfq_battle_v4_seed42_26_06_03-03_00_45/models/main",
+      "checkpoint_dir": {
+        "main": "/home/wowthecoder/SRE-DQN/discrete_action_space/mean_field_dsrq/runs/mf_srq_torch_epsilon_training/eps_0_1/battle_v4/seed42/ckpt_main_best.pt",
+        "opponent": "/home/wowthecoder/SRE-DQN/discrete_action_space/mean_field_dsrq/runs/mf_srq_torch_epsilon_training/eps_0_1/battle_v4/seed42/ckpt_opponent_best.pt"
+      },
+      "num_episodes_per_assignment": 25,
+      "records": [
+        {
+          "episode": 1,
+          "global_step": 1,
+          "env_idx": 0,
+          "rewards": {
+            "red": 256.0749804675579,
+            "blue": 40.84999522008002
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 50,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 14
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "mfq",
+          "mfdsrq_win": 0,
+          "baseline_win": 1,
+          "mfdsrq_reward": 40.84999522008002,
+          "baseline_reward": 256.0749804675579,
+          "mfdsrq_kills": 14,
+          "baseline_kills": 64
+        },
+        {
+          "episode": 2,
+          "global_step": 2,
+          "env_idx": 0,
+          "rewards": {
+            "red": 318.73499120399356,
+            "blue": 48.5749946385622
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 51,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 13
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "mfq",
+          "mfdsrq_win": 0,
+          "baseline_win": 1,
+          "mfdsrq_reward": 48.5749946385622,
+          "baseline_reward": 318.73499120399356,
+          "mfdsrq_kills": 13,
+          "baseline_kills": 64
+        },
+        {
+          "episode": 3,
+          "global_step": 3,
+          "env_idx": 0,
+          "rewards": {
+            "red": 266.54998530074954,
+            "blue": 15.00999877974391
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 54,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 10
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "mfq",
+          "mfdsrq_win": 0,
+          "baseline_win": 1,
+          "mfdsrq_reward": 15.00999877974391,
+          "baseline_reward": 266.54998530074954,
+          "mfdsrq_kills": 10,
+          "baseline_kills": 64
+        },
+        {
+          "episode": 4,
+          "global_step": 4,
+          "env_idx": 0,
+          "rewards": {
+            "red": 247.16998026520014,
+            "blue": 48.16999686323106
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 50,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 14
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "mfq",
+          "mfdsrq_win": 0,
+          "baseline_win": 1,
+          "mfdsrq_reward": 48.16999686323106,
+          "baseline_reward": 247.16998026520014,
+          "mfdsrq_kills": 14,
+          "baseline_kills": 64
+        },
+        {
+          "episode": 5,
+          "global_step": 5,
+          "env_idx": 0,
+          "rewards": {
+            "red": 244.8749894425273,
+            "blue": 40.444993826560676
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 51,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 13
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "mfq",
+          "mfdsrq_win": 0,
+          "baseline_win": 1,
+          "mfdsrq_reward": 40.444993826560676,
+          "baseline_reward": 244.8749894425273,
+          "mfdsrq_kills": 13,
+          "baseline_kills": 64
+        },
+        {
+          "episode": 6,
+          "global_step": 6,
+          "env_idx": 0,
+          "rewards": {
+            "red": 228.99498751387,
+            "blue": 37.82499272376299
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 51,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 13
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "mfq",
+          "mfdsrq_win": 0,
+          "baseline_win": 1,
+          "mfdsrq_reward": 37.82499272376299,
+          "baseline_reward": 228.99498751387,
+          "mfdsrq_kills": 13,
+          "baseline_kills": 64
+        },
+        {
+          "episode": 7,
+          "global_step": 7,
+          "env_idx": 0,
+          "rewards": {
+            "red": 197.62998197972775,
+            "blue": 26.399997074157
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 53,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 11
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "mfq",
+          "mfdsrq_win": 0,
+          "baseline_win": 1,
+          "mfdsrq_reward": 26.399997074157,
+          "baseline_reward": 197.62998197972775,
+          "mfdsrq_kills": 11,
+          "baseline_kills": 64
+        },
+        {
+          "episode": 8,
+          "global_step": 8,
+          "env_idx": 0,
+          "rewards": {
+            "red": 324.28997775912285,
+            "blue": 16.37499729078263
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 56,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 8
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "mfq",
+          "mfdsrq_win": 0,
+          "baseline_win": 1,
+          "mfdsrq_reward": 16.37499729078263,
+          "baseline_reward": 324.28997775912285,
+          "mfdsrq_kills": 8,
+          "baseline_kills": 64
+        },
+        {
+          "episode": 9,
+          "global_step": 9,
+          "env_idx": 0,
+          "rewards": {
+            "red": 317.94498041272163,
+            "blue": 26.184993661940098
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 54,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 10
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "mfq",
+          "mfdsrq_win": 0,
+          "baseline_win": 1,
+          "mfdsrq_reward": 26.184993661940098,
+          "baseline_reward": 317.94498041272163,
+          "mfdsrq_kills": 10,
+          "baseline_kills": 64
+        },
+        {
+          "episode": 10,
+          "global_step": 10,
+          "env_idx": 0,
+          "rewards": {
+            "red": 243.00498048961163,
+            "blue": 28.39499542862177
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 53,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 11
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "mfq",
+          "mfdsrq_win": 0,
+          "baseline_win": 1,
+          "mfdsrq_reward": 28.39499542862177,
+          "baseline_reward": 243.00498048961163,
+          "mfdsrq_kills": 11,
+          "baseline_kills": 64
+        },
+        {
+          "episode": 11,
+          "global_step": 11,
+          "env_idx": 0,
+          "rewards": {
+            "red": 276.2349908351898,
+            "blue": 19.134995881468058
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 53,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 11
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "mfq",
+          "mfdsrq_win": 0,
+          "baseline_win": 1,
+          "mfdsrq_reward": 19.134995881468058,
+          "baseline_reward": 276.2349908351898,
+          "mfdsrq_kills": 11,
+          "baseline_kills": 64
+        },
+        {
+          "episode": 12,
+          "global_step": 12,
+          "env_idx": 0,
+          "rewards": {
+            "red": 213.08499459922314,
+            "blue": 48.514990449883044
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 49,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 15
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "mfq",
+          "mfdsrq_win": 0,
+          "baseline_win": 1,
+          "mfdsrq_reward": 48.514990449883044,
+          "baseline_reward": 213.08499459922314,
+          "mfdsrq_kills": 15,
+          "baseline_kills": 64
+        },
+        {
+          "episode": 13,
+          "global_step": 13,
+          "env_idx": 0,
+          "rewards": {
+            "red": 275.15498815849423,
+            "blue": 49.87999538611621
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 49,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 15
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "mfq",
+          "mfdsrq_win": 0,
+          "baseline_win": 1,
+          "mfdsrq_reward": 49.87999538611621,
+          "baseline_reward": 275.15498815849423,
+          "mfdsrq_kills": 15,
+          "baseline_kills": 64
+        },
+        {
+          "episode": 14,
+          "global_step": 14,
+          "env_idx": 0,
+          "rewards": {
+            "red": 316.05997939407825,
+            "blue": 37.764993995428085
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 52,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 12
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "mfq",
+          "mfdsrq_win": 0,
+          "baseline_win": 1,
+          "mfdsrq_reward": 37.764993995428085,
+          "baseline_reward": 316.05997939407825,
+          "mfdsrq_kills": 12,
+          "baseline_kills": 64
+        },
+        {
+          "episode": 15,
+          "global_step": 15,
+          "env_idx": 0,
+          "rewards": {
+            "red": 222.35499067604542,
+            "blue": 35.01499554421753
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 53,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 11
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "mfq",
+          "mfdsrq_win": 0,
+          "baseline_win": 1,
+          "mfdsrq_reward": 35.01499554421753,
+          "baseline_reward": 222.35499067604542,
+          "mfdsrq_kills": 11,
+          "baseline_kills": 64
+        },
+        {
+          "episode": 16,
+          "global_step": 16,
+          "env_idx": 0,
+          "rewards": {
+            "red": 315.4799818620086,
+            "blue": 24.309997158125043
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 54,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 10
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "mfq",
+          "mfdsrq_win": 0,
+          "baseline_win": 1,
+          "mfdsrq_reward": 24.309997158125043,
+          "baseline_reward": 315.4799818620086,
+          "mfdsrq_kills": 10,
+          "baseline_kills": 64
+        },
+        {
+          "episode": 17,
+          "global_step": 17,
+          "env_idx": 0,
+          "rewards": {
+            "red": 242.98998899012804,
+            "blue": 27.839994255453348
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 53,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 11
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "mfq",
+          "mfdsrq_win": 0,
+          "baseline_win": 1,
+          "mfdsrq_reward": 27.839994255453348,
+          "baseline_reward": 242.98998899012804,
+          "mfdsrq_kills": 11,
+          "baseline_kills": 64
+        },
+        {
+          "episode": 18,
+          "global_step": 18,
+          "env_idx": 0,
+          "rewards": {
+            "red": 212.02499220892787,
+            "blue": 25.819992535747588
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 53,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 11
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "mfq",
+          "mfdsrq_win": 0,
+          "baseline_win": 1,
+          "mfdsrq_reward": 25.819992535747588,
+          "baseline_reward": 212.02499220892787,
+          "mfdsrq_kills": 11,
+          "baseline_kills": 64
+        },
+        {
+          "episode": 19,
+          "global_step": 19,
+          "env_idx": 0,
+          "rewards": {
+            "red": 213.4099849909544,
+            "blue": 16.414995908737183
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 55,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 9
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "mfq",
+          "mfdsrq_win": 0,
+          "baseline_win": 1,
+          "mfdsrq_reward": 16.414995908737183,
+          "baseline_reward": 213.4099849909544,
+          "mfdsrq_kills": 9,
+          "baseline_kills": 64
+        },
+        {
+          "episode": 20,
+          "global_step": 20,
+          "env_idx": 0,
+          "rewards": {
+            "red": 186.38498796522617,
+            "blue": 24.609991477802396
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 53,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 11
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "mfq",
+          "mfdsrq_win": 0,
+          "baseline_win": 1,
+          "mfdsrq_reward": 24.609991477802396,
+          "baseline_reward": 186.38498796522617,
+          "mfdsrq_kills": 11,
+          "baseline_kills": 64
+        },
+        {
+          "episode": 21,
+          "global_step": 21,
+          "env_idx": 0,
+          "rewards": {
+            "red": 314.85999266430736,
+            "blue": 42.93499566055834
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 51,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 13
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "mfq",
+          "mfdsrq_win": 0,
+          "baseline_win": 1,
+          "mfdsrq_reward": 42.93499566055834,
+          "baseline_reward": 314.85999266430736,
+          "mfdsrq_kills": 13,
+          "baseline_kills": 64
+        },
+        {
+          "episode": 22,
+          "global_step": 22,
+          "env_idx": 0,
+          "rewards": {
+            "red": 258.0799886956811,
+            "blue": 39.9699959885329
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 51,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 13
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "mfq",
+          "mfdsrq_win": 0,
+          "baseline_win": 1,
+          "mfdsrq_reward": 39.9699959885329,
+          "baseline_reward": 258.0799886956811,
+          "mfdsrq_kills": 13,
+          "baseline_kills": 64
+        },
+        {
+          "episode": 23,
+          "global_step": 23,
+          "env_idx": 0,
+          "rewards": {
+            "red": 175.25999092683196,
+            "blue": 26.204996180720627
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 53,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 11
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "mfq",
+          "mfdsrq_win": 0,
+          "baseline_win": 1,
+          "mfdsrq_reward": 26.204996180720627,
+          "baseline_reward": 175.25999092683196,
+          "mfdsrq_kills": 11,
+          "baseline_kills": 64
+        },
+        {
+          "episode": 24,
+          "global_step": 24,
+          "env_idx": 0,
+          "rewards": {
+            "red": 311.27498972415924,
+            "blue": 33.82999405357987
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 53,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 11
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "mfq",
+          "mfdsrq_win": 0,
+          "baseline_win": 1,
+          "mfdsrq_reward": 33.82999405357987,
+          "baseline_reward": 311.27498972415924,
+          "mfdsrq_kills": 11,
+          "baseline_kills": 64
+        },
+        {
+          "episode": 25,
+          "global_step": 25,
+          "env_idx": 0,
+          "rewards": {
+            "red": 279.1799847558141,
+            "blue": 51.67998955398798
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 49,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 15
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_blue_vs_baseline_red",
+          "mfdsrq_team": "blue",
+          "baseline_team": "red",
+          "baseline": "mfq",
+          "mfdsrq_win": 0,
+          "baseline_win": 1,
+          "mfdsrq_reward": 51.67998955398798,
+          "baseline_reward": 279.1799847558141,
+          "mfdsrq_kills": 15,
+          "baseline_kills": 64
+        },
+        {
+          "episode": 1,
+          "global_step": 1,
+          "env_idx": 0,
+          "rewards": {
+            "red": 267.56998214125633,
+            "blue": 15.409992127679288
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 56,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 8
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "mfq",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 267.56998214125633,
+          "baseline_reward": 15.409992127679288,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 8
+        },
+        {
+          "episode": 2,
+          "global_step": 2,
+          "env_idx": 0,
+          "rewards": {
+            "red": 270.5199753791094,
+            "blue": 59.86499068327248
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 47,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 17
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "mfq",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 270.5199753791094,
+          "baseline_reward": 59.86499068327248,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 17
+        },
+        {
+          "episode": 3,
+          "global_step": 3,
+          "env_idx": 0,
+          "rewards": {
+            "red": 268.8799720555544,
+            "blue": 37.884989362210035
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 52,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 12
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "mfq",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 268.8799720555544,
+          "baseline_reward": 37.884989362210035,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 12
+        },
+        {
+          "episode": 4,
+          "global_step": 4,
+          "env_idx": 0,
+          "rewards": {
+            "red": 281.30997770279646,
+            "blue": 68.03998795803636
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 46,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 18
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "mfq",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 281.30997770279646,
+          "baseline_reward": 68.03998795803636,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 18
+        },
+        {
+          "episode": 5,
+          "global_step": 5,
+          "env_idx": 0,
+          "rewards": {
+            "red": 271.26998088043183,
+            "blue": 43.349991713650525
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 51,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 13
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "mfq",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 271.26998088043183,
+          "baseline_reward": 43.349991713650525,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 13
+        },
+        {
+          "episode": 6,
+          "global_step": 6,
+          "env_idx": 0,
+          "rewards": {
+            "red": 274.1599678583443,
+            "blue": 65.72498758509755
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 47,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 17
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "mfq",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 274.1599678583443,
+          "baseline_reward": 65.72498758509755,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 17
+        },
+        {
+          "episode": 7,
+          "global_step": 7,
+          "env_idx": 0,
+          "rewards": {
+            "red": 273.95497274398804,
+            "blue": 5.714996060356498
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 57,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 7
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "mfq",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 273.95497274398804,
+          "baseline_reward": 5.714996060356498,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 7
+        },
+        {
+          "episode": 8,
+          "global_step": 8,
+          "env_idx": 0,
+          "rewards": {
+            "red": 267.4599694982171,
+            "blue": 35.79499025363475
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 51,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 13
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "mfq",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 267.4599694982171,
+          "baseline_reward": 35.79499025363475,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 13
+        },
+        {
+          "episode": 9,
+          "global_step": 9,
+          "env_idx": 0,
+          "rewards": {
+            "red": 277.589982368052,
+            "blue": 11.819997425191104
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 56,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 8
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "mfq",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 277.589982368052,
+          "baseline_reward": 11.819997425191104,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 8
+        },
+        {
+          "episode": 10,
+          "global_step": 10,
+          "env_idx": 0,
+          "rewards": {
+            "red": 280.18498454988,
+            "blue": 57.6999886194244
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 49,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 15
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "mfq",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 280.18498454988,
+          "baseline_reward": 57.6999886194244,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 15
+        },
+        {
+          "episode": 11,
+          "global_step": 11,
+          "env_idx": 0,
+          "rewards": {
+            "red": 270.9999786838889,
+            "blue": 40.7249933546409
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 51,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 13
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "mfq",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 270.9999786838889,
+          "baseline_reward": 40.7249933546409,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 13
+        },
+        {
+          "episode": 12,
+          "global_step": 12,
+          "env_idx": 0,
+          "rewards": {
+            "red": 273.169978544116,
+            "blue": 58.71498959604651
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 47,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 17
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "mfq",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 273.169978544116,
+          "baseline_reward": 58.71498959604651,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 17
+        },
+        {
+          "episode": 13,
+          "global_step": 13,
+          "env_idx": 0,
+          "rewards": {
+            "red": 269.34497928619385,
+            "blue": 55.689988788217306
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 49,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 15
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "mfq",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 269.34497928619385,
+          "baseline_reward": 55.689988788217306,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 15
+        },
+        {
+          "episode": 14,
+          "global_step": 14,
+          "env_idx": 0,
+          "rewards": {
+            "red": 272.5949726700783,
+            "blue": 30.134992212988436
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 53,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 11
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "mfq",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 272.5949726700783,
+          "baseline_reward": 30.134992212988436,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 11
+        },
+        {
+          "episode": 15,
+          "global_step": 15,
+          "env_idx": 0,
+          "rewards": {
+            "red": 277.90997111424804,
+            "blue": 66.40498763974756
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 45,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 19
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "mfq",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 277.90997111424804,
+          "baseline_reward": 66.40498763974756,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 19
+        },
+        {
+          "episode": 16,
+          "global_step": 16,
+          "env_idx": 0,
+          "rewards": {
+            "red": 273.54498813301325,
+            "blue": 49.59998828731477
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 49,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 15
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "mfq",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 273.54498813301325,
+          "baseline_reward": 49.59998828731477,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 15
+        },
+        {
+          "episode": 17,
+          "global_step": 17,
+          "env_idx": 0,
+          "rewards": {
+            "red": 273.6099833063781,
+            "blue": 60.13999082893133
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 46,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 18
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "mfq",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 273.6099833063781,
+          "baseline_reward": 60.13999082893133,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 18
+        },
+        {
+          "episode": 18,
+          "global_step": 18,
+          "env_idx": 0,
+          "rewards": {
+            "red": 270.189980071038,
+            "blue": 59.994988361373544
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 48,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 16
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "mfq",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 270.189980071038,
+          "baseline_reward": 59.994988361373544,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 16
+        },
+        {
+          "episode": 19,
+          "global_step": 19,
+          "env_idx": 0,
+          "rewards": {
+            "red": 270.964976195246,
+            "blue": 45.869991252198815
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 49,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 15
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "mfq",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 270.964976195246,
+          "baseline_reward": 45.869991252198815,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 15
+        },
+        {
+          "episode": 20,
+          "global_step": 20,
+          "env_idx": 0,
+          "rewards": {
+            "red": 270.394980404526,
+            "blue": 1.5599969336763024
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 58,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 6
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "mfq",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 270.394980404526,
+          "baseline_reward": 1.5599969336763024,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 6
+        },
+        {
+          "episode": 21,
+          "global_step": 21,
+          "env_idx": 0,
+          "rewards": {
+            "red": 260.6399800032377,
+            "blue": 46.85999192669988
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 50,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 14
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "mfq",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 260.6399800032377,
+          "baseline_reward": 46.85999192669988,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 14
+        },
+        {
+          "episode": 22,
+          "global_step": 22,
+          "env_idx": 0,
+          "rewards": {
+            "red": 261.61997812241316,
+            "blue": 59.30998627282679
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 47,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 17
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "mfq",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 261.61997812241316,
+          "baseline_reward": 59.30998627282679,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 17
+        },
+        {
+          "episode": 23,
+          "global_step": 23,
+          "env_idx": 0,
+          "rewards": {
+            "red": 280.3549890704453,
+            "blue": 83.01498320885003
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 44,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 20
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "mfq",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 280.3549890704453,
+          "baseline_reward": 83.01498320885003,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 20
+        },
+        {
+          "episode": 24,
+          "global_step": 24,
+          "env_idx": 0,
+          "rewards": {
+            "red": 267.7449708189815,
+            "blue": 29.80999206751585
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 53,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 11
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "mfq",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 267.7449708189815,
+          "baseline_reward": 29.80999206751585,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 11
+        },
+        {
+          "episode": 25,
+          "global_step": 25,
+          "env_idx": 0,
+          "rewards": {
+            "red": 268.35997896641493,
+            "blue": 15.219993987120688
+          },
+          "initial_counts": {
+            "red": 64,
+            "blue": 64
+          },
+          "final_counts": {
+            "red": 55,
+            "blue": 0
+          },
+          "kills": {
+            "red": 64,
+            "blue": 9
+          },
+          "wins": {
+            "red": 1,
+            "blue": 0
+          },
+          "tie": 0,
+          "assignment": "mfdsrq_red_vs_baseline_blue",
+          "mfdsrq_team": "red",
+          "baseline_team": "blue",
+          "baseline": "mfq",
+          "mfdsrq_win": 1,
+          "baseline_win": 0,
+          "mfdsrq_reward": 268.35997896641493,
+          "baseline_reward": 15.219993987120688,
+          "mfdsrq_kills": 64,
+          "baseline_kills": 9
+        }
+      ],
+      "assignments": {
+        "mfdsrq_blue_vs_baseline_red": {
+          "episodes": 25,
+          "mfdsrq_win_rate": 0.0,
+          "baseline_win_rate": 1.0,
+          "tie_rate": 0.0,
+          "mean_mfdsrq_reward": 33.28619478151202,
+          "mean_baseline_reward": 258.2841864512861,
+          "mean_mfdsrq_kills": 11.84,
+          "mean_baseline_kills": 64.0
+        },
+        "mfdsrq_red_vs_baseline_blue": {
+          "episodes": 25,
+          "mfdsrq_win_rate": 1.0,
+          "baseline_win_rate": 0.0,
+          "tie_rate": 0.0,
+          "mean_mfdsrq_reward": 271.77377802271394,
+          "mean_baseline_reward": 44.17419066026807,
+          "mean_mfdsrq_kills": 64.0,
+          "mean_baseline_kills": 13.76
+        }
+      },
+      "summary": {
+        "episodes": 50,
+        "mfdsrq_win_rate": 0.5,
+        "baseline_win_rate": 0.5,
+        "tie_rate": 0.0,
+        "mean_mfdsrq_reward": 152.529986402113,
+        "mean_baseline_reward": 151.22918855577709,
+        "mean_mfdsrq_kills": 37.92,
+        "mean_baseline_kills": 38.88
+      }
+    }
+  }
+}

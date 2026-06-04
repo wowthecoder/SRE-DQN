@@ -1,14 +1,9 @@
-iteration: 5382
-total_loss: 1373.85705566
-value_loss: 689.96301270
-action_loss: 683.89404297
-best_loss: 851.27453613
-best_idx: 2381
+iteration: 5384
+total_loss: 1158.73632812
+value_loss: 579.71820068
+action_loss: 579.01812744
+best_loss: 847.51171875
+best_idx: 2383
 improvement_counter: 3001
-eval_reward_count: 5
-eval_rewards:
-  iteration: 1000 | eps_b: 0 | mean_reward: -1.51318109 | std_reward: 2.79840636 | agent_mean_rewards: [-1.452567, -1.345387, -1.601141, -1.605749, -1.561063]
-  iteration: 2000 | eps_b: 0 | mean_reward: -1.36832321 | std_reward: 2.77872920 | agent_mean_rewards: [-1.347428, -1.393876, -1.48781 , -1.300885, -1.311619]
-  iteration: 3000 | eps_b: 0 | mean_reward: -1.41094756 | std_reward: 2.83359051 | agent_mean_rewards: [-1.616543, -1.397213, -1.432219, -1.128538, -1.480226]
-  iteration: 4000 | eps_b: 0 | mean_reward: -1.36416256 | std_reward: 2.78006411 | agent_mean_rewards: [-1.197647, -1.461406, -1.295781, -1.393901, -1.472078]
-  iteration: 5000 | eps_b: 0 | mean_reward: -1.38226128 | std_reward: 2.95112062 | agent_mean_rewards: [-1.561749, -1.29148 , -1.350649, -1.372232, -1.335196]
+training_reward_count: 5385
+latest_training_reward: iteration: 5384 | eps_b: 0 | mean_reward: -2.38958907 | std_reward: 2.73125529 | agent_mean_rewards: [-2.24781 , -2.043684, -2.270517, -2.663492, -2.722442]

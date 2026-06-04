@@ -1421,14 +1421,14 @@ def load_deepsrq_path_mcp_pool_policy(
         repo_root=repo_root,
     )
     checkpoints = [
-        run_dir / "shared_deepsrq_final.pt",
         run_dir / "shared_deepsrq_best.pt",
+        run_dir / "shared_deepsrq_final.pt",
     ]
     checkpoints = [path for path in checkpoints if path.exists()]
     if not checkpoints:
         raise FileNotFoundError(
             f"Deep SRQ checkpoint not found under {run_dir}. "
-            "Expected shared_deepsrq_final.pt or shared_deepsrq_best.pt."
+            "Expected shared_deepsrq_best.pt or shared_deepsrq_final.pt."
         )
     workers = int(
         sre_solver_workers
@@ -1542,10 +1542,10 @@ def load_deepsrq_path_mcp_pool_policy(
             continue
         agent = candidate_agent
         selected_config_overrides = config_overrides
-        if checkpoint.name != "shared_deepsrq_final.pt":
+        if checkpoint.name != "shared_deepsrq_best.pt":
             print(
                 f"Deep SRQ eval loaded {checkpoint.name} for {scenario.key} "
-                f"epsilon={epsilon:g}; final checkpoint was unavailable or incompatible."
+                f"epsilon={epsilon:g}; best checkpoint was unavailable or incompatible."
             )
         break
     if agent is None:
@@ -1602,14 +1602,14 @@ def load_deepsrq_solver_policy(
         repo_root=repo_root,
     )
     checkpoints = [
-        run_dir / "shared_deepsrq_final.pt",
         run_dir / "shared_deepsrq_best.pt",
+        run_dir / "shared_deepsrq_final.pt",
     ]
     checkpoints = [path for path in checkpoints if path.exists()]
     if not checkpoints:
         raise FileNotFoundError(
             f"Deep SRQ checkpoint not found under {run_dir}. "
-            "Expected shared_deepsrq_final.pt or shared_deepsrq_best.pt."
+            "Expected shared_deepsrq_best.pt or shared_deepsrq_final.pt."
         )
 
     current_hp = deep_srq_lbf_hyperparams(
@@ -1707,10 +1707,10 @@ def load_deepsrq_solver_policy(
             continue
         agent = candidate_agent
         selected_config_overrides = config_overrides
-        if checkpoint.name != "shared_deepsrq_final.pt":
+        if checkpoint.name != "shared_deepsrq_best.pt":
             print(
                 f"Deep SRQ eval loaded {checkpoint.name} for {scenario.key} "
-                f"epsilon={epsilon:g}; final checkpoint was unavailable or incompatible."
+                f"epsilon={epsilon:g}; best checkpoint was unavailable or incompatible."
             )
         break
     if agent is None:
