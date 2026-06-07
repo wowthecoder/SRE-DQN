@@ -1,4 +1,4 @@
-"""Tests for the solver-free mean-field SRQ implementation."""
+"""Tests for the torch-only mean-field SRQ implementation."""
 
 import sys
 from pathlib import Path
@@ -14,91 +14,36 @@ for p in [str(_ROOT), str(_DISCRETE)]:
         sys.path.insert(0, p)
 
 from mean_field_dsrq.magent_env_wrapper import MAgentMFWrapper  # noqa: E402
-from mean_field_dsrq.solver_free_mean_field_dsrq import (  # noqa: E402
+from mean_field_dsrq.torch_robust_mean_field_dsrq import (  # noqa: E402
+    MeanFieldReplayBuffer,
     PairwiseMeanFieldQNetwork,
-    RobustMeanFieldResult,
-    RobustMeanFieldSreOperator,
-    SolverFreeMFDsrqAgent,
-    _tv_worst_case_mean,
-    _tv_worst_case_value,
+    TorchRobustMFDsrqAgent,
 )
 from mean_field_dsrq.train_mf_dsrq import (  # noqa: E402
     conditioning_group_idx,
     make_mfdsrq_agent,
+    normalize_training_config,
     resolve_mean_field_source,
 )
-from scipy.optimize import linprog  # noqa: E402
 
 
-def test_robust_operator_epsilon_zero_matches_mean_field_greedy_value():
-    matrix = np.array([[1.0, 0.0], [0.0, 2.0]], dtype=np.float64)
-    mean = np.array([0.25, 0.75], dtype=np.float64)
-    op = RobustMeanFieldSreOperator(num_actions=2, epsilon=0.0)
-
-    result = op.solve(matrix, mean)
-
-    assert result.success is True
-    assert result.value == pytest.approx(1.5)
-    np.testing.assert_allclose(result.policy, [0.0, 1.0], atol=1e-7)
-    np.testing.assert_allclose(result.worst_mean, mean, atol=1e-7)
-
-
-def test_robust_operator_value_is_nonincreasing_with_epsilon():
-    matrix = np.array([[3.0, 0.0], [1.0, 1.0]], dtype=np.float64)
-    mean = np.array([1.0, 0.0], dtype=np.float64)
-
-    nominal = RobustMeanFieldSreOperator(num_actions=2, epsilon=0.0).solve(matrix, mean)
-    robust = RobustMeanFieldSreOperator(num_actions=2, epsilon=1.0).solve(matrix, mean)
-
-    assert robust.value <= nominal.value + 1e-7
-    assert robust.value == pytest.approx(1.0)
-
-
-def test_robust_operator_matches_bruteforce_grid_for_two_actions():
-    matrix = np.array([[2.0, -1.0], [0.5, 1.2]], dtype=np.float64)
-    mean = np.array([0.7, 0.3], dtype=np.float64)
-    epsilon = 0.25
-    op = RobustMeanFieldSreOperator(num_actions=2, epsilon=epsilon)
-
-    result = op.solve(matrix, mean)
-
-    grid_values = []
-    for p0 in np.linspace(0.0, 1.0, 2001):
-        policy = np.array([p0, 1.0 - p0], dtype=np.float64)
-        values = policy @ matrix
-        grid_values.append(_tv_worst_case_value(mean, values, epsilon))
-    assert result.value == pytest.approx(max(grid_values), abs=2e-3)
-
-
-def test_tv_worst_case_mean_matches_transport_lp():
-    rng = np.random.default_rng(123)
-    for _ in range(20):
-        mean = rng.dirichlet(np.ones(5))
-        values = rng.normal(size=5)
-        epsilon = float(rng.uniform(0.0, 1.0))
-
-        actual = _tv_worst_case_mean(mean, values, epsilon)
-
-        cost = np.ones((5, 5), dtype=np.float64)
-        np.fill_diagonal(cost, 0.0)
-        c = np.tile(values.reshape(1, -1), (5, 1)).reshape(-1)
-        a_eq = np.zeros((5, 25), dtype=np.float64)
-        for b in range(5):
-            a_eq[b, b * 5 : (b + 1) * 5] = 1.0
-        result = linprog(
-            c,
-            A_ub=cost.reshape(1, -1),
-            b_ub=np.array([epsilon], dtype=np.float64),
-            A_eq=a_eq,
-            b_eq=mean,
-            bounds=[(0.0, None)] * 25,
-            method="highs",
-        )
-        assert result.success
-        expected = result.x.reshape(5, 5).sum(axis=0)
-
-        assert float(actual @ values) == pytest.approx(float(expected @ values), abs=1e-6)
-        np.testing.assert_allclose(actual.sum(), 1.0, atol=1e-7)
+def _make_agent(**overrides):
+    defaults = dict(
+        type_id=0,
+        obs_channels=2,
+        obs_height=3,
+        obs_width=3,
+        n_own_actions=4,
+        n_nbr_actions=4,
+        batch_size=4,
+        buffer_capacity=32,
+        learning_starts=4,
+        train_every=1,
+        epsilon_explore=0.0,
+        device=torch.device("cpu"),
+    )
+    defaults.update(overrides)
+    return TorchRobustMFDsrqAgent(**defaults)
 
 
 def test_pairwise_network_forward_is_mean_weighted_payoff_sum():
@@ -126,78 +71,6 @@ def test_pairwise_network_conditions_payoffs_on_feature_vector():
 
     assert payoff.shape == (2, 3, 4)
     assert not torch.allclose(payoff[0], payoff[1])
-
-
-class FakeRobustOperator:
-    def __init__(self, policy):
-        self.policy = np.asarray(policy, dtype=np.float32)
-        self.calls = 0
-
-    def solve(self, payoff_matrix, mean_action, epsilon=None):
-        del payoff_matrix, mean_action, epsilon
-        self.calls += 1
-        return RobustMeanFieldResult(
-            policy=self.policy,
-            value=0.5,
-            worst_mean=np.full(self.policy.size, 1.0 / self.policy.size, dtype=np.float32),
-            lambda_value=0.0,
-            success=True,
-        )
-
-    def worst_case_mean(self, values, mean_action, epsilon=None):
-        del values, epsilon
-        return np.asarray(mean_action, dtype=np.float32)
-
-
-def _make_agent(**overrides):
-    defaults = dict(
-        type_id=0,
-        obs_channels=2,
-        obs_height=3,
-        obs_width=3,
-        n_own_actions=4,
-        n_nbr_actions=4,
-        batch_size=4,
-        buffer_capacity=32,
-        learning_starts=4,
-        train_every=1,
-        epsilon_explore=0.0,
-        device=torch.device("cpu"),
-    )
-    defaults.update(overrides)
-    return SolverFreeMFDsrqAgent(**defaults)
-
-
-def test_action_selection_uses_solver_free_robust_policy():
-    agent = _make_agent()
-    agent.robust_operator = FakeRobustOperator([0.0, 0.0, 1.0, 0.0])
-    obs = np.random.randn(6, 2, 3, 3).astype(np.float32)
-    mean = np.full((6, 4), 0.25, dtype=np.float32)
-
-    actions = agent.act_batch(obs, mean)
-
-    assert actions.tolist() == [2] * 6
-    assert agent.robust_operator.calls == 6
-    assert not hasattr(agent, "sre_solver")
-
-
-def test_train_step_updates_from_replay_without_path_solver():
-    torch.manual_seed(1)
-    np.random.seed(1)
-    agent = _make_agent()
-    before = [p.detach().clone() for p in agent.q_net.parameters()]
-    mean = np.full(4, 0.25, dtype=np.float32)
-
-    for i in range(6):
-        obs = np.random.randn(2, 3, 3).astype(np.float32)
-        next_obs = np.random.randn(2, 3, 3).astype(np.float32)
-        agent.push(obs, i % 4, float(i), next_obs, mean, mean, done=False)
-
-    loss = agent.train_step()
-
-    assert isinstance(loss, float)
-    after = list(agent.q_net.parameters())
-    assert any(not torch.allclose(old, new) for old, new in zip(before, after))
 
 
 def test_replay_buffer_samples_feature_vectors_for_training():
@@ -230,7 +103,7 @@ def test_replay_buffer_samples_feature_vectors_for_training():
 
 
 def test_replay_buffer_owns_pushed_arrays():
-    agent = _make_agent(feature_dim=3)
+    buffer = MeanFieldReplayBuffer(capacity=4)
     obs = np.arange(18, dtype=np.float32).reshape(2, 3, 3)
     next_obs = obs + 100.0
     mean = np.array([0.1, 0.2, 0.3, 0.4], dtype=np.float32)
@@ -242,7 +115,7 @@ def test_replay_buffer_owns_pushed_arrays():
         for value in (obs, feature, next_obs, next_feature, mean, next_mean)
     )
 
-    agent.push(
+    buffer.push(
         obs,
         1,
         0.5,
@@ -256,7 +129,7 @@ def test_replay_buffer_owns_pushed_arrays():
     for value in (obs, next_obs, mean, next_mean, feature, next_feature):
         value.fill(-999.0)
 
-    stored = agent.buffer.buffer[0]
+    stored = buffer.buffer[0]
 
     np.testing.assert_allclose(stored[0], expected[0])
     np.testing.assert_allclose(stored[1], expected[1])
@@ -267,7 +140,7 @@ def test_replay_buffer_owns_pushed_arrays():
 
 
 def test_checkpoint_round_trip(tmp_path):
-    agent = _make_agent()
+    agent = _make_agent(robust_policy_temperature=0.25)
     ckpt = tmp_path / "agent.pt"
     agent.epsilon_robust = 0.33
     agent.epsilon_explore = 0.12
@@ -278,11 +151,12 @@ def test_checkpoint_round_trip(tmp_path):
 
     assert loaded.epsilon_robust == pytest.approx(0.33)
     assert loaded.epsilon_explore == pytest.approx(0.12)
+    assert loaded.robust_policy_temperature == pytest.approx(0.25)
     for p_saved, p_loaded in zip(agent.q_net.parameters(), loaded.q_net.parameters()):
         torch.testing.assert_close(p_saved, p_loaded)
 
 
-def test_training_factory_defaults_to_solver_free_agent():
+def test_training_factory_defaults_to_torch_agent():
     cfg = {
         "type_prefixes": {"red": "red_"},
         "epsilon_robust_start": 0.1,
@@ -296,8 +170,63 @@ def test_training_factory_defaults_to_solver_free_agent():
         device=torch.device("cpu"),
     )
 
-    assert isinstance(agent, SolverFreeMFDsrqAgent)
-    assert not hasattr(agent, "sre_solver")
+    assert isinstance(agent, TorchRobustMFDsrqAgent)
+    assert agent.algorithm_name == "mf_srq_torch"
+
+
+def test_training_factory_rejects_deleted_algorithms():
+    cfg = {
+        "algorithm": "mf_srq_lp",
+        "type_prefixes": {"red": "red_"},
+        "epsilon_robust_start": 0.1,
+    }
+    with pytest.raises(ValueError, match="mf_srq_torch"):
+        make_mfdsrq_agent(
+            cfg,
+            type_id=0,
+            obs_shape=(2, 3, 3),
+            n_own_actions=4,
+            n_nbr_actions=4,
+            device=torch.device("cpu"),
+        )
+
+
+def test_normalize_config_uses_constant_epsilon_when_end_missing():
+    cfg = normalize_training_config(
+        {
+            "algorithm": "mf_srq_torch",
+            "env_name": "battle_v4",
+            "epsilon_robust_start": 0.1,
+        },
+        derive_schedule_output_dir=True,
+    )
+
+    assert cfg["epsilon_robust_end"] == pytest.approx(0.1)
+    assert cfg["output_dir"].endswith("mf_srq_torch_epsilon_training/eps_0_1")
+
+
+def test_normalize_config_derives_decay_and_ramp_output_dirs():
+    decay = normalize_training_config(
+        {
+            "algorithm": "mf_srq_torch",
+            "env_name": "battle_v4",
+            "epsilon_robust_start": 0.5,
+            "epsilon_robust_end": 0.0,
+        },
+        derive_schedule_output_dir=True,
+    )
+    ramp = normalize_training_config(
+        {
+            "algorithm": "mf_srq_torch",
+            "env_name": "battle_v4",
+            "epsilon_robust_start": 0.01,
+            "epsilon_robust_end": 1.0,
+        },
+        derive_schedule_output_dir=True,
+    )
+
+    assert decay["output_dir"].endswith("mf_srq_torch_epsilon_decay_to_zero/start_0_5_to_0")
+    assert ramp["output_dir"].endswith("mf_srq_torch_epsilon_ramp_up/start_0_01_to_1")
 
 
 def test_mean_field_source_defaults_to_opponent_conditioning():

@@ -3,7 +3,7 @@
 Usage:
     python -m discrete_action_space.mean_field_dsrq.eval_mf_dsrq \
         --config discrete_action_space/mean_field_dsrq/configs/battle_v4.yaml \
-        --checkpoint_dir discrete_action_space/mean_field_dsrq/runs/battle_v4/mf_srq_lp_seed42 \
+        --checkpoint_dir discrete_action_space/mean_field_dsrq/runs/mf_srq_torch_epsilon_training/eps_0_1/battle_v4/seed42 \
         --num_episodes 100 \
         --obs_noise_sigmas 0,0.05,0.10,0.20
 """

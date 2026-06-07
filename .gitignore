@@ -39,3 +39,4 @@ relevant_papers/
 *.pt
 *.th
 *.pyc
+baseline_only_tournament.json

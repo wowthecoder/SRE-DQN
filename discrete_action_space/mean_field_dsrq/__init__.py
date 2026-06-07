@@ -1,25 +1,17 @@
-from .solver_free_mean_field_dsrq import (
-    PairwiseMeanFieldQNetwork,
-    RobustMeanFieldResult,
-    RobustMeanFieldSreOperator,
-    SolverFreeMFDsrqAgent,
-    SolverFreeMFReplayBuffer,
-)
 from .torch_robust_mean_field_dsrq import (
+    MeanFieldReplayBuffer,
+    PairwiseMeanFieldQNetwork,
     TorchRobustActionValueOperator,
     TorchRobustMFDsrqAgent,
     torch_tv_worst_case_values,
 )
 
-MFDsrqAgent = SolverFreeMFDsrqAgent
+MFDsrqAgent = TorchRobustMFDsrqAgent
 
 __all__ = [
     "MFDsrqAgent",
+    "MeanFieldReplayBuffer",
     "PairwiseMeanFieldQNetwork",
-    "RobustMeanFieldResult",
-    "RobustMeanFieldSreOperator",
-    "SolverFreeMFDsrqAgent",
-    "SolverFreeMFReplayBuffer",
     "TorchRobustActionValueOperator",
     "TorchRobustMFDsrqAgent",
     "torch_tv_worst_case_values",

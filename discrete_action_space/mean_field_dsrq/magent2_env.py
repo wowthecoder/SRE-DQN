@@ -20,6 +20,7 @@ DEFAULT_TASK_CONFIG: dict[str, Any] = {
     "dead_penalty": -0.1,
     "attack_penalty": -0.1,
     "attack_opponent_reward": 0.2,
+    "randomize_handles_on_reset": True,
 }
 
 RUNS_DIR = Path(__file__).resolve().parent / "runs"
@@ -44,6 +45,7 @@ class LowLevelBattleEnv:
 
         cfg = {**DEFAULT_TASK_CONFIG, **task_config}
         self.max_steps = int(cfg["max_cycles"])
+        self.randomize_handles_on_reset = bool(cfg.get("randomize_handles_on_reset", False))
         self.env = battle_v4.parallel_env(
             map_size=int(cfg["map_size"]),
             max_cycles=self.max_steps,
@@ -56,10 +58,20 @@ class LowLevelBattleEnv:
             extra_features=bool(cfg.get("extra_features", True)),
         )
         self.grid = self.env.env
-        self.handles = self.grid.get_handles()
+        self._base_handles = list(self.grid.get_handles())
+        self.handles = list(self._base_handles)
+        self.handle_order_indices = tuple(range(len(self.handles)))
+
+    def _set_handle_order(self):
+        order = list(range(len(self._base_handles)))
+        if self.randomize_handles_on_reset and len(order) == 2 and np.random.randint(2):
+            order.reverse()
+        self.handle_order_indices = tuple(int(i) for i in order)
+        self.handles = [self._base_handles[i] for i in order]
 
     def reset(self):
         self.env.reset()
+        self._set_handle_order()
 
     def meta(self) -> LowLevelBattleMeta:
         return LowLevelBattleMeta(

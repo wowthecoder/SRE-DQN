@@ -13,12 +13,39 @@ for p in [str(_ROOT), str(_DISCRETE)]:
     if p not in sys.path:
         sys.path.insert(0, p)
 
-from mean_field_dsrq.solver_free_mean_field_dsrq import _tv_worst_case_value  # noqa: E402
 from mean_field_dsrq.torch_robust_mean_field_dsrq import (  # noqa: E402
     TorchRobustMFDsrqAgent,
     torch_tv_worst_case_values,
 )
 from mean_field_dsrq.train_mf_dsrq import make_mfdsrq_agent  # noqa: E402
+
+
+def _numpy_tv_worst_case_value(mean, values, epsilon):
+    q = np.asarray(mean, dtype=np.float64).copy()
+    q = np.clip(q, 0.0, None)
+    q = q / q.sum() if q.sum() > 0 else np.full_like(q, 1.0 / q.size)
+    v = np.asarray(values, dtype=np.float64)
+    budget = float(np.clip(epsilon, 0.0, 1.0))
+    high_order = np.argsort(-v)
+    low_order = np.argsort(v)
+    high_pos = 0
+    low_pos = 0
+    while budget > 1e-12 and high_pos < q.size and low_pos < q.size:
+        hi = int(high_order[high_pos])
+        lo = int(low_order[low_pos])
+        if v[hi] <= v[lo] + 1e-12:
+            break
+        movable = min(q[hi], 1.0 - q[lo], budget)
+        if movable <= 1e-12:
+            high_pos += int(q[hi] <= 1e-12)
+            low_pos += int(q[lo] >= 1.0 - 1e-12)
+            continue
+        q[hi] -= movable
+        q[lo] += movable
+        budget -= movable
+        high_pos += int(q[hi] <= 1e-12)
+        low_pos += int(q[lo] >= 1.0 - 1e-12)
+    return float(q @ v)
 
 
 def _make_torch_agent(**overrides):
@@ -57,7 +84,7 @@ def test_torch_tv_worst_case_values_match_numpy_scalar_operator():
     expected = np.empty((3, 4), dtype=np.float32)
     for batch_idx in range(3):
         for action_idx in range(4):
-            expected[batch_idx, action_idx] = _tv_worst_case_value(
+            expected[batch_idx, action_idx] = _numpy_tv_worst_case_value(
                 mean[batch_idx],
                 payoff[batch_idx, action_idx],
                 epsilon,
@@ -257,4 +284,3 @@ def test_training_factory_selects_torch_robust_agent():
     assert isinstance(agent, TorchRobustMFDsrqAgent)
     assert agent.algorithm_name == "mf_srq_torch"
     assert agent.feature_dim == 3
-    assert not hasattr(agent, "sre_solver")

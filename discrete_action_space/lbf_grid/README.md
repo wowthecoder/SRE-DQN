@@ -402,8 +402,6 @@ deviation.
 ## EPyMARL Baselines
 
 `lbf_epymarl_baselines.ipynb` runs:
-
-- Random policy, locally.
 - IQL, IPPO, MAPPO, and MAA2C through an external EPyMARL checkout.
 
 The notebook registers three local Gymnasium IDs for the requested scenarios:

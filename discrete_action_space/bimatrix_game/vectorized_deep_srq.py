@@ -126,11 +126,13 @@ def train_vectorized_deep_srq_experiment(
     obs_dim = env.reset().shape[1]
     num_actions = len(env.action_space)
     pairing = ("deep_srq", "deep_srq")
-    run_name = (
-        f"vectorized_envs{num_envs}_eps{epsilon_robust_initial:g}_{epsilon_schedule}"
-    )
     if run_name_suffix:
-        run_name = f"{run_name}__{run_name_suffix}"
+        run_name = (
+            f"vectorized_envs{num_envs}_eps{epsilon_robust_initial:g}_{epsilon_schedule}"
+        )
+        run_name = f"{run_name}_{run_name_suffix}"
+    else:
+        run_name = f"{epsilon_schedule}_eps{epsilon_robust_initial:g}_{seed}"
     run_dir = Path(output_root) / scenario_key / run_name
     run_dir.mkdir(parents=True, exist_ok=True)
 

@@ -21,10 +21,10 @@ import yaml
 _THIS_DIR = Path(__file__).resolve().parent
 _DISCRETE_DIR = _THIS_DIR.parent
 _DEFAULT_RUNS_DIR = _THIS_DIR / "runs"
+_DEFAULT_ALGORITHM = "mf_srq_torch"
 if str(_DISCRETE_DIR) not in sys.path:
     sys.path.insert(0, str(_DISCRETE_DIR))
 
-from mean_field_dsrq.solver_free_mean_field_dsrq import SolverFreeMFDsrqAgent
 from mean_field_dsrq.torch_robust_mean_field_dsrq import TorchRobustMFDsrqAgent
 from mean_field_dsrq.magent2_env import (
     DEFAULT_TASK_CONFIG,
@@ -50,8 +50,76 @@ def _load_config(path: str) -> dict:
         return yaml.safe_load(f)
 
 
+def _coerce_cli_value(value: str):
+    lowered = value.strip().lower()
+    if lowered in {"none", "null"}:
+        return None
+    if lowered in {"true", "false"}:
+        return lowered == "true"
+    try:
+        return int(value)
+    except ValueError:
+        try:
+            return float(value)
+        except ValueError:
+            return value
+
+
 def _linear_schedule(start, end, fraction):
     return start + (end - start) * min(max(fraction, 0.0), 1.0)
+
+
+def _epsilon_value_slug(value: float) -> str:
+    return f"{float(value):g}".replace(".", "_").replace("-", "neg_")
+
+
+def _epsilon_slug(epsilon: float) -> str:
+    return f"eps_{_epsilon_value_slug(epsilon)}"
+
+
+def _schedule_slug(start: float, end: float) -> str:
+    return f"start_{_epsilon_value_slug(start)}_to_{_epsilon_value_slug(end)}"
+
+
+def _validate_algorithm(cfg: dict) -> str:
+    algorithm = str(cfg.get("algorithm", _DEFAULT_ALGORITHM)).lower()
+    if algorithm != _DEFAULT_ALGORITHM:
+        raise ValueError(
+            "mean-field DSRQ now supports only algorithm='mf_srq_torch'; "
+            f"got {cfg.get('algorithm')!r}."
+        )
+    cfg["algorithm"] = _DEFAULT_ALGORITHM
+    return _DEFAULT_ALGORITHM
+
+
+def normalize_training_config(
+    cfg: dict,
+    *,
+    derive_schedule_output_dir: bool = False,
+) -> dict:
+    """Return a torch-only training config with normalized epsilon schedule fields."""
+    cfg = dict(cfg)
+    _validate_algorithm(cfg)
+    if "epsilon_robust_start" not in cfg or cfg.get("epsilon_robust_start") is None:
+        cfg["epsilon_robust_start"] = 0.10
+    eps_start = float(cfg["epsilon_robust_start"])
+    if cfg.get("epsilon_robust_end") is None:
+        cfg["epsilon_robust_end"] = eps_start
+    eps_end = float(cfg["epsilon_robust_end"])
+    cfg["epsilon_robust_start"] = eps_start
+    cfg["epsilon_robust_end"] = eps_end
+    cfg.setdefault("epsilon_robust_decay_frac", 1.0)
+    cfg.setdefault("env_name", "battle_v4")
+
+    if derive_schedule_output_dir:
+        if eps_start == eps_end:
+            output_root = _DEFAULT_RUNS_DIR / "mf_srq_torch_epsilon_training" / _epsilon_slug(eps_start)
+        elif eps_end < eps_start:
+            output_root = _DEFAULT_RUNS_DIR / "mf_srq_torch_epsilon_decay_to_zero" / _schedule_slug(eps_start, eps_end)
+        else:
+            output_root = _DEFAULT_RUNS_DIR / "mf_srq_torch_epsilon_ramp_up" / _schedule_slug(eps_start, eps_end)
+        cfg["output_dir"] = str(output_root)
+    return cfg
 
 
 def _reference_explore_schedule(cfg: dict, fraction: float) -> float:
@@ -247,10 +315,6 @@ def _train_main_agent(agent, max_batches: int | None) -> float | None:
     return float(np.mean(losses)) if losses else None
 
 
-def mfdsrq_algorithm_name(cfg: dict) -> str:
-    return str(cfg.get("algorithm", "mf_srq_lp")).lower()
-
-
 def resolve_mean_field_source(cfg: dict) -> str:
     mean_field_source = str(cfg.get("mean_field_source", "opponent")).lower()
     if mean_field_source not in {"opponent", "same_team", "self"}:
@@ -278,7 +342,8 @@ def make_mfdsrq_agent(
     feature_dim: int = 0,
 ):
     C, H, W = obs_shape
-    common = dict(
+    _validate_algorithm(cfg)
+    return TorchRobustMFDsrqAgent(
         type_id=int(type_id),
         obs_channels=C,
         obs_height=H,
@@ -297,34 +362,12 @@ def make_mfdsrq_agent(
         grad_clip=cfg.get("grad_clip", 10.0),
         epsilon_explore=cfg.get("epsilon_explore_start", 1.0),
         device=device,
-    )
-    algorithm = mfdsrq_algorithm_name(cfg)
-    if algorithm in {"mf_srq_lp", "solver_free_mf_srq", "solver_free_mfdsrq"}:
-        return SolverFreeMFDsrqAgent(
-            **common,
-            robust_distance=cfg.get("robust_distance", "tv"),
-            robust_lp_fallback=cfg.get("robust_lp_fallback", "greedy_tv"),
-            robust_policy_cache_enabled=cfg.get("robust_policy_cache_enabled", True),
-            robust_policy_cache_size=cfg.get("robust_policy_cache_size", 4096),
-            robust_policy_cache_round_digits=cfg.get("robust_policy_cache_round_digits", 6),
-        )
-    if algorithm in {"mf_srq_torch", "torch_mf_srq", "torch_robust_mfdsrq"}:
-        return TorchRobustMFDsrqAgent(
-            **common,
-            robust_distance=cfg.get("robust_distance", "tv"),
-            robust_lp_fallback=cfg.get("robust_lp_fallback", "greedy_tv"),
-            robust_policy_cache_enabled=False,
-            robust_policy_cache_size=0,
-            robust_policy_cache_round_digits=cfg.get("robust_policy_cache_round_digits", 6),
-            robust_policy_temperature=cfg.get("robust_policy_temperature", 0.1),
-        )
-    raise ValueError(
-        "algorithm must be 'mf_srq_lp' or 'mf_srq_torch', "
-        f"got {cfg.get('algorithm')!r}."
+        robust_policy_temperature=cfg.get("robust_policy_temperature", 0.1),
     )
 
 
 def train(cfg: dict):
+    cfg = normalize_training_config(cfg)
     seed = cfg.get("seed", 42)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -340,6 +383,9 @@ def train(cfg: dict):
     num_envs = max(int(cfg.get("num_envs", 16)), 1)
     target_episodes = int(cfg.get("target_episodes", 2000))
     task_config = {**DEFAULT_TASK_CONFIG, **cfg}
+    task_config["randomize_handles_on_reset"] = bool(
+        cfg.get("randomize_handles_on_reset", True)
+    )
     max_steps = int(task_config["max_cycles"])
     envs = [LowLevelBattleEnv(task_config) for _ in range(num_envs)]
     meta = envs[0].meta()
@@ -368,16 +414,16 @@ def train(cfg: dict):
         ),
     }
 
-    eps_robust_start = cfg.get("epsilon_robust_start", 0.10)
-    eps_robust_end = cfg.get("epsilon_robust_end", 0.02)
+    eps_robust_start = cfg["epsilon_robust_start"]
+    eps_robust_end = cfg["epsilon_robust_end"]
     eps_robust_decay_frac = cfg.get("epsilon_robust_decay_frac", 1.0)
     self_play_tau = float(cfg.get("self_play_tau", 0.01))
-    save_every = int(cfg.get("save_every", 20))
+    save_every = int(cfg.get("save_every", 400))
     max_train_batches_per_update = cfg.get("max_train_batches_per_update")
     if max_train_batches_per_update is not None:
         max_train_batches_per_update = int(max_train_batches_per_update)
 
-    algorithm = mfdsrq_algorithm_name(cfg)
+    algorithm = _validate_algorithm(cfg)
     run_dir = Path(cfg.get("output_dir", _DEFAULT_RUNS_DIR)) / cfg["env_name"] / f"seed{seed}"
     run_dir.mkdir(parents=True, exist_ok=True)
     with open(run_dir / "config.json", "w") as f:
@@ -573,6 +619,7 @@ def train(cfg: dict):
                         record["env_idx"] = env_idx
                         record["steps"] = step_ct[env_idx]
                         record["env_steps"] = int(env_steps)
+                        record["handle_order_indices"] = list(env.handle_order_indices)
                         records.append(record)
                         if progress_bar is not None:
                             progress_bar.update(1)
@@ -698,37 +745,93 @@ def n_nbr_t_default(n_own: dict, type_name: str, cfg: dict) -> int:
     return int(n_own[type_name])
 
 
+def save_training_curves(result_or_stats_path: dict | str | Path, *, smoothing_window: int = 20) -> Path:
+    """Save the notebook-style reward, win, and kill plot for a completed run."""
+    if isinstance(result_or_stats_path, dict):
+        stats_path = result_or_stats_path.get("stats_path")
+        if not stats_path:
+            raise ValueError("Training result dict does not contain stats_path.")
+    else:
+        stats_path = result_or_stats_path
+    stats_path = Path(stats_path)
+    if stats_path.is_dir():
+        stats_path = stats_path / "training_stats.json"
+    with open(stats_path, encoding="utf-8") as f:
+        stats = json.load(f)
+
+    records = stats.get("episode_records") or stats.get("records") or []
+    if not records:
+        raise ValueError("No completed episode records found in training stats.")
+
+    import matplotlib.pyplot as plt
+
+    run_dir = Path(stats["run_dir"])
+    episode_index = np.arange(1, len(records) + 1)
+    window = max(int(smoothing_window), 1)
+    type_names = stats.get("type_names") or ["main", "opponent"]
+
+    fig, axes = plt.subplots(1, 3, figsize=(17, 4))
+    for type_name in type_names:
+        rewards = np.asarray([record["rewards"].get(type_name, 0.0) for record in records], dtype=np.float64)
+        if window > 1:
+            kernel = np.ones(window, dtype=np.float64) / window
+            padded = np.pad(rewards, (window - 1, 0), mode="edge")
+            rewards = np.convolve(padded, kernel, mode="valid")
+        wins = np.asarray([int(record.get("winner") == type_name) for record in records], dtype=np.int64)
+        kills = np.asarray([record.get("kills", {}).get(type_name, 0) for record in records], dtype=np.float64)
+        axes[0].plot(episode_index, rewards, label=type_name)
+        axes[1].plot(episode_index, np.cumsum(wins), label=type_name)
+        axes[2].plot(episode_index, kills, label=type_name)
+
+    axes[0].set_title(f"Training Rewards, rolling mean {window}")
+    axes[0].set_xlabel("Completed episode")
+    axes[0].set_ylabel("Team reward")
+    axes[1].set_title("Cumulative Team Wins")
+    axes[1].set_xlabel("Completed episode")
+    axes[1].set_ylabel("Wins")
+    axes[2].set_title("Kills Per Episode")
+    axes[2].set_xlabel("Completed episode")
+    axes[2].set_ylabel("Kills")
+    for ax in axes:
+        ax.legend()
+        ax.grid(alpha=0.25)
+    fig.tight_layout()
+    out_path = run_dir / "training_reward_wins_and_kills.png"
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"Saved training curves to {out_path}")
+    return out_path
+
+
 def main():
     parser = argparse.ArgumentParser(description="Train MF-DSRQ on MAgent2")
     parser.add_argument("--config", required=True, help="Path to YAML config file")
     for key in [
         "algorithm", "target_episodes", "num_envs", "map_size", "max_cycles", "seed",
-        "epsilon_robust_start", "epsilon_robust_end",
+        "epsilon_robust_start", "epsilon_robust_end", "epsilon_robust_decay_frac",
         "lr", "batch_size", "buffer_capacity", "learning_starts",
         "output_dir", "reward_log_interval", "save_every", "self_play_tau",
-        "max_train_batches_per_update", "mean_field_source",
-        "robust_distance", "robust_lp_fallback",
-        "robust_policy_cache_size", "sre_solver_name", "sre_solver_workers",
-        "sre_num_random_starts", "sre_num_pure_starts",
+        "max_train_batches_per_update", "mean_field_source", "robust_policy_temperature",
+        "use_progress_bar", "use_gpu", "randomize_handles_on_reset",
     ]:
         parser.add_argument(f"--{key}", type=str, default=None)
     args = parser.parse_args()
 
     cfg = _load_config(args.config)
+    output_dir_explicit = args.output_dir is not None
     for key in vars(args):
         if key == "config":
             continue
         val = getattr(args, key)
         if val is not None:
-            try:
-                cfg[key] = int(val)
-            except ValueError:
-                try:
-                    cfg[key] = float(val)
-                except ValueError:
-                    cfg[key] = val
+            cfg[key] = _coerce_cli_value(val)
 
-    train(cfg)
+    cfg = normalize_training_config(
+        cfg,
+        derive_schedule_output_dir=not output_dir_explicit,
+    )
+    result = train(cfg)
+    save_training_curves(result, smoothing_window=int(cfg.get("training_reward_smoothing_window", 20)))
 
 
 if __name__ == "__main__":

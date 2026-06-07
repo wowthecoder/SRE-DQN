@@ -1,5 +1,5 @@
-# Solver-free mean-field SRQ config for MAgent2 battle_v4
-algorithm: mf_srq_lp
+# Torch-only mean-field SRQ config for MAgent2 battle_v4
+algorithm: mf_srq_torch
 env_name: battle_v4
 env_backend: magent2
 map_size: 40
@@ -15,13 +15,8 @@ mean_field_source: opponent
 
 # Local mean-field SRE robustness
 epsilon_robust_start: 0.10
-epsilon_robust_end: 0.02
 epsilon_robust_decay_frac: 1.0
-robust_distance: tv
-robust_lp_fallback: greedy_tv
-robust_policy_cache_enabled: true
-robust_policy_cache_size: 4096
-robust_policy_cache_round_digits: 6
+robust_policy_temperature: 0.1
 
 # Exploration schedule follows the mfrl-master Battle training script:
 # 1.0 -> 0.2 over the first 80%, then 0.2 -> 0.1.
@@ -48,8 +43,9 @@ self_play_tau: 0.01
 max_train_batches_per_update:
 
 # Logging
+# save_every should be a multiple of num_envs
 output_dir: discrete_action_space/mean_field_dsrq/runs
 reward_log_interval: 100
-save_every: 20
+save_every: 400
 
 use_gpu: true

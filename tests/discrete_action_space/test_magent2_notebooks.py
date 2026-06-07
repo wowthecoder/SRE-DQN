@@ -125,6 +125,11 @@ def test_evaluation_notebook_has_torch_model_cells_for_training_configs():
         assert any(f'("{model_key}",)' in source for source in history_cells)
     notebook_source = "\n".join(code_cells)
     assert "TRAINING_PLOT_SMOOTHING_WINDOW = 50" in notebook_source
+    assert "EVAL_MATCHUP_PAIRS" in notebook_source
+    assert '("mfdsrq", "iql")' in notebook_source
+    assert '("mfdsrq", "ac")' in notebook_source
+    assert '("mfdsrq", "mfq")' in notebook_source
+    assert "matchup_pairs=EVAL_MATCHUP_PAIRS" in notebook_source
     assert "baseline_training_history_frame" in notebook_source
     assert "for algorithm in BASELINE_ALGORITHMS" in notebook_source
     assert 'df["reward_main"].rolling(smoothing_window' in notebook_source

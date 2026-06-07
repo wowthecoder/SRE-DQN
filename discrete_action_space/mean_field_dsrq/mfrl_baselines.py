@@ -31,6 +31,7 @@ DEFAULT_MFRL_TASK_CONFIG: dict[str, Any] = {
     "dead_penalty": -0.1,
     "attack_penalty": -0.1,
     "attack_opponent_reward": 0.2,
+    "randomize_handles_on_reset": True,
 }
 DEFAULT_BASELINE_RUNS_DIR = RUNS_DIR / "mfrl_baselines"
 
@@ -437,6 +438,9 @@ class MFQ(DQN):
             use_mean=True,
         )
 
+    def act(self, obs, feature, prob=None, eps=None, deterministic: bool = False):
+        return super().act(obs, feature, prob=prob, eps=eps, deterministic=True)
+
     def train(self, device, *, max_batches: int | None = None):
         self.replay_buffer.tight()
         losses = []
@@ -536,7 +540,7 @@ class ActorCritic(nn.Module):
     def flush_buffer(self, **kwargs):
         self.replay_buffer.push(**kwargs)
 
-    def train(self, device, *, max_samples: int | None = None):
+    def train(self, device, *, max_samples: int | None = None, update_repeats: int = 1):
         self.device = torch.device(device)
         batch_data = list(self.replay_buffer.episodes())
         self.replay_buffer = EpisodesBuffer(use_mean=self.use_mean)
@@ -584,26 +588,29 @@ class ActorCritic(nn.Module):
         action_t = torch.as_tensor(action, dtype=torch.long, device=device)
         reward_t = torch.as_tensor(reward, dtype=torch.float32, device=device)
         action_mask = torch.zeros([action_t.size(0), self.num_actions], device=device).scatter_(1, action_t.unsqueeze(-1), 1).float()
-        flatten_view = view_t.flatten(1)
-        h_view = F.relu(self.net["obs_linear"](flatten_view))
-        h_emb = F.relu(self.net["emb_linear"](feature_t))
-        dense = torch.cat([h_view, h_emb], dim=-1)
-        dense = F.relu(self.net["cat_linear"](dense))
-        policy = F.softmax(self.net["policy_linear"](dense / 0.1), dim=-1)
-        policy = torch.clamp(policy, 1e-10, 1 - 1e-10)
-        value = self.net["value_linear"](dense).flatten()
-        advantage = (reward_t - value).detach()
-        log_policy = (policy + 1e-6).log()
-        log_prob = (log_policy * action_mask).sum(1)
-        pg_loss = -(advantage * log_prob).mean()
-        vf_loss = self.value_coef * (reward_t - value).pow(2).mean()
-        neg_entropy = self.ent_coef * (policy * log_policy).sum(1).mean()
-        total_loss = pg_loss + vf_loss + neg_entropy
-        self.optim.zero_grad()
-        total_loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.get_all_params(), 5.0)
-        self.optim.step()
-        return float(total_loss.detach().cpu().item())
+        update_repeats = max(int(update_repeats), 1)
+        last_loss = None
+        for _ in range(update_repeats):
+            flatten_view = view_t.flatten(1)
+            h_view = F.relu(self.net["obs_linear"](flatten_view))
+            h_emb = F.relu(self.net["emb_linear"](feature_t))
+            dense = torch.cat([h_view, h_emb], dim=-1)
+            dense = F.relu(self.net["cat_linear"](dense))
+            policy = F.softmax(self.net["policy_linear"](dense / 0.1), dim=-1)
+            policy = torch.clamp(policy, 1e-10, 1 - 1e-10)
+            value = self.net["value_linear"](dense).flatten()
+            advantage = (reward_t - value).detach()
+            log_policy = (policy + 1e-6).log()
+            log_prob = (log_policy * action_mask).sum(1)
+            pg_loss = -(advantage * log_prob).mean()
+            vf_loss = self.value_coef * (reward_t - value).pow(2).mean()
+            neg_entropy = self.ent_coef * (policy * log_policy).sum(1).mean()
+            total_loss = pg_loss + vf_loss + neg_entropy
+            self.optim.zero_grad()
+            total_loss.backward()
+            self.optim.step()
+            last_loss = total_loss.detach()
+        return float(last_loss.cpu().item()) if last_loss is not None else None
 
     def save(self, dir_path, step="final"):
         dir_path = Path(dir_path)
@@ -696,12 +703,13 @@ def train_mfrl_baseline(
     save_folder: str | Path = DEFAULT_BASELINE_RUNS_DIR,
     device: str | torch.device | None = None,
     render_every: int = 0,
-    save_every: int = 20,
+    save_every: int = 400,
     self_play_tau: float = 0.01,
     print_every: int | None = None,
     reward_log_interval: int | None = 100,
     max_train_batches_per_update: int | None = None,
     max_policy_samples_per_update: int | None = None,
+    ac_update_repeats: int | None = None,
 ) -> dict[str, Any]:
     """Train one reference-style MFRL baseline with synchronous vectorized collection."""
     algorithm = _canonical_algorithm(algorithm)
@@ -709,6 +717,9 @@ def train_mfrl_baseline(
     torch.manual_seed(int(seed))
     device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
     task_config = {**DEFAULT_MFRL_TASK_CONFIG, **(task_config or {})}
+    task_config["randomize_handles_on_reset"] = bool(
+        task_config.get("randomize_handles_on_reset", True)
+    )
     max_steps = int(task_config["max_cycles"])
     envs = [LowLevelBattleEnv(task_config) for _ in range(max(int(num_envs), 1))]
     meta = envs[0].meta()
@@ -716,6 +727,11 @@ def train_mfrl_baseline(
         _spawn_model(algorithm, meta, max_steps, device),
         _spawn_model(algorithm, meta, max_steps, device),
     ]
+    effective_ac_update_repeats = (
+        max(int(ac_update_repeats), 1)
+        if ac_update_repeats is not None
+        else len(envs)
+    )
 
     timestamp = time.strftime("%y_%m_%d-%H_%M_%S")
     run_dir = Path(save_folder) / f"{algorithm}_battle_v4_seed{seed}_{timestamp}"
@@ -842,6 +858,7 @@ def train_mfrl_baseline(
                         record = _episode_win_record(completed, episode_rewards[env_idx], initial_counts[env_idx], final_counts)
                         record["env_idx"] = env_idx
                         record["steps"] = step_ct[env_idx]
+                        record["handle_order_indices"] = list(env.handle_order_indices)
                         records.append(record)
                         progress.update(1)
                         if reward_log_interval and (
@@ -861,7 +878,11 @@ def train_mfrl_baseline(
                             break
 
             if isinstance(models[0], ActorCritic):
-                loss = models[0].train(device, max_samples=max_policy_samples_per_update)
+                loss = models[0].train(
+                    device,
+                    max_samples=max_policy_samples_per_update,
+                    update_repeats=effective_ac_update_repeats,
+                )
             else:
                 loss = models[0].train(device, max_batches=max_train_batches_per_update)
             losses.append({"episode": completed, "loss": loss})
@@ -900,6 +921,8 @@ def train_mfrl_baseline(
         "device": str(device),
         "max_train_batches_per_update": max_train_batches_per_update,
         "max_policy_samples_per_update": max_policy_samples_per_update,
+        "ac_update_repeats": ac_update_repeats,
+        "effective_ac_update_repeats": int(effective_ac_update_repeats),
         "task_config": task_config,
         "records": records,
         "losses": losses,

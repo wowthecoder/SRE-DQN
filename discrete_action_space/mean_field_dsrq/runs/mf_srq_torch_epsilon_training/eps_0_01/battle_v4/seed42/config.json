@@ -36,7 +36,7 @@
   "max_train_batches_per_update": null,
   "output_dir": "/home/wowthecoder/SRE-DQN/discrete_action_space/mean_field_dsrq/runs/mf_srq_torch_epsilon_training/eps_0_01",
   "reward_log_interval": 100,
-  "save_every": 20,
+  "save_every": 400,
   "use_gpu": true,
   "robust_policy_temperature": 0.1
 }

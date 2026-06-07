@@ -1,19 +1,28 @@
-"""Torch-native robust-action mean-field Deep SRQ.
-
-This variant keeps the solver-free MF-SRQ network, replay buffer, and training
-surface, but replaces the SciPy LP robust best response with a batched Torch
-operator.  The operator robustifies each own-action value against a TV ball
-around the neighbour mean action, then uses an MF-Q-style Boltzmann policy.
-"""
+"""Torch-native robust-action mean-field Deep SRQ."""
 
 from __future__ import annotations
 
+import time
+from collections import deque
+from pathlib import Path
 from typing import Optional
 
+import numpy as np
 import torch
 import torch.nn as nn
+import torch.optim as optim
 
-from .solver_free_mean_field_dsrq import SolverFreeMFDsrqAgent
+
+def _normalize_distribution(values: np.ndarray, size: Optional[int] = None) -> np.ndarray:
+    p = np.asarray(values, dtype=np.float64).reshape(-1)
+    if size is not None and p.size != int(size):
+        raise ValueError(f"Expected distribution length {size}, got {p.size}.")
+    p = np.clip(p, 0.0, None)
+    total = float(p.sum())
+    if total <= 0.0:
+        n = int(size) if size is not None else max(int(p.size), 1)
+        return np.full(n, 1.0 / n, dtype=np.float32)
+    return (p / total).astype(np.float32)
 
 
 def _normalize_torch_distribution(values: torch.Tensor, eps: float = 1e-12) -> torch.Tensor:
@@ -36,23 +45,168 @@ def _finite_for_policy(values: torch.Tensor) -> torch.Tensor:
     return torch.nan_to_num(values, nan=0.0, posinf=float(high), neginf=float(low))
 
 
+class PairwiseMeanFieldQNetwork(nn.Module):
+    """Reference-style MF-Q CNN producing pairwise mean-field payoffs."""
+
+    def __init__(
+        self,
+        obs_channels: int,
+        obs_height: int,
+        obs_width: int,
+        n_own_actions: int,
+        n_mean_actions: int,
+        feature_dim: int = 0,
+    ):
+        super().__init__()
+        self.n_own_actions = int(n_own_actions)
+        self.n_mean_actions = int(n_mean_actions)
+        self.feature_dim = int(feature_dim)
+        self.conv = nn.Sequential(
+            nn.Conv2d(obs_channels, 32, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(32, 32, kernel_size=3, padding=1),
+            nn.ReLU(),
+        )
+        self.obs_fc = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(32 * obs_height * obs_width, 256),
+            nn.ReLU(),
+        )
+        if self.feature_dim > 0:
+            self.feature_fc = nn.Sequential(
+                nn.Linear(self.feature_dim, 32),
+                nn.ReLU(),
+            )
+            head_input_dim = 256 + 32
+        else:
+            self.feature_fc = None
+            head_input_dim = 256
+        self.head = nn.Sequential(
+            nn.Linear(head_input_dim, 128),
+            nn.ReLU(),
+            nn.Linear(128, 64),
+            nn.ReLU(),
+            nn.Linear(64, self.n_own_actions * self.n_mean_actions),
+        )
+
+    def _feature_tensor(
+        self,
+        obs: torch.Tensor,
+        feature: Optional[torch.Tensor],
+    ) -> Optional[torch.Tensor]:
+        if self.feature_dim <= 0:
+            return None
+        if feature is None:
+            return torch.zeros(
+                (obs.shape[0], self.feature_dim),
+                dtype=obs.dtype,
+                device=obs.device,
+            )
+        feature = feature.to(dtype=obs.dtype, device=obs.device)
+        feature = feature.reshape(feature.shape[0], -1)
+        if feature.shape[0] != obs.shape[0] or feature.shape[1] != self.feature_dim:
+            raise ValueError(
+                "Expected feature shape "
+                f"[{obs.shape[0]}, {self.feature_dim}], got {tuple(feature.shape)}."
+            )
+        return feature
+
+    def payoff_matrix(
+        self,
+        obs: torch.Tensor,
+        feature: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        obs_feat = self.obs_fc(self.conv(obs))
+        feature_t = self._feature_tensor(obs, feature)
+        if feature_t is not None:
+            obs_feat = torch.cat([obs_feat, self.feature_fc(feature_t)], dim=-1)
+        payoff = self.head(obs_feat)
+        return payoff.reshape(-1, self.n_own_actions, self.n_mean_actions)
+
+    def forward(
+        self,
+        obs: torch.Tensor,
+        mean_action: torch.Tensor,
+        feature: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        payoff = self.payoff_matrix(obs, feature)
+        return torch.bmm(payoff, mean_action.unsqueeze(-1)).squeeze(-1)
+
+
+class MeanFieldReplayBuffer:
+    """Ring buffer of per-agent mean-field transitions."""
+
+    def __init__(self, capacity: int):
+        self.buffer = deque(maxlen=int(capacity))
+
+    def push(
+        self,
+        obs: np.ndarray,
+        action: int,
+        reward: float,
+        next_obs: np.ndarray,
+        mean_a: np.ndarray,
+        next_mean_a: np.ndarray,
+        done: bool,
+        valid: bool = True,
+        feature: Optional[np.ndarray] = None,
+        next_feature: Optional[np.ndarray] = None,
+    ) -> None:
+        if feature is None:
+            feature = np.zeros(0, dtype=np.float32)
+        if next_feature is None:
+            next_feature = np.zeros_like(feature, dtype=np.float32)
+        self.buffer.append(
+            (
+                np.array(obs, dtype=np.float32, copy=True),
+                np.array(feature, dtype=np.float32, copy=True),
+                int(action),
+                float(reward),
+                np.array(next_obs, dtype=np.float32, copy=True),
+                np.array(next_feature, dtype=np.float32, copy=True),
+                _normalize_distribution(mean_a),
+                _normalize_distribution(next_mean_a),
+                float(done),
+                float(valid),
+            )
+        )
+
+    def sample(
+        self,
+        batch_size: int,
+        device: Optional[torch.device] = None,
+    ) -> dict[str, torch.Tensor]:
+        idxs = np.random.randint(0, len(self.buffer), size=int(batch_size))
+        batch = [self.buffer[int(i)] for i in idxs]
+        obs, features, actions, rewards, next_obs, next_features, mean_a, next_mean_a, dones, valids = zip(*batch)
+
+        def tensor(values, dtype):
+            out = torch.as_tensor(np.stack(values), dtype=dtype)
+            return out.to(device) if device is not None else out
+
+        return {
+            "obs": tensor(obs, torch.float32),
+            "feature": tensor(features, torch.float32),
+            "action": tensor(actions, torch.long),
+            "reward": tensor(rewards, torch.float32),
+            "next_obs": tensor(next_obs, torch.float32),
+            "next_feature": tensor(next_features, torch.float32),
+            "mean_a": tensor(mean_a, torch.float32),
+            "next_mean_a": tensor(next_mean_a, torch.float32),
+            "done": tensor(dones, torch.float32),
+            "valid": tensor(valids, torch.float32),
+        }
+
+    def __len__(self) -> int:
+        return len(self.buffer)
+
+
 def torch_tv_worst_case_values(
     mean_action: torch.Tensor,
     values: torch.Tensor,
     epsilon: float | torch.Tensor,
 ) -> torch.Tensor:
-    """Return worst-case expectations under the 0/1-cost TV transport ball.
-
-    Args:
-        mean_action: Nominal distributions with shape ``[batch, mean_actions]``.
-        values: Payoffs with shape ``[batch, own_actions, mean_actions]``.
-        epsilon: Transport budget. With 0/1 ground cost this is the amount of
-            probability mass that may be moved from high-value neighbour actions
-            to low-value neighbour actions.
-
-    Returns:
-        Tensor of robust action values with shape ``[batch, own_actions]``.
-    """
+    """Return worst-case expectations under the 0/1-cost TV transport ball."""
     if values.ndim != 3:
         raise ValueError(f"Expected values shape [B,A,K], got {tuple(values.shape)}.")
     if mean_action.ndim != 2:
@@ -170,19 +324,74 @@ class TorchRobustActionValueOperator:
         return _normalize_torch_distribution(policy)
 
 
-class TorchRobustMFDsrqAgent(SolverFreeMFDsrqAgent):
-    """MF-SRQ using a Torch batched robust-action-value operator."""
+class TorchRobustMFDsrqAgent:
+    """Mean-field DSRQ learner with a Torch batched robust value operator."""
 
     algorithm_name = "mf_srq_torch"
 
     def __init__(
         self,
-        *args,
+        type_id: int,
+        obs_channels: int,
+        obs_height: int,
+        obs_width: int,
+        n_own_actions: int,
+        n_nbr_actions: int,
+        *,
+        feature_dim: int = 0,
+        epsilon_robust: float = 0.1,
+        gamma: float = 0.95,
+        lr: float = 1e-4,
+        batch_size: int = 64,
+        buffer_capacity: int = 80_000,
+        learning_starts: int = 5_000,
+        train_every: int = 5,
+        target_tau: float = 0.005,
+        grad_clip: Optional[float] = 10.0,
+        epsilon_explore: float = 1.0,
         robust_policy_temperature: float = 0.1,
-        **kwargs,
+        device: Optional[torch.device] = None,
     ):
-        super().__init__(*args, **kwargs)
+        self.type_id = int(type_id)
+        self.n_own_actions = int(n_own_actions)
+        self.n_nbr_actions = int(n_nbr_actions)
+        self.feature_dim = int(feature_dim)
+        self.num_actions = self.n_own_actions
+        self.epsilon_robust = float(epsilon_robust)
+        self.gamma = float(gamma)
+        self.batch_size = int(batch_size)
+        self.learning_starts = int(learning_starts)
+        self.train_every = max(1, int(train_every))
+        self.target_tau = float(target_tau)
+        self.grad_clip = grad_clip
+        self.epsilon_explore = float(epsilon_explore)
         self.robust_policy_temperature = float(robust_policy_temperature)
+
+        if device is None:
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = device
+
+        self.q_net = PairwiseMeanFieldQNetwork(
+            obs_channels,
+            obs_height,
+            obs_width,
+            self.n_own_actions,
+            self.n_nbr_actions,
+            self.feature_dim,
+        ).to(device)
+        self.target_net = PairwiseMeanFieldQNetwork(
+            obs_channels,
+            obs_height,
+            obs_width,
+            self.n_own_actions,
+            self.n_nbr_actions,
+            self.feature_dim,
+        ).to(device)
+        self.target_net.load_state_dict(self.q_net.state_dict())
+        self.target_net.eval()
+
+        self.opt = optim.Adam(self.q_net.parameters(), lr=float(lr))
+        self.buffer = MeanFieldReplayBuffer(buffer_capacity)
         self.robust_operator = TorchRobustActionValueOperator(
             self.n_own_actions,
             self.n_nbr_actions,
@@ -190,6 +399,11 @@ class TorchRobustMFDsrqAgent(SolverFreeMFDsrqAgent):
             temperature=self.robust_policy_temperature,
         )
         self.robust_torch_operator_calls = 0
+
+        self._update_calls = 0
+        self._total_train_steps = 0
+        self._last_loss: Optional[float] = None
+        self._update_times: list[float] = []
 
     def _robust_action_values(
         self,
@@ -214,14 +428,28 @@ class TorchRobustMFDsrqAgent(SolverFreeMFDsrqAgent):
         return self.robust_operator.policy_from_values(robust_q)
 
     @torch.no_grad()
+    def act(
+        self,
+        obs: np.ndarray,
+        mean_a: Optional[np.ndarray] = None,
+        feature: Optional[np.ndarray] = None,
+    ) -> int:
+        feature_batch = None if feature is None else np.expand_dims(feature, axis=0)
+        return int(
+            self.act_batch(
+                np.expand_dims(obs, axis=0),
+                None if mean_a is None else np.expand_dims(mean_a, axis=0),
+                feature_batch,
+            )[0]
+        )
+
+    @torch.no_grad()
     def act_batch(
         self,
-        obs_batch,
-        mean_a_batch=None,
-        feature_batch=None,
-    ):
-        import numpy as np
-
+        obs_batch: np.ndarray,
+        mean_a_batch: Optional[np.ndarray] = None,
+        feature_batch: Optional[np.ndarray] = None,
+    ) -> np.ndarray:
         batch_size = int(len(obs_batch))
         if mean_a_batch is None:
             mean_a_batch = np.full(
@@ -257,9 +485,46 @@ class TorchRobustMFDsrqAgent(SolverFreeMFDsrqAgent):
             actions[pending] = sampled.detach().cpu().numpy().astype(np.int64)
         return actions.astype(np.int64)
 
-    def train_step(self) -> Optional[float]:
-        import time
+    def push(
+        self,
+        obs: np.ndarray,
+        action: int,
+        reward: float,
+        next_obs: np.ndarray,
+        mean_a: np.ndarray,
+        next_mean_a: np.ndarray,
+        done: bool,
+        valid: bool = True,
+        feature: Optional[np.ndarray] = None,
+        next_feature: Optional[np.ndarray] = None,
+    ) -> None:
+        if self.feature_dim > 0:
+            if feature is None:
+                feature = np.zeros(self.feature_dim, dtype=np.float32)
+            if next_feature is None:
+                next_feature = np.zeros(self.feature_dim, dtype=np.float32)
+        self.buffer.push(
+            obs,
+            action,
+            reward,
+            next_obs,
+            mean_a,
+            next_mean_a,
+            done,
+            valid,
+            feature=feature,
+            next_feature=next_feature,
+        )
+        self._update_calls += 1
 
+    def maybe_train(self) -> Optional[float]:
+        if len(self.buffer) < self.learning_starts:
+            return None
+        if self._update_calls % self.train_every != 0:
+            return None
+        return self.train_step()
+
+    def train_step(self) -> Optional[float]:
         if len(self.buffer) < max(self.batch_size, self.learning_starts):
             return None
         t0 = time.perf_counter()
@@ -319,16 +584,48 @@ class TorchRobustMFDsrqAgent(SolverFreeMFDsrqAgent):
         self._update_times.append(time.perf_counter() - t0)
         return self._last_loss
 
+    def soft_update_target_network(self, tau: float) -> None:
+        for target_param, param in zip(self.target_net.parameters(), self.q_net.parameters()):
+            target_param.data.mul_(1.0 - tau).add_(param.data, alpha=tau)
+
     def save_checkpoint(self, path) -> None:
-        super().save_checkpoint(path)
-        checkpoint = torch.load(path, map_location="cpu", weights_only=False)
-        checkpoint["robust_policy_temperature"] = self.robust_policy_temperature
-        torch.save(checkpoint, path)
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(
+            {
+                "algorithm": self.algorithm_name,
+                "q_net": self.q_net.state_dict(),
+                "target_net": self.target_net.state_dict(),
+                "optimizer": self.opt.state_dict(),
+                "epsilon_robust": self.epsilon_robust,
+                "epsilon_explore": self.epsilon_explore,
+                "total_train_steps": self._total_train_steps,
+                "n_own_actions": self.n_own_actions,
+                "n_nbr_actions": self.n_nbr_actions,
+                "feature_dim": self.feature_dim,
+                "robust_policy_temperature": self.robust_policy_temperature,
+            },
+            path,
+        )
 
     def load_checkpoint(self, path, map_location=None) -> None:
-        super().load_checkpoint(path, map_location=map_location)
         checkpoint = torch.load(path, map_location=map_location or self.device, weights_only=False)
+        self.q_net.load_state_dict(checkpoint["q_net"])
+        self.target_net.load_state_dict(checkpoint["target_net"])
+        if "optimizer" in checkpoint:
+            self.opt.load_state_dict(checkpoint["optimizer"])
+        self.epsilon_robust = float(checkpoint.get("epsilon_robust", self.epsilon_robust))
+        self.epsilon_explore = float(checkpoint.get("epsilon_explore", self.epsilon_explore))
+        self._total_train_steps = int(checkpoint.get("total_train_steps", 0))
         self.robust_policy_temperature = float(
             checkpoint.get("robust_policy_temperature", self.robust_policy_temperature)
         )
         self.robust_operator.temperature = self.robust_policy_temperature
+
+    def get_avg_update_time_ms(self) -> Optional[float]:
+        if not self._update_times:
+            return None
+        return float(np.mean(self._update_times)) * 1000.0
+
+    def close(self) -> None:
+        return None

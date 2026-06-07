@@ -399,6 +399,16 @@ def train_pairing(
     run_slug = "_vs_".join(run_slug_parts)
     if run_name_suffix:
         run_slug = f"{run_slug}_{str(run_name_suffix)}_{seed}"
+    elif any(config["epsilon_robust_initial"] is not None for config in agent_epsilon_configs):
+        first_robust_config = next(
+            config
+            for config in agent_epsilon_configs
+            if config["epsilon_robust_initial"] is not None
+        )
+        run_slug = (
+            f"{first_robust_config['epsilon_schedule']}_"
+            f"eps{float(first_robust_config['epsilon_robust_initial']):g}_{seed}"
+        )
     else:
         run_slug = f"{run_slug}_{seed}"
     

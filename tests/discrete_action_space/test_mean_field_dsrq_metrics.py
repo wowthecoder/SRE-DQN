@@ -11,8 +11,10 @@ for p in [str(_ROOT), str(_DISCRETE)]:
 
 from mean_field_dsrq.notebook_utils import (  # noqa: E402
     _comparison_payload_from_worker_results,
+    _fixed_side_tournament_payload_from_worker_results,
     _split_episode_chunks,
     _strict_training_summary,
+    plot_fixed_side_tournament_bars,
     plot_mfdsrq_torch_baseline_bars,
     plot_mfrl_baseline_training_curves,
     plot_mfdsrq_training_curves,
@@ -226,6 +228,123 @@ def test_parallel_comparison_aggregation_schema(tmp_path):
         "mfdsrq_red_vs_baseline_blue",
         "mfdsrq_blue_vs_baseline_red",
     }
+
+
+def test_fixed_side_tournament_aggregation_respects_matchup_pairs(tmp_path):
+    checkpoint_paths = {
+        "main": tmp_path / "ckpt_main_best.pt",
+        "opponent": tmp_path / "ckpt_opponent_best.pt",
+    }
+    worker_results = [
+        {
+            "main_algorithm": "mfdsrq",
+            "opponent_algorithm": "iql",
+            "main_checkpoint": "mfdsrq-main",
+            "opponent_checkpoint": "iql-opponent",
+            "records": [
+                {
+                    "episode": 1,
+                    "main_win": 1,
+                    "opponent_win": 0,
+                    "tie": 0,
+                    "main_reward": 4.0,
+                    "opponent_reward": 1.0,
+                    "main_kills": 2,
+                    "opponent_kills": 0,
+                }
+            ],
+        },
+        {
+            "main_algorithm": "mfdsrq",
+            "opponent_algorithm": "ac",
+            "main_checkpoint": "mfdsrq-main",
+            "opponent_checkpoint": "ac-opponent",
+            "records": [
+                {
+                    "episode": 1,
+                    "main_win": 0,
+                    "opponent_win": 0,
+                    "tie": 1,
+                    "main_reward": 2.0,
+                    "opponent_reward": 2.0,
+                    "main_kills": 0,
+                    "opponent_kills": 0,
+                }
+            ],
+        },
+        {
+            "main_algorithm": "mfq",
+            "opponent_algorithm": "iql",
+            "main_checkpoint": "mfq-main",
+            "opponent_checkpoint": "iql-opponent",
+            "records": [
+                {
+                    "episode": 1,
+                    "main_win": 1,
+                    "opponent_win": 0,
+                    "tie": 0,
+                    "main_reward": 9.0,
+                    "opponent_reward": 0.0,
+                    "main_kills": 3,
+                    "opponent_kills": 0,
+                }
+            ],
+        },
+    ]
+
+    payload = _fixed_side_tournament_payload_from_worker_results(
+        epsilon=0.1,
+        checkpoint_paths=checkpoint_paths,
+        algorithms=("mfdsrq", "iql", "ac", "mfq"),
+        matchup_pairs=(("mfdsrq", "iql"), ("mfdsrq", "ac")),
+        baseline_folders={"iql": tmp_path / "iql_run", "ac": tmp_path / "ac_run"},
+        worker_results=worker_results,
+        num_episodes_per_matchup=1,
+        workers=2,
+    )
+
+    assert [(row["main_algorithm"], row["opponent_algorithm"]) for row in payload["rows"]] == [
+        ("mfdsrq", "iql"),
+        ("mfdsrq", "ac"),
+    ]
+    assert set(payload["matchups"]) == {"mfdsrq"}
+    assert set(payload["matchups"]["mfdsrq"]) == {"iql", "ac"}
+    assert payload["matchup_pairs"] == [["mfdsrq", "iql"], ["mfdsrq", "ac"]]
+
+
+def test_selected_fixed_side_tournament_plot_uses_only_real_matchups(tmp_path):
+    tournament = {
+        "epsilon": 0.1,
+        "experiment_label": "selected",
+        "checkpoint_dir": str(tmp_path),
+        "algorithms": ["mfdsrq", "iql", "ac", "mfq"],
+        "matchup_pairs": [["mfdsrq", "iql"], ["mfdsrq", "ac"], ["mfdsrq", "mfq"]],
+        "rows": [
+            {
+                "main_algorithm": "mfdsrq",
+                "opponent_algorithm": "iql",
+                "main_win_rate": 0.6,
+                "mean_main_reward": 10.0,
+            },
+            {
+                "main_algorithm": "mfdsrq",
+                "opponent_algorithm": "ac",
+                "main_win_rate": 0.4,
+                "mean_main_reward": 8.0,
+            },
+            {
+                "main_algorithm": "mfdsrq",
+                "opponent_algorithm": "mfq",
+                "main_win_rate": 0.7,
+                "mean_main_reward": 12.0,
+            },
+        ],
+    }
+
+    win_fig, reward_fig = plot_fixed_side_tournament_bars(tournament, save=False)
+
+    assert len(win_fig.axes[0].patches) == 3
+    assert len(reward_fig.axes[0].patches) == 3
 
 
 def test_mfdsrq_torch_baseline_bar_plot_has_two_panels_and_grouped_bars(tmp_path):
