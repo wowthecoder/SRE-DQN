@@ -11,7 +11,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 from tqdm.auto import tqdm
 
-from .instrumented_env import aggregate_lbf_episode_metrics, extract_lbf_metrics
 from .state_action_encoding import canonical_lbf_state, lbf_action_masks
 
 
@@ -22,6 +21,10 @@ def action_masks(env, agent_order):
     if getattr(inner, "field", None) is not None and getattr(inner, "players", None) is not None:
         return lbf_action_masks(env, agent_order)
     return None
+
+
+def _empty_metric_totals():
+    return {"episode_count": 0, "episode_lengths": []}
 
 
 def _unwrap_lbf_env(env):
@@ -306,7 +309,7 @@ def sample_lbf_rollouts_vectorized(
             "actions": [],
             "steps": 0,
             "frames": [],
-            "episode_metrics": extract_lbf_metrics(reset_info),
+            "episode_metrics": None,
             "capture_frames": capture_frames,
             "render_failed": False,
             "render_error": None,
@@ -369,9 +372,6 @@ def sample_lbf_rollouts_vectorized(
                         for index, agent in enumerate(agent_order)
                     }
                     obs_dict, reward_dict, term_dict, trunc_dict, step_info = env.step(action_dict)
-                    slot["episode_metrics"] = (
-                        extract_lbf_metrics(step_info) or slot["episode_metrics"]
-                    )
                     rewards = np.asarray(
                         [reward_dict.get(agent, 0.0) for agent in agent_order],
                         dtype=np.float64,
@@ -433,10 +433,7 @@ def sample_lbf_rollouts_vectorized(
         "steps": [rollout["steps"] for rollout in rollouts],
         "episode_lengths": [rollout["steps"] for rollout in rollouts],
         "episode_metrics": [rollout.get("episode_metrics") for rollout in rollouts],
-        "metric_totals": aggregate_lbf_episode_metrics(
-            [rollout.get("episode_metrics") for rollout in rollouts],
-            len(rollouts[0]["total_rewards"]) if rollouts else None,
-        ),
+        "metric_totals": _empty_metric_totals(),
     }
 
 

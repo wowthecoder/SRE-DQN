@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from numbers import Number
 from typing import Any
 
-from .instrumented_env import InstrumentedForagingEnv
+from .exact_level_env import ExactLevelForagingEnv as _ExactLevelForagingEnv
 
 
 @dataclass(frozen=True)
@@ -127,15 +127,13 @@ def _epymarl_safe_info(info: Any) -> dict[str, Number]:
 
     safe = {}
     for key, value in info.items():
-        if key == "lbf_metrics":
-            continue
         if isinstance(value, Number):
             safe[key] = value
     return safe
 
 
-class ExactLevelForagingEnv(InstrumentedForagingEnv):
-    """lb-foraging env with exact levels, dense spawning, and diagnostics."""
+class ExactLevelForagingEnv(_ExactLevelForagingEnv):
+    """lb-foraging env with exact levels and EPyMARL-safe info payloads."""
 
     def reset(self, *args, **kwargs):
         obs, info = super().reset(*args, **kwargs)

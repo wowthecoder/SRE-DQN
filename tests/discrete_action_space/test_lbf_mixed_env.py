@@ -4,7 +4,6 @@ import pytest
 pytest.importorskip("lbforaging")
 
 from lbf_grid.pz_wrapper import make_pz_env
-from lbf_grid.deep_srq_lbf import _print_lbf_evaluation_metrics
 from lbf_grid.epymarl_lbf_env import EPYMARL_LBF_SCENARIOS, ExactLevelForagingEnv
 from lbf_grid.notebook_eval import (
     best_joint_reward_rollout_index,
@@ -38,7 +37,7 @@ def _prepare_manual_field(env, foods):
     env._inner._gen_valid_moves()
 
 
-def _make_invalid_load_metric_env():
+def _make_invalid_load_env():
     env = make_pz_env(
         players=2,
         player_levels=[1, 1],
@@ -62,17 +61,6 @@ def _make_invalid_load_metric_env():
             agent: obs_list[index]
             for index, agent in enumerate(env.possible_agents)
         }
-        metrics = infos["player_0"]["lbf_metrics"]
-        metrics["initial_agent_positions"] = [
-            {"agent": "player_0", "agent_id": 0, "row": 3, "col": 2, "level": 1},
-            {"agent": "player_1", "agent_id": 1, "row": 1, "col": 1, "level": 1},
-        ]
-        metrics["initial_foods"] = [{"row": 3, "col": 3, "level": 3}]
-        env._inner._lbf_metrics["initial_agent_positions"] = metrics[
-            "initial_agent_positions"
-        ]
-        env._inner._lbf_metrics["initial_foods"] = metrics["initial_foods"]
-        infos = {agent: {"lbf_metrics": metrics} for agent in env.possible_agents}
         return obs, infos
 
     env.reset = reset_with_layout
@@ -169,11 +157,10 @@ def test_dense_epymarl_scenarios_spawn_requested_food_multisets():
                 assert config["normalize_reward"] is False
                 assert config["simple_food_rewards"] is True
                 assert config["penalty"] == pytest.approx(0.0)
-                assert config["empty_load_penalty"] == pytest.approx(0.01)
+                assert config["empty_load_penalty"] == pytest.approx(0.0)
                 assert levels == expected_levels[key]
                 assert len(_food_positions(env)) == len(expected_levels[key])
-                metrics = infos["player_0"]["lbf_metrics"]
-                assert sorted(food["level"] for food in metrics["initial_foods"]) == expected_levels[key]
+                assert all("lbf_metrics" not in info for info in infos.values())
             finally:
                 env.close()
 
@@ -184,10 +171,10 @@ def test_dense_epymarl_gym_env_spawns_requested_food_count():
     assert scenario.kwargs["simple_food_rewards"] is True
     env = ExactLevelForagingEnv(**scenario.kwargs)
     try:
-        _, info = env.reset(seed=0)
+        env.reset(seed=0)
 
-        assert len(_food_records := info["lbf_metrics"]["initial_foods"]) == 18
-        assert sorted(food["level"] for food in _food_records) == [
+        assert len(np.argwhere(env.field > 0)) == 18
+        assert _food_levels_from_field(env.field) == [
             1,
             1,
             1,
@@ -231,12 +218,10 @@ def test_simple_food_reward_grants_food_level_to_solo_collector():
         env._inner._gen_valid_moves()
 
         _, rewards, _, _, infos = env.step({"player_0": 5, "player_1": 0})
-        metrics = infos["player_0"]["lbf_metrics"]
 
         assert rewards["player_0"] == pytest.approx(3.0)
         assert rewards["player_1"] == pytest.approx(0.0)
-        assert metrics["foods_collected_total"] == 1
-        assert metrics["foods_collected_per_agent"] == {"agent_0": 1, "agent_1": 0}
+        assert all("lbf_metrics" not in info for info in infos.values())
     finally:
         env.close()
 
@@ -261,13 +246,10 @@ def test_empty_load_penalty_only_applies_to_empty_load():
         env._inner._gen_valid_moves()
 
         _, rewards, _, _, infos = env.step({"player_0": 5, "player_1": 0})
-        metrics = infos["player_0"]["lbf_metrics"]
 
         assert rewards["player_0"] == pytest.approx(-0.01)
         assert rewards["player_1"] == pytest.approx(0.0)
-        assert metrics["empty_loads_total"] == 1
-        assert metrics["empty_loads_per_agent"]["agent_0"] == 1
-        assert metrics["invalid_loads_total"] == 0
+        assert all("lbf_metrics" not in info for info in infos.values())
     finally:
         env.close()
 
@@ -292,12 +274,9 @@ def test_invalid_load_is_recorded_without_reward_penalty():
         env._inner._gen_valid_moves()
 
         _, rewards, _, _, infos = env.step({"player_0": 5, "player_1": 0})
-        metrics = infos["player_0"]["lbf_metrics"]
 
         assert rewards["player_0"] == pytest.approx(0.0)
-        assert metrics["invalid_loads_total"] == 1
-        assert metrics["invalid_loads_per_agent"]["agent_0"] == 1
-        assert metrics["empty_loads_total"] == 0
+        assert all("lbf_metrics" not in info for info in infos.values())
     finally:
         env.close()
 
@@ -322,23 +301,17 @@ def test_successful_collection_records_food_per_participating_agent():
         env._inner._gen_valid_moves()
 
         _, rewards, _, _, infos = env.step({"player_0": 5, "player_1": 5})
-        metrics = infos["player_0"]["lbf_metrics"]
 
         assert rewards["player_0"] == pytest.approx(1.0)
         assert rewards["player_1"] == pytest.approx(1.0)
-        assert metrics["foods_collected_total"] == 1
-        assert metrics["foods_collected_per_agent"] == {"agent_0": 1, "agent_1": 1}
-        assert metrics["foods_collected_by_agent"]["agent_0"] == [
-            {"step": 1, "row": 3, "col": 3, "level": 2}
-        ]
-        assert metrics["invalid_loads_total"] == 0
+        assert all("lbf_metrics" not in info for info in infos.values())
     finally:
         env.close()
 
 
-def test_vectorized_rollout_records_lbf_episode_metrics():
+def test_vectorized_rollout_omits_lbf_episode_metrics():
     rollouts = sample_lbf_rollouts_vectorized(
-        make_env=_make_invalid_load_metric_env,
+        make_env=_make_invalid_load_env,
         policy_batch_fn=lambda contexts: [[5, 0] for _ in contexts],
         seed=0,
         n_episodes=2,
@@ -350,8 +323,8 @@ def test_vectorized_rollout_records_lbf_episode_metrics():
 
     assert rollouts["episode_lengths"] == [1, 1]
     assert len(rollouts["episode_metrics"]) == 2
-    assert [metric["invalid_loads_total"] for metric in rollouts["episode_metrics"]] == [1, 1]
-    assert rollouts["metric_totals"]["invalid_loads_total"] == 2
+    assert rollouts["episode_metrics"] == [None, None]
+    assert rollouts["metric_totals"] == {"episode_count": 0, "episode_lengths": []}
 
 
 def test_best_joint_reward_rollout_can_be_replayed_for_frames():
@@ -419,59 +392,6 @@ def test_best_joint_reward_rollout_can_be_replayed_for_frames():
     assert replay["render_error"] is None
     assert [int(frame[0, 0, 0]) for frame in replay["frames"]] == [110, 111]
     assert instances[-1].actions == [{"player_0": 1, "player_1": 0}]
-
-
-def test_training_summary_prints_latest_lbf_eval_metrics(capsys):
-    metric = {
-        "initial_agent_positions": [
-            {"agent": "player_0", "agent_id": 0, "row": 1, "col": 2, "level": 1},
-            {"agent": "player_1", "agent_id": 1, "row": 3, "col": 4, "level": 2},
-        ],
-        "initial_foods": [{"row": 5, "col": 6, "level": 3}],
-        "episode_length": 7,
-        "foods_collected_total": 1,
-        "foods_collected_per_agent": {"agent_0": 1, "agent_1": 0},
-        "foods_collected_by_agent": {
-            "agent_0": [{"step": 3, "row": 5, "col": 6, "level": 3}],
-            "agent_1": [],
-        },
-        "empty_loads_total": 2,
-        "empty_loads_per_agent": {"agent_0": 1, "agent_1": 1},
-        "invalid_loads_total": 1,
-        "invalid_loads_per_agent": {"agent_0": 0, "agent_1": 1},
-    }
-    stats = {
-        "num_agents": 2,
-        "periodic_eval": [
-            {
-                "episode": 100,
-                "global_step": 5000,
-                "episode_metrics": [metric],
-                "metric_totals": {
-                    "episode_count": 1,
-                    "episode_lengths": [7],
-                    "foods_collected_total": 1,
-                    "foods_collected_per_agent": {"agent_0": 1, "agent_1": 0},
-                    "empty_loads_total": 2,
-                    "empty_loads_per_agent": {"agent_0": 1, "agent_1": 1},
-                    "invalid_loads_total": 1,
-                    "invalid_loads_per_agent": {"agent_0": 0, "agent_1": 1},
-                },
-            }
-        ],
-    }
-
-    _print_lbf_evaluation_metrics(stats)
-    output = capsys.readouterr().out
-
-    assert "LBF Evaluation Metrics" in output
-    assert "Agent starting coordinates: Agent 1: (1, 2) L1, Agent 2: (3, 4) L2" in output
-    assert "Food coordinates: (5, 6) L3" in output
-    assert "Episode length: 7" in output
-    assert "Foods collected total: 1" in output
-    assert "Agent 1: (5, 6) L3" in output
-    assert "Empty loads per agent: Agent 1: 1, Agent 2: 1" in output
-    assert "Invalid loads per agent: Agent 1: 0, Agent 2: 1" in output
 
 
 def test_pettingzoo_wrapper_uses_basic_lbf_defaults():

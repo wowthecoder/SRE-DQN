@@ -59,7 +59,6 @@ def _make_torch_agent(**overrides):
         batch_size=4,
         buffer_capacity=32,
         learning_starts=4,
-        train_every=1,
         epsilon_explore=0.0,
         device=torch.device("cpu"),
     )
@@ -105,7 +104,7 @@ def test_torch_tv_epsilon_zero_matches_mean_weighted_payoffs():
     torch.testing.assert_close(actual, expected)
 
 
-def test_torch_robust_agent_samples_from_batched_robust_policy():
+def test_torch_robust_agent_uses_greedy_argmax_from_batched_robust_policy():
     agent = _make_torch_agent(robust_policy_temperature=0.01)
     obs = np.random.randn(6, 2, 3, 3).astype(np.float32)
     mean = np.zeros((6, 4), dtype=np.float32)
@@ -131,6 +130,24 @@ def test_torch_robust_agent_samples_from_batched_robust_policy():
 
     assert actions.tolist() == [2] * 6
     assert agent.robust_torch_operator_calls == 6
+
+
+def test_torch_robust_agent_full_exploration_uses_random_actions_without_policy_call():
+    np.random.seed(7)
+    agent = _make_torch_agent(epsilon_explore=1.0)
+    obs = np.random.randn(8, 2, 3, 3).astype(np.float32)
+    mean = np.full((8, 4), 0.25, dtype=np.float32)
+
+    class FailingNet(torch.nn.Module):
+        def payoff_matrix(self, obs_t, feature_t=None):
+            raise AssertionError("full exploration should not compute robust policy")
+
+    agent.q_net = FailingNet()
+    actions = agent.act_batch(obs, mean)
+
+    assert actions.shape == (8,)
+    assert np.all((0 <= actions) & (actions < 4))
+    assert agent.robust_torch_operator_calls == 0
 
 
 def test_torch_robust_agent_sanitizes_invalid_policy_values():

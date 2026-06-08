@@ -38,7 +38,6 @@ def _make_agent(**overrides):
         batch_size=4,
         buffer_capacity=32,
         learning_starts=4,
-        train_every=1,
         epsilon_explore=0.0,
         device=torch.device("cpu"),
     )

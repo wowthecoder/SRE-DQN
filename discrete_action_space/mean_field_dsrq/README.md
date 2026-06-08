@@ -330,12 +330,12 @@ for each collection wave until target_episodes:
             batch CHW observations, features, and mean_input across envs
 
             with probability epsilon_explore:
-                sample a random action
+                action = random discrete action
             otherwise:
                 M = q_net.payoff_matrix(obs, feature)  # [B, own_actions, mean_actions]
                 robust_values = TV_worst_case(mean_input, M, epsilon_robust)
                 policy = softmax(robust_values / robust_policy_temperature)
-                sample action from policy
+                action = argmax(policy)
 
         step each active Battle env serially
         next_prob[group] = mean one-hot current actions for that group
@@ -366,7 +366,7 @@ for each collection wave until target_episodes:
 
             y = reward + gamma * (1 - done) * robust_target_value
             minimize valid-masked MSE(q_taken, y)
-            clip gradients to grad_clip
+            if grad_clip is not None, clip gradients to grad_clip
             Adam step
             soft-update target network with target_tau
 
@@ -383,7 +383,7 @@ Key code pointers:
 | `PairwiseMeanFieldQNetwork` | CNN plus feature MLP that outputs `[own_action, mean_action]` payoff matrices. |
 | `torch_tv_worst_case_values(...)` | Batched TV worst-case expectation operator. |
 | `TorchRobustActionValueOperator` | Wraps robust value computation and robust-value softmax policy. |
-| `TorchRobustMFDsrqAgent.act_batch(...)` | Epsilon-random exploration, robust policy construction, and action sampling. |
+| `TorchRobustMFDsrqAgent.act_batch(...)` | Epsilon-random exploration, robust policy construction, and greedy argmax action selection. |
 | `TorchRobustMFDsrqAgent.train_step(...)` | Robust double-DQN style target and masked MSE update. |
 | `MeanFieldReplayBuffer` | Per-main-agent transition ring buffer. |
 | `resolve_mean_field_source(...)` | Chooses `opponent`, `same_team`, or `self` conditioning. |
@@ -392,7 +392,7 @@ Key code pointers:
 | `_soft_copy_agent(...)` | Self-play copy from main to opponent. |
 | `train(...)` in `train_mf_dsrq.py` | Full training loop and stats/checkpoint writer. |
 
-Gradient clipping: `TorchRobustMFDsrqAgent.train_step(...)` uses `torch.nn.utils.clip_grad_norm_` when `grad_clip` is not `None`; the default is `10.0`.
+Gradient clipping: `TorchRobustMFDsrqAgent.train_step(...)` uses `torch.nn.utils.clip_grad_norm_` when `grad_clip` is not `None`; the default is `10.0`. The training notebook exposes `DISABLE_GRAD_CLIPPING`, which passes `grad_clip=None` when enabled.
 
 ## Network Architectures
 
@@ -517,8 +517,7 @@ Default YAML hyperparameters:
 | `batch_size` | `64` |
 | `buffer_capacity` | `80_000` |
 | `learning_starts` | `5_000` |
-| `train_every` | `5` |
-| `grad_clip` | `10.0` |
+| `grad_clip` | `10.0`; notebook can pass `None` via `DISABLE_GRAD_CLIPPING=True` |
 | `epsilon_robust_start` | `0.10` |
 | `epsilon_robust_end` | defaults to start if omitted |
 | `epsilon_robust_decay_frac` | `1.0` |
@@ -816,12 +815,12 @@ Fixed-side tournament records include:
 | Main class | `MFQ` in `mfrl_baselines.py` | `TorchRobustMFDsrqAgent` in `torch_robust_mean_field_dsrq.py` |
 | Network output | Direct Q-vector `[21]` | Pairwise payoff matrix `[21, 21]` |
 | Mean-action source in current trainer | `former_prob[group_idx]`, the same group's previous action histogram | `former_prob[conditioning_group_idx]`; default `mean_field_source: opponent` |
-| Action rule during training | Current code forces greedy argmax through `MFQ.act(...)` | Epsilon-random exploration, otherwise sample from robust softmax policy |
+| Action rule during training | Current code forces greedy argmax through `MFQ.act(...)` | Epsilon-random exploration, otherwise greedy argmax through the robust softmax policy |
 | Target | Double-DQN style direct Q target conditioned on next histogram | Robust online policy plus target payoff matrix and TV worst-case target |
 | Robustness | None | TV mass transport radius `epsilon_robust in [0, 1]` |
 | Replay | `MemoryGroup` arrays built from main-agent episode fragments | `MeanFieldReplayBuffer` deque of main-agent transitions |
 | Target update | Soft update with `tau=0.005` | Soft update with `target_tau=0.005` |
-| Gradient clipping | none | `grad_clip=10.0` by default |
+| Gradient clipping | none | `grad_clip=10.0` by default, disabled by `grad_clip=None` |
 | Self-play | Main trains, opponent soft-copied when main recent reward is higher | Same role structure |
 
 ### Why Larger Robust Epsilon Can Train Slower
@@ -915,14 +914,13 @@ Practical speed knobs for smoke evaluation:
 | YAML `batch_size` | `64` |
 | `buffer_capacity` | `80_000` |
 | `learning_starts` | `5_000` |
-| `train_every` | `5` |
 | `max_train_batches_per_update` | `None` |
 | `lr` | `1e-4` |
 | `gamma` | `0.95` |
 | `target_tau` | `0.005` |
-| `grad_clip` | `10.0` |
+| `grad_clip` | `10.0`, or `None` when notebook `DISABLE_GRAD_CLIPPING=True` |
 | `robust_policy_temperature` | `0.1` |
-| `epsilon_explore` | `1.0 -> 0.2 -> 0.1` |
+| `epsilon_explore` | Random-action exploration probability; non-random branch uses robust argmax |
 | `epsilon_robust` fixed runs | `0.01`, `0.1`, `0.5`, `1.0` |
 | `self_play_tau` | `0.01` |
 | `save_every` | `400` |
@@ -959,3 +957,9 @@ python -m py_compile \
 pytest tests/discrete_action_space/test_torch_robust_mean_field_dsrq.py -v
 pytest tests/discrete_action_space/test_magent2_notebooks.py -v
 ```
+
+## Notes
+In the runs folder, v1 is the version not working.
+v2 is without randomized side swapping.
+v3 run folders is for vectorized/synchrounous batching (16 envs), condition on opponent actions, sampling instead of argmax, and gradient clipping. Exploration epsilon schedule is in 2 stages: linear decay from 1.0 -> 0.2 in 1600 episodes then 0.2 -> 0.1 in the final 400 episodes.
+v4 run folders uses argmax instead of sampling, no gradient clipping, modified exploration epsilon schedule: linear decay form 1.0 -> 0.2 in 1000 episodes, then 0.2 -> 0.05 in the final 1000 episodes. Found that this helps the model converge faster. 

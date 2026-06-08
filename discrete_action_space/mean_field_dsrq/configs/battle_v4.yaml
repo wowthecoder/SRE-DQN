@@ -31,7 +31,6 @@ lr: 1.0e-4
 batch_size: 64
 buffer_capacity: 80000
 learning_starts: 5000
-train_every: 5
 target_tau: 0.005
 grad_clip: 10.0
 

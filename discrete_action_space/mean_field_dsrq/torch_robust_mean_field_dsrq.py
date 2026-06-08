@@ -244,7 +244,7 @@ def torch_tv_worst_case_values(
         )
 
     high_order = torch.argsort(flat_values, dim=-1, descending=True)
-    low_order = torch.argsort(flat_values, dim=-1, descending=False)
+    low_order = torch.flip(high_order, dims=[-1])
     rows = torch.arange(flat_values.shape[0], device=values.device)
     high_pos = torch.zeros_like(rows)
     low_pos = torch.zeros_like(rows)
@@ -345,7 +345,6 @@ class TorchRobustMFDsrqAgent:
         batch_size: int = 64,
         buffer_capacity: int = 80_000,
         learning_starts: int = 5_000,
-        train_every: int = 5,
         target_tau: float = 0.005,
         grad_clip: Optional[float] = 10.0,
         epsilon_explore: float = 1.0,
@@ -361,7 +360,6 @@ class TorchRobustMFDsrqAgent:
         self.gamma = float(gamma)
         self.batch_size = int(batch_size)
         self.learning_starts = int(learning_starts)
-        self.train_every = max(1, int(train_every))
         self.target_tau = float(target_tau)
         self.grad_clip = grad_clip
         self.epsilon_explore = float(epsilon_explore)
@@ -400,7 +398,6 @@ class TorchRobustMFDsrqAgent:
         )
         self.robust_torch_operator_calls = 0
 
-        self._update_calls = 0
         self._total_train_steps = 0
         self._last_loss: Optional[float] = None
         self._update_times: list[float] = []
@@ -457,12 +454,18 @@ class TorchRobustMFDsrqAgent:
                 1.0 / self.n_nbr_actions,
                 dtype=np.float32,
             )
-        explore = np.random.rand(batch_size) < self.epsilon_explore
+        if batch_size == 0:
+            return np.array([], dtype=np.int64)
+
+        explore_prob = min(max(float(self.epsilon_explore), 0.0), 1.0)
+        explore = np.random.rand(batch_size) < explore_prob
         actions = np.random.randint(0, self.n_own_actions, size=batch_size, dtype=np.int64)
         pending = np.flatnonzero(~explore)
         if pending.size:
             obs_t = torch.as_tensor(
-                obs_batch[pending], dtype=torch.float32, device=self.device
+                obs_batch[pending],
+                dtype=torch.float32,
+                device=self.device,
             )
             mean_t = torch.as_tensor(
                 np.asarray(mean_a_batch)[pending],
@@ -481,8 +484,8 @@ class TorchRobustMFDsrqAgent:
             payoff = self.q_net.payoff_matrix(obs_t, feature_t)
             policy = self._policy_from_payoffs(payoff, mean_t)
             policy = _normalize_torch_distribution(policy)
-            sampled = torch.multinomial(policy, num_samples=1).squeeze(1)
-            actions[pending] = sampled.detach().cpu().numpy().astype(np.int64)
+            greedy = policy.argmax(dim=1)
+            actions[pending] = greedy.detach().cpu().numpy().astype(np.int64)
         return actions.astype(np.int64)
 
     def push(
@@ -515,14 +518,6 @@ class TorchRobustMFDsrqAgent:
             feature=feature,
             next_feature=next_feature,
         )
-        self._update_calls += 1
-
-    def maybe_train(self) -> Optional[float]:
-        if len(self.buffer) < self.learning_starts:
-            return None
-        if self._update_calls % self.train_every != 0:
-            return None
-        return self.train_step()
 
     def train_step(self) -> Optional[float]:
         if len(self.buffer) < max(self.batch_size, self.learning_starts):

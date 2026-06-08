@@ -25,8 +25,6 @@ from dueling_double_dqn_sre import (
 from sre_solvers import (
     LemkeLcpBimatrixSreSolver,
     LemkeLcpBimatrixSreSolverConfig,
-    NfgTransformerSreSolver,
-    NfgTransformerSreSolverConfig,
     PathCBimatrixSreSolver,
     PathCBimatrixSreSolverConfig,
     PathMcpNPlayerSreSolverConfig,
@@ -101,7 +99,7 @@ class DeepSrqLbfHyperparams:
             target_tau=None,
             action_epsilon_start=1.0,
             action_epsilon_end=0.05,
-            action_epsilon_decay_fraction=0.6,
+            action_epsilon_decay_fraction=1.0,
             sre_policy_cache_enabled=True,
         )
     )
@@ -112,9 +110,6 @@ class DeepSrqLbfHyperparams:
         default_factory=lambda: ProcessPoolPathMcpNPlayerSreSolverConfig(
             max_workers=8,
         )
-    )
-    nfg_transformer: NfgTransformerSreSolverConfig = field(
-        default_factory=NfgTransformerSreSolverConfig
     )
 
 DEFAULT_LBF_CONFIG = basic_lbf_config()
@@ -229,6 +224,7 @@ def _write_reward_history_snapshot(
     training_mode=None,
     epsilon_robust_initial=None,
     epsilon_schedule=None,
+    use_action_masks=True,
     periodic_eval=None,
     total_environment_steps=None,
     gradient_steps=None,
@@ -249,6 +245,7 @@ def _write_reward_history_snapshot(
             None if epsilon_robust_initial is None else float(epsilon_robust_initial)
         ),
         "epsilon_schedule": None if epsilon_schedule is None else str(epsilon_schedule),
+        "use_action_masks": bool(use_action_masks),
         "rewards": rewards_history,
         "episode_rewards": _episode_rewards_from_agent_history(rewards_history),
         "episode_lengths": [int(length) for length in episode_lengths],
@@ -277,7 +274,9 @@ def _slugify(label):
     return str(label).strip().lower().replace(" ", "_")
 
 
-def _action_masks(env, agent_order):
+def _action_masks(env, agent_order, *, use_action_masks=True):
+    if not bool(use_action_masks):
+        return None
     if hasattr(env, "action_masks"):
         return env.action_masks(agent_order)
     inner = getattr(env, "_inner", env)
@@ -309,6 +308,7 @@ def _evaluate_agent_rewards(
     n_episodes,
     max_steps=None,
     num_envs=1,
+    use_action_masks=True,
 ):
     old_epsilon = agent.config.epsilon_explore
     agent.config.epsilon_explore = 0.0
@@ -351,7 +351,11 @@ def _evaluate_agent_rewards(
                         for idx in active_indices
                     ]
                     action_masks_batch = [
-                        _action_masks(slots[idx]["env"], slots[idx]["agent_order"])
+                        _action_masks(
+                            slots[idx]["env"],
+                            slots[idx]["agent_order"],
+                            use_action_masks=use_action_masks,
+                        )
                         for idx in active_indices
                     ]
                     actions_batch = agent.act_joint_batch(
@@ -411,7 +415,11 @@ def _evaluate_agent_rewards(
                         state = canonical_lbf_state(env, agent_order)
                         action_list = agent.act_joint(
                             state,
-                            action_masks=_action_masks(env, agent_order),
+                            action_masks=_action_masks(
+                                env,
+                                agent_order,
+                                use_action_masks=use_action_masks,
+                            ),
                         )
                         action_dict = _action_dict_from_list(action_list, agent_order)
                         obs_dict, reward_dict, term_dict, trunc_dict, _ = env.step(action_dict)
@@ -447,8 +455,6 @@ def _evaluate_agent_rewards(
 def _make_solver(solver_name, hp, seed):
     if not isinstance(hp, DeepSrqLbfHyperparams):
         hp = deep_srq_lbf_hyperparams(hp)
-    if solver_name in {"nfg_transformer_sre", "nfg_sre"}:
-        return NfgTransformerSreSolver(config=hp.nfg_transformer)
     if solver_name in {"path_mcp_nplayer_pool", "path_nplayer_pool", "path_mcp_pool"}:
         return ProcessPoolPathMcpNPlayerSreSolver(
             config=replace(hp.path_mcp_pool, random_seed=seed)
@@ -531,81 +537,6 @@ def _action_dict_from_list(action_list, agent_order):
     }
 
 
-def _agent_metric_label(agent_key):
-    try:
-        agent_idx = int(str(agent_key).rsplit("_", 1)[-1]) + 1
-    except (TypeError, ValueError):
-        return str(agent_key)
-    return f"Agent {agent_idx}"
-
-
-def _format_agent_counts(counts):
-    if not counts:
-        return "none"
-    return ", ".join(
-        f"{_agent_metric_label(agent_key)}: {int(value)}"
-        for agent_key, value in sorted(counts.items())
-    )
-
-
-def _format_positions(records):
-    if not records:
-        return "none"
-    labels = []
-    for record in records:
-        agent_idx = int(record.get("agent_id", len(labels))) + 1
-        labels.append(
-            f"Agent {agent_idx}: ({int(record['row'])}, {int(record['col'])}) "
-            f"L{int(record['level'])}"
-        )
-    return ", ".join(labels)
-
-
-def _format_foods(records):
-    if not records:
-        return "none"
-    return ", ".join(
-        f"({int(record['row'])}, {int(record['col'])}) L{int(record['level'])}"
-        for record in records
-    )
-
-
-def _print_lbf_evaluation_metrics(stats):
-    periodic_eval = list((stats or {}).get("periodic_eval") or [])
-    if not periodic_eval:
-        print("LBF Evaluation Metrics: none")
-        return
-
-    latest_eval = periodic_eval[-1]
-    episode_metrics = list(latest_eval.get("episode_metrics") or [])
-    metric = episode_metrics[-1] if episode_metrics else {}
-    totals = latest_eval.get("metric_totals") or {}
-
-    print("LBF Evaluation Metrics")
-    if "episode" in latest_eval:
-        print(f"Episode: {int(latest_eval['episode'])}")
-    if "global_step" in latest_eval:
-        print(f"Global step: {int(latest_eval['global_step'])}")
-    print(
-        "Agent starting coordinates: "
-        f"{_format_positions(metric.get('initial_agent_positions') or [])}"
-    )
-    print(f"Food coordinates: {_format_foods(metric.get('initial_foods') or [])}")
-    if metric.get("episode_length") is not None:
-        print(f"Episode length: {int(metric['episode_length'])}")
-
-    foods_total = totals.get("foods_collected_total", metric.get("foods_collected_total", 0))
-    print(f"Foods collected total: {int(foods_total)}")
-    foods_by_agent = metric.get("foods_collected_by_agent") or {}
-    for agent_key, food_records in sorted(foods_by_agent.items()):
-        print(f"{_agent_metric_label(agent_key)}: {_format_foods(food_records)}")
-
-    empty_counts = totals.get("empty_loads_per_agent") or metric.get("empty_loads_per_agent")
-    invalid_counts = totals.get("invalid_loads_per_agent") or metric.get("invalid_loads_per_agent")
-    print(f"Empty loads per agent: {_format_agent_counts(empty_counts)}")
-    print(f"Invalid loads per agent: {_format_agent_counts(invalid_counts)}")
-
-
 def _train_step_due_count(previous_update_calls, current_update_calls, train_every):
     train_every = max(1, int(train_every))
     return int(current_update_calls // train_every - previous_update_calls // train_every)
@@ -673,6 +604,7 @@ def train_lbf_deep_srq_vectorized(
     eval_seed_offset=50_000,
     eval_num_envs=1,
     num_envs=2,
+    use_action_masks=True,
     run_name_suffix=None,
     print_full_stats=True,
     scenario_key=None,
@@ -749,6 +681,7 @@ def train_lbf_deep_srq_vectorized(
             training_mode="vectorized",
             epsilon_robust_initial=epsilon_robust_initial,
             epsilon_schedule=epsilon_schedule,
+            use_action_masks=use_action_masks,
             periodic_eval=eval_history,
             total_environment_steps=global_step,
             gradient_steps=gradient_steps,
@@ -758,7 +691,8 @@ def train_lbf_deep_srq_vectorized(
     print(
         f"LBF DeepSRQ vectorized | players={num_agents} | solver={solver_name} | "
         f"eps0={epsilon_robust_initial:g} | schedule={epsilon_schedule} | "
-        f"seed={seed} | num_envs={num_envs} | agent_device={agent.device} | "
+        f"seed={seed} | num_envs={num_envs} | action_masks={bool(use_action_masks)} | "
+        f"agent_device={agent.device} | "
         f"solver_device={getattr(agent.sre_solver, 'device', 'n/a')}"
     )
 
@@ -773,7 +707,7 @@ def train_lbf_deep_srq_vectorized(
             "env": env,
             "agent_order": order,
             "state": canonical_lbf_state(env, order),
-            "action_masks": _action_masks(env, order),
+            "action_masks": _action_masks(env, order, use_action_masks=use_action_masks),
             "ep_rewards": np.zeros(len(order), dtype=np.float64),
             "ep_steps": 0,
             "active": True,
@@ -834,7 +768,11 @@ def train_lbf_deep_srq_vectorized(
                     )
                     next_action_masks = None
                     if env.agents and not np.all(done_mask > 0.0):
-                        next_action_masks = _action_masks(env, order)
+                        next_action_masks = _action_masks(
+                            env,
+                            order,
+                            use_action_masks=use_action_masks,
+                        )
                     pending_transitions.append(
                         (
                             slot["state"],
@@ -896,6 +834,7 @@ def train_lbf_deep_srq_vectorized(
                             n_episodes=eval_episodes,
                             max_steps=config.get("max_episode_steps"),
                             num_envs=eval_num_envs,
+                            use_action_masks=use_action_masks,
                         )
                         eval_record.update(
                             {
@@ -990,6 +929,7 @@ def train_lbf_deep_srq_vectorized(
         "training_mode": "vectorized",
         "num_envs": int(num_envs),
         "eval_num_envs": int(eval_num_envs),
+        "use_action_masks": bool(use_action_masks),
         "completed_episodes": int(completed_episodes),
         "vectorized_collection_steps": int(vectorized_collection_steps),
         "rewards": rewards_history,

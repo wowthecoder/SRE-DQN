@@ -6,7 +6,7 @@ from typing import Dict, Optional, Sequence, Tuple
 
 from pettingzoo import ParallelEnv
 
-from .instrumented_env import InstrumentedForagingEnv
+from .exact_level_env import ExactLevelForagingEnv
 from .state_action_encoding import canonical_lbf_state, lbf_action_masks
 
 
@@ -72,7 +72,7 @@ class LBFParallelEnv(ParallelEnv):
         ):
             _as_level_list("max_food_level", max_food_level, self.max_food)
 
-        self._inner = InstrumentedForagingEnv(
+        self._inner = ExactLevelForagingEnv(
             players=players,
             player_levels=player_levels,
             min_player_level=min_player_level,

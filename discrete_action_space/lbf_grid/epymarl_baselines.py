@@ -15,7 +15,6 @@ from pathlib import Path
 import numpy as np
 
 from .epymarl_lbf_env import get_epymarl_lbf_scenario
-from .instrumented_env import aggregate_lbf_episode_metrics
 from .notebook_eval import plot_training_reward_curve, plot_training_reward_max_curve
 
 
@@ -68,8 +67,9 @@ def _load_episode_metrics(metrics_dir: str | Path) -> list[dict]:
 
 
 def _episode_metric_totals(metrics: list[dict]) -> dict:
-    """Aggregate LBF per-episode metric payloads for notebook summaries."""
-    return aggregate_lbf_episode_metrics(metrics)
+    """Return an empty metric summary after LBF instrumentation removal."""
+    del metrics
+    return {"episode_count": 0, "episode_lengths": []}
 
 
 def _format_epymarl_override_value(value) -> str:

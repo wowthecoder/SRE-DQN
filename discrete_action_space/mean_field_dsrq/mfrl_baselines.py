@@ -270,7 +270,6 @@ class ValueNet(nn.Module):
         feature_shape,
         num_actions,
         *,
-        update_every=5,
         use_mf=False,
         learning_rate=1e-4,
         tau=0.005,
@@ -280,7 +279,6 @@ class ValueNet(nn.Module):
         self.view_space = tuple(obs_shape)
         self.feature_space = int(feature_shape)
         self.num_actions = int(num_actions)
-        self.update_every = int(update_every)
         self.use_mf = bool(use_mf)
         self.temperature = 0.1
         self.lr = float(learning_rate)
@@ -391,6 +389,9 @@ class DQN(ValueNet):
 
     def flush_buffer(self, **kwargs):
         self.replay_buffer.push(**kwargs)
+
+    def act(self, obs, feature, prob=None, eps=None, deterministic: bool = False):
+        return super().act(obs, feature, prob=prob, eps=eps, deterministic=True)
 
     def train(self, device, *, max_batches: int | None = None):
         self.replay_buffer.tight()
@@ -976,7 +977,7 @@ class MFRLPolicyAdapter:
         result_or_folder: dict[str, Any] | str | Path,
         *,
         side: str = "main",
-        step: str = "final",
+        step: str = "best",
         map_location: str | torch.device = "cpu",
     ):
         result = _load_result(result_or_folder)
@@ -987,11 +988,22 @@ class MFRLPolicyAdapter:
         env = LowLevelBattleEnv(self.task_config)
         meta = env.meta()
         self.model = _spawn_model(self.algorithm, meta, env.max_steps, self.device)
-        self.model.load(result["model_dirs"][side], step=step, map_location=self.device)
+        if str(step) == "best":
+            model_dir_map = result.get("best_model_dirs")
+            if not model_dir_map or side not in model_dir_map:
+                raise KeyError(
+                    f"Baseline result for {self.algorithm!r} does not contain a best checkpoint "
+                    f"directory for side {side!r}."
+                )
+            model_dir = model_dir_map[side]
+        else:
+            model_dir = result["model_dirs"][side]
+        self.model.load(model_dir, step=step, map_location=self.device)
         _set_mfrl_model_eval_mode(self.model)
         self.meta = meta
         self.side = side
-        self.checkpoint = str(result["model_dirs"][side])
+        self.checkpoint = str(model_dir)
+        self.checkpoint_step = str(step)
         self._former_prob_by_type: dict[str, np.ndarray] = {}
 
     def act_low_level(self, env: LowLevelBattleEnv, group_idx: int, prob: np.ndarray | None = None, eps: float = 0.1):

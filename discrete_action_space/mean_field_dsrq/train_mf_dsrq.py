@@ -357,7 +357,6 @@ def make_mfdsrq_agent(
         batch_size=cfg.get("batch_size", 64),
         buffer_capacity=cfg.get("buffer_capacity", 80_000),
         learning_starts=cfg.get("learning_starts", 5_000),
-        train_every=cfg.get("train_every", 5),
         target_tau=cfg.get("target_tau", 0.005),
         grad_clip=cfg.get("grad_clip", 10.0),
         epsilon_explore=cfg.get("epsilon_explore_start", 1.0),
