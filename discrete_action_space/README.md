@@ -3,6 +3,273 @@
 This folder extends tabular Strategically Robust Q-learning (SRQ) to deep
 discrete-action stage games. The DQN produces a normal-form Q tensor and an SRE stage-game solver turns that tensor into one mixed policy per agent.
 
+## Algorithm Lineage
+
+The active discrete-action stack has three closely related algorithms:
+
+- Tabular NashQ keeps a joint-action Q table and uses a Nash equilibrium stage
+  solver for action selection and Bellman targets.
+- Tabular SRQ keeps the same joint-action Q table, but replaces the Nash
+  operator with the strategically robust equilibrium (SRE) operator.
+- Deep SRQ keeps the SRQ operator, but replaces the tabular table with a
+  dueling Double-DQN that emits the full normal-form payoff tensor.
+
+All three algorithms model every player's value for each joint action. The main
+change across the sequence is the stage-game operator and the representation of
+the Q function:
+
+| Algorithm | Q representation | Stage-game operator | Solver path | Main implementation |
+|---|---|---|---|---|
+| Tabular NashQ | `dict[state] -> [A1, ..., AN, N]` | Nash equilibrium | `pygambit.nash.enummixed_solve` for the 2-player bimatrix case | `NashQagent.py` |
+| Tabular SRQ | `dict[state] -> [A1, ..., AN, N]` | SRE with TVC Wasserstein radius | PATH LCP for bimatrix games | `SRQagent.py` |
+| Deep SRQ | neural `Q_theta(s) -> [A1, ..., AN, N]` | SRE with TVC Wasserstein radius | PATH LCP for 2 players, PATH MCP for N players, optional process pools | `dueling_double_dqn_sre.py` |
+
+Under the total-variation cost used by the discrete SRQ paper, the robust
+radius is naturally interpreted on `[0, 1]`: `epsilon_robust = 0` recovers Nash
+behavior and larger values move toward security-style robustness.
+
+## Algorithm Pseudocode
+
+### Tabular NashQ
+
+```text
+Initialise one agent-local joint Q table:
+  Q_i(s, a_1, ..., a_N, j) = 0 for every modelled player j
+
+For each episode:
+  reset environment to state s
+
+  While not terminal:
+    U <- Q_i(s) as a normal-form stage game
+    pi_NE <- Nash(U)
+
+    For each agent k:
+      with probability epsilon_explore:
+        sample a_k uniformly
+      otherwise:
+        sample a_k from pi_NE[k]
+
+    step environment with joint action a
+    observe rewards r_1, ..., r_N and next state s_next
+
+    if s_next is terminal:
+      v_next <- zeros(N)
+    else:
+      pi_next <- Nash(Q_i(s_next))
+      v_next <- E_{a' ~ product(pi_next)}[Q_i(s_next, a')]
+
+    Q_i(s, a, :) <- (1 - alpha) Q_i(s, a, :)
+                    + alpha * (r + gamma * v_next)
+
+    s <- s_next
+
+  decay epsilon_explore and alpha
+```
+
+`NashQAgent` inherits most table/update mechanics from `SRQAgent`; the
+difference is that `solve_sre_from_q_values(...)` is overridden to call pygambit
+and select the Nash equilibrium with highest nominal joint payoff when multiple
+equilibria are returned.
+
+### Tabular SRQ
+
+```text
+Initialise one agent-local joint Q table:
+  Q_i(s, a_1, ..., a_N, j) = 0 for every modelled player j
+Initialise epsilon_robust, epsilon_explore, and alpha
+
+For each episode:
+  reset environment to state s
+
+  While not terminal:
+    U <- Q_i(s) as a normal-form stage game
+    pi_SRE <- SRE(U, epsilon_robust)
+
+    For each agent k:
+      with probability epsilon_explore:
+        sample a_k uniformly
+      otherwise:
+        sample a_k from pi_SRE[k]
+
+    step environment with joint action a
+    observe rewards r_1, ..., r_N and next state s_next
+
+    if s_next is terminal:
+      v_next <- zeros(N)
+    else:
+      pi_next <- SRE(Q_i(s_next), epsilon_robust)
+      v_next <- E_{a' ~ product(pi_next)}[Q_i(s_next, a')]
+
+    Q_i(s, a, :) <- (1 - alpha) Q_i(s, a, :)
+                    + alpha * (r + gamma * v_next)
+
+    s <- s_next
+
+  decay epsilon_robust, epsilon_explore, and alpha
+```
+
+`SRQAgent` solves the two-player SRE stage game through
+`solve_strategically_robust_bimatrix_game_path_lcp(...)`. It tries pure-profile
+PATH starts when `num_pure_starts=None`, adds the configured random starts, and
+selects the returned policy profile with highest nominal joint payoff.
+
+### Deep SRQ
+
+```text
+Initialise:
+  online Q network Q_theta(s) -> [A1, ..., AN, N]
+  target Q network Q_target <- Q_theta
+  replay buffer D
+  SRE stage-game solver
+
+For each episode:
+  reset environment and build the canonical global state vector s
+  update epsilon_robust and epsilon_explore from the configured schedules
+
+  While not terminal:
+    q <- Q_theta(s)
+    pi_SRE <- SRE(q, epsilon_robust), after slicing to legal actions if masks exist
+
+    For each agent k:
+      with probability epsilon_explore:
+        sample a legal random action
+      otherwise:
+        sample from pi_SRE[k]
+
+    step environment with joint action a
+    store (s, a, r, s_next, done, masks, next_masks) in replay D
+
+    Every train_every environment updates:
+      sample a minibatch from D
+      current_q <- Q_theta(s_batch)[joint action indices]
+
+      next_online <- Q_theta(s_next)
+      next_target <- Q_target(s_next)
+      pi_next <- SRE(next_online, epsilon_robust)
+      v_next <- E_{a' ~ product(pi_next)}[next_target(a')]
+
+      target <- r + gamma * (1 - done) * v_next
+      minimise MSE(current_q, target)
+      update Q_target by hard sync or Polyak averaging
+
+    s <- s_next
+```
+
+The Deep SRQ Bellman value is still the tabular SRQ product-policy expectation.
+Robustness changes the policy profile selected by the SRE stage solver; the
+default target does not add a second robust penalty term after the solve.
+
+## Architecture and Hyperparameters
+
+### Tabular NashQ and Tabular SRQ
+
+Both tabular agents use the same table shape and update rule:
+
+- State key: `str(state)` in the bimatrix grid-world implementation.
+- Table value: NumPy tensor with shape `[num_actions] * num_agents + [num_agents]`.
+- Updated cell: `Q_i(s, a_1, ..., a_N, :)`, so each stored transition updates
+  all modelled players' values for the realised joint action.
+- Bellman target: `rewards + gamma * equilibrium_value(next_state)`.
+
+The shared `SRQAgentConfig` defaults are:
+
+| Field | Default | Meaning |
+|---|---:|---|
+| `epsilon_robust` | `1.0` | SRE robustness radius; ignored by NashQ's stage solver |
+| `epsilon_explore` | `1.0` | epsilon-greedy action exploration |
+| `alpha` | `0.1` | tabular learning rate |
+| `gamma` | `0.9` | discount factor |
+| `decay_rate` | `0.998` | multiplicative decay for exploration, alpha, and exponential robust-epsilon schedules |
+| `epsilon_robust_min` | `0.01` | floor for exponential SRQ robustness decay |
+| `epsilon_explore_min` | `0.01` | exploration floor |
+| `alpha_min` | `1 / 3000` | learning-rate floor |
+| `epsilon_schedule` | `"exponential"` | one of `"constant"`, `"linear"`, or `"exponential"` for SRQ robustness |
+
+For NashQ, the robust-epsilon fields are carried by the inherited config but do
+not affect the pygambit Nash solve.
+
+### Deep SRQ
+
+The default neural architecture is `DuelingJointQNetwork`:
+
+```text
+state vector
+  -> MLP hidden dims q_hidden_dims, default (128, 128), ReLU activations
+  -> value head:     Linear(feature_dim, num_agents)
+  -> advantage head: Linear(feature_dim, num_actions ** num_agents * num_agents)
+  -> reshape advantage to [batch, |A_joint|, num_agents]
+  -> Q = V + (Adv - mean_joint_action Adv)
+  -> reshape to [batch, A1, ..., AN, N]
+```
+
+Two alternate critic layouts are available through `network_type`:
+
+- `"per_agent_independent"`: one independent dueling joint-action critic per
+  player.
+- `"shared_trunk_separate_heads"`: a shared state encoder with separate
+  per-player dueling payoff heads.
+
+The default `DuelingDoubleDqnSreAgentConfig` is:
+
+| Field | Default | Meaning |
+|---|---:|---|
+| `lr` | `3e-4` | Adam learning rate |
+| `gamma` | `0.99` | discount factor, often overridden to `0.9` in bimatrix sweeps |
+| `buffer_size` | `10000` | replay capacity |
+| `batch_size` | `16` | replay minibatch size |
+| `learning_starts` | `1000` | minimum replay size before training |
+| `grad_clip_norm` | `10.0` | gradient clipping norm |
+| `sre_num_random_starts` | `5` | random starts per SRE solve in the DQN loop |
+| `sre_num_pure_starts` | `0` | pure-profile starts per SRE solve unless overridden |
+| `train_every` | `1` | environment updates between gradient updates |
+| `target_update_steps` | `100` | hard target-network sync cadence, in gradient steps |
+| `target_tau` | `None` | if set, use Polyak target updates instead of hard sync |
+| `target_equilibrium_update_steps` | `4` | cadence for fresh target-equilibrium solves when cache reuse is enabled |
+| `action_epsilon_start/end` | `1.0 / 0.05` | exploration schedule endpoints |
+| `action_epsilon_decay_fraction` | `0.5` | fraction of training used for exploration decay |
+| `epsilon_robust_initial` | `1.0` | robust-epsilon schedule start |
+| `epsilon_schedule` | `"constant"` | one of `"constant"`, `"linear"`, or `"exponential"` |
+| `sre_solver_name` | `"path_c_pool"` | factory name used by experiment helpers |
+| `sre_solver_workers` | `8` | worker count for process-pool solvers |
+| `q_hidden_dims` | `(128, 128)` | MLP hidden dimensions |
+| `sre_policy_cache_enabled` | `True` | cache exact rounded Q-tensor policy solves |
+| `sre_policy_cache_size` | `4096` | maximum policy-cache entries |
+| `sre_policy_cache_round_digits` | `6` | Q tensor rounding precision for cache keys |
+| `sre_state_cache_round_digits` | `4` | state-vector rounding precision for state-level keys |
+| `sre_remove_fixed_players` | `True` | remove one-action masked players from the PATH stage game |
+
+Experiment notebooks override these defaults depending on the scenario. For
+example, the current bimatrix full-pair sweep uses `gamma=0.9`, `train_every=4`,
+`target_equilibrium_update_steps=1`, disables the SRE policy cache, and sets
+`sre_num_pure_starts=16` for the 4-by-4 bimatrix game.
+
+## What Changed from Tabular SRQ to Deep SRQ
+
+The Deep SRQ implementation is not just a table replaced by a neural network.
+The important engineering changes are:
+
+- Replaced the explicit state table with a dueling joint-action Q network whose
+  output is the same normal-form tensor that tabular SRQ used.
+- Added Double-DQN target semantics: the online network selects the next-state
+  SRE policy and the target network evaluates that policy.
+- Added a replay buffer, `learning_starts`, minibatch updates, gradient
+  clipping, `train_every`, hard/soft target-network updates, and checkpointing.
+- Added batched action selection through `act_joint_batch(...)` so vectorized
+  environments can collect rollouts while sharing solver calls.
+- Added action-mask support: legal-action subgames are sliced before solving,
+  fixed one-action players can be removed, and returned policies are expanded
+  back to full action spaces.
+- Added PATH process-pool solvers for expensive in-loop SRE solves:
+  `ProcessPoolPathCBimatrixSreSolver` for two-player LCPs and
+  `ProcessPoolPathMcpNPlayerSreSolver` for N-player MCPs.
+- Added exact rounded Q-tensor policy caching, state-level reuse candidates,
+  warm-start policy forwarding, and duplicate-key coalescing for batched solves.
+- Generalized the stage-game boundary from two-player bimatrix LCPs to
+  N-player MCPs through `PathMcpNPlayerSreSolver`.
+- Added timing, cache, candidate-count, and backend solver diagnostics to
+  training artifacts so solver cost can be separated from neural-learning
+  behavior.
+
 ## PATH Solver Integration
 
 The core runtime boundary is `PathSolverWrapper` in `path_solver.py`. It loads
@@ -51,7 +318,7 @@ and `PathMcpNPlayerSreSolver` for more than two agents. Notebook and experiment
 helpers often inject a solver built through `make_sre_solver(...)`, which is how
 the process-pool and alternative solver backends are usually selected.
 
-## Deep SRQ Pseudocode
+## Deep SRQ Detailed Data Flow
 
 The deep algorithm follows tabular SRQ's operator, but replaces the tabular
 state-action table with a neural Q tensor.
@@ -115,20 +382,16 @@ default Bellman value.
 
 ## Q Tensor to PATH
 
-All three deep discrete algorithms eventually hand the SRE solver a finite
-normal-form payoff tensor:
+Deep SRQ hands the SRE solver a finite normal-form payoff tensor:
 
 ```text
 q_tensor[a_1, ..., a_N, i] = estimated payoff/Q value for player i
                              at joint action (a_1, ..., a_N)
 ```
 
-For Deep SRQ, the network emits this tensor directly as
-`Q_theta(s) -> [A1, ..., AN, N]`. For SR-AC and SR-A2C, the query critic is
-called once per legal joint action, producing `[num_joint_actions, N]`, and
-the result is reshaped to `[A1_legal, ..., AN_legal, N]`. When action masks are
-active, the solver sees only the legal subgame; returned legal-action policies
-are expanded back to the full action space by the caller.
+The network emits this tensor directly as `Q_theta(s) -> [A1, ..., AN, N]`.
+When action masks are active, the solver sees only the legal subgame; returned
+legal-action policies are expanded back to the full action space by the caller.
 
 The solver factory chooses the PATH formulation from the tensor arity:
 
@@ -307,7 +570,7 @@ matrices `A1`, `A2`. It also adds the simplex equalities as paired linear rows.
 The final LCP has the standard PATH form:
 
 ```text
-0 <= z  ⟂  M z + q >= 0
+0 <= z  perp  M z + q >= 0
 ```
 
 with variable order:
@@ -388,9 +651,9 @@ are free. Since `prod_{j != i} p_j(a_j)` is multilinear for `N > 2`, these
 callbacks define an MCP rather than a single constant LCP matrix.
 
 Each PATH candidate is converted back to policies from the `prob` blocks. The
-solver then recomputes robust exploitability and robust policy values in Python.
-Candidates are ordered by `robust_exploitability` by default, or by
-`joint_nominal_welfare` when requested.
+solver then recomputes nominal and robust policy values in Python. Candidates
+are ordered by `joint_nominal_welfare`, matching the two-player wrapper's
+highest-joint-payoff selection rule.
 
 ## State Between Solves
 

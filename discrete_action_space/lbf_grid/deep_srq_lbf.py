@@ -23,21 +23,8 @@ from dueling_double_dqn_sre import (
     DuelingDoubleDqnSreAgentConfig,
 )
 from sre_solvers import (
-    LemkeLcpBimatrixSreSolver,
-    LemkeLcpBimatrixSreSolverConfig,
-    PathCBimatrixSreSolver,
-    PathCBimatrixSreSolverConfig,
-    PathMcpNPlayerSreSolverConfig,
-    PathMcpNPlayerSreSolver,
-    PathTvcMcpNPlayerSreSolver,
-    ProcessPoolLemkeLcpBimatrixSreSolver,
-    ProcessPoolLemkeLcpBimatrixSreSolverConfig,
     ProcessPoolPathCBimatrixSreSolver,
     ProcessPoolPathCBimatrixSreSolverConfig,
-    ProcessPoolPathMcpNPlayerSreSolverConfig,
-    ProcessPoolPathMcpNPlayerSreSolver,
-    ProcessPoolPathTvcMcpNPlayerSreSolver,
-    ProcessPoolPathTvcMcpNPlayerSreSolverConfig,
 )
 from stats_utils import (
     collect_timing_stats,
@@ -53,16 +40,16 @@ from .state_action_encoding import canonical_lbf_state, lbf_action_masks
 
 
 BASE_SEED = 2025
-DEFAULT_LBF_SOLVER = "path_mcp_nplayer"
+DEFAULT_LBF_SOLVER = "path_c_pool"
 DEFAULT_OUTPUT_ROOT = Path("lbf_deep_srq_runs")
 
 BASIC_LBF_CONFIG = {
-    "players": 3,
-    "field_size": (10, 10),
+    "players": 2,
+    "field_size": (8, 8),
     "sight": None,
     "max_food": 3,
     "max_episode_steps": 75,
-    "player_levels": [1, 1, 1],
+    "player_levels": [1, 1],
     "min_food_level": 1,
     "max_food_level": 3,
     "normalize_reward": True,
@@ -103,11 +90,8 @@ class DeepSrqLbfHyperparams:
             sre_policy_cache_enabled=True,
         )
     )
-    path_mcp: PathMcpNPlayerSreSolverConfig = field(
-        default_factory=PathMcpNPlayerSreSolverConfig
-    )
-    path_mcp_pool: ProcessPoolPathMcpNPlayerSreSolverConfig = field(
-        default_factory=lambda: ProcessPoolPathMcpNPlayerSreSolverConfig(
+    path_c_pool: ProcessPoolPathCBimatrixSreSolverConfig = field(
+        default_factory=lambda: ProcessPoolPathCBimatrixSreSolverConfig(
             max_workers=8,
         )
     )
@@ -452,54 +436,6 @@ def _evaluate_agent_rewards(
     }
 
 
-def _make_solver(solver_name, hp, seed):
-    if not isinstance(hp, DeepSrqLbfHyperparams):
-        hp = deep_srq_lbf_hyperparams(hp)
-    if solver_name in {"path_mcp_nplayer_pool", "path_nplayer_pool", "path_mcp_pool"}:
-        return ProcessPoolPathMcpNPlayerSreSolver(
-            config=replace(hp.path_mcp_pool, random_seed=seed)
-        )
-    if solver_name in {
-        "path_tvc_mcp_nplayer_pool",
-        "path_tvc_nplayer_pool",
-        "path_tvc_mcp_pool",
-    }:
-        return ProcessPoolPathTvcMcpNPlayerSreSolver(
-            config=ProcessPoolPathTvcMcpNPlayerSreSolverConfig(
-                pathwrap_path=hp.path_mcp_pool.pathwrap_path,
-                max_workers=hp.path_mcp_pool.max_workers,
-                start_method=hp.path_mcp_pool.start_method,
-                random_seed=seed,
-            )
-        )
-    if solver_name in {"path_mcp_nplayer", "path_nplayer", "path_mcp"}:
-        return PathMcpNPlayerSreSolver(config=replace(hp.path_mcp, random_seed=seed))
-    if solver_name in {"path_tvc_mcp_nplayer", "path_tvc_nplayer", "path_tvc_mcp"}:
-        return PathTvcMcpNPlayerSreSolver(config=replace(hp.path_mcp, random_seed=seed))
-    if solver_name == "path_c_pool":
-        return ProcessPoolPathCBimatrixSreSolver(
-            config=ProcessPoolPathCBimatrixSreSolverConfig(
-                max_workers=hp.path_mcp_pool.max_workers,
-                start_method=hp.path_mcp_pool.start_method,
-                random_seed=seed,
-            )
-        )
-    if solver_name == "path_c":
-        return PathCBimatrixSreSolver(
-            config=PathCBimatrixSreSolverConfig(random_seed=seed)
-        )
-    if solver_name == "lemkelcp_pool":
-        return ProcessPoolLemkeLcpBimatrixSreSolver(
-            config=ProcessPoolLemkeLcpBimatrixSreSolverConfig(
-                max_workers=hp.path_mcp_pool.max_workers,
-                start_method=hp.path_mcp_pool.start_method,
-            )
-        )
-    if solver_name == "lemkelcp":
-        return LemkeLcpBimatrixSreSolver(config=LemkeLcpBimatrixSreSolverConfig())
-    raise ValueError(f"Unknown SRE solver: {solver_name}")
-
-
 def _make_deep_srq_agent(
     *,
     obs_dim,
@@ -523,7 +459,12 @@ def _make_deep_srq_agent(
         epsilon_schedule=epsilon_schedule,
         epsilon_explore=hp.agent.action_epsilon_start,
         use_gpu=use_gpu,
-        sre_solver=_make_solver(solver_name, hp, seed),
+        sre_solver_name="path_c_pool",
+        sre_solver_workers=hp.path_c_pool.max_workers,
+        sre_solver_start_method=hp.path_c_pool.start_method,
+        sre_solver=ProcessPoolPathCBimatrixSreSolver(
+            config=replace(hp.path_c_pool, random_seed=seed)
+        ),
     )
     return DuelingDoubleDqnSreAgent(
         agent_config

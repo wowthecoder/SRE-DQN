@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sys
 import time
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -22,7 +22,10 @@ for _path in (str(_DISCRETE_DIR), str(_BIMATRIX_DIR)):
 from stats_utils import compact_training_stats, load_training_stats, save_training_stats
 
 from dueling_double_dqn_sre import DuelingDoubleDqnSreAgent, DuelingDoubleDqnSreAgentConfig
-from sre_solvers import make_sre_solver
+from sre_solvers import (
+    ProcessPoolPathCBimatrixSreSolver,
+    ProcessPoolPathCBimatrixSreSolverConfig,
+)
 
 from .deep_srq_lbf import (
     BASE_SEED,
@@ -45,19 +48,17 @@ from .notebook_eval import (
     save_rollout_video,
 )
 from .pz_wrapper import LBFParallelEnv
-from .state_action_encoding import canonical_lbf_state
 
 
 ROBUST_EPSILONS = (0.01, 0.1, 0.5, 1.0)
 BASELINE_ALGORITHMS = ("iql", "ippo", "mappo", "maa2c")
 DEFAULT_EVAL_EPISODES = 500
 DEFAULT_EVAL_VIDEO_FPS = 4
-DEEPSRQ_PATH_MCP_NPLAYER_POOL_FAMILY = "deepsrq_path_mcp_nplayer_pool"
+DEEPSRQ_PATH_LCP_FOLDER_NAME = "deepsrq_path_lcp_pool"
 PATH_C_POOL_SOLVER = "path_c_pool"
-PATH_MCP_NPLAYER_POOL_SOLVER = "path_mcp_nplayer_pool"
-DEFAULT_PATH_POOL_NPLAYER_SOLVER = PATH_MCP_NPLAYER_POOL_SOLVER
-DEFAULT_PATH_MCP_NPLAYER_POOL_WORKERS = 8
-DEEPSRQ_PATH_MCP_POOL_HYPERPARAMETER_OVERRIDES = {
+DEFAULT_PATH_C_POOL_WORKERS = 8
+NUM_AGENTS = 2
+DEEPSRQ_PATH_C_POOL_HYPERPARAMETER_OVERRIDES = {
     "agent": {
         "sre_num_random_starts": 5,
         "sre_num_pure_starts": 0,
@@ -100,16 +101,6 @@ def _hp_value(hp: dict, section: str, field: str, default, *legacy_keys):
     return section_payload.get(field, default)
 
 
-def _agent_hp(hp: dict, field: str, *legacy_keys):
-    return _hp_value(
-        hp,
-        "agent",
-        field,
-        getattr(_DEFAULT_DEEP_SRQ_LBF_HP.agent, field),
-        *legacy_keys,
-    )
-
-
 @dataclass(frozen=True)
 class LbfNotebookScenario:
     key: str
@@ -142,14 +133,6 @@ def robust_lbf_scenarios() -> tuple[LbfNotebookScenario, ...]:
         for scenario in EPYMARL_LBF_SCENARIOS.values()
     )
 
-
-def scenario_num_agents(scenario: LbfNotebookScenario) -> int:
-    if "players" in scenario.config:
-        return int(scenario.config["players"])
-    _, num_agents, _, _ = probe_lbf(scenario.config, seed=BASE_SEED)
-    return int(num_agents)
-
-
 def _scenario_display_label(scenario: LbfNotebookScenario) -> str:
     scenario_keys = [item.key for item in robust_lbf_scenarios()]
     try:
@@ -161,7 +144,7 @@ def _scenario_display_label(scenario: LbfNotebookScenario) -> str:
 def _algorithm_display_label(label: str | None) -> str:
     label = str(label or "").strip()
     display_names = {
-        DEEPSRQ_PATH_MCP_NPLAYER_POOL_FAMILY: "Deep SRQ",
+        DEEPSRQ_PATH_LCP_FOLDER_NAME: "Deep SRQ",
         "iql": "IQL",
         "ippo": "IPPO",
         "mappo": "MAPPO",
@@ -173,9 +156,10 @@ def _algorithm_display_label(label: str | None) -> str:
 def deepsrq_path_pool_solver_for_scenario(
     scenario: LbfNotebookScenario,
     *,
-    nplayer_solver_name: str = DEFAULT_PATH_POOL_NPLAYER_SOLVER,
+    nplayer_solver_name: str = PATH_C_POOL_SOLVER,
 ) -> str:
-    return PATH_C_POOL_SOLVER if scenario_num_agents(scenario) == 2 else str(nplayer_solver_name)
+    _ = (scenario, nplayer_solver_name)
+    return PATH_C_POOL_SOLVER
 
 
 def lbf_grid_dir(repo_root: str | Path | None = None) -> Path:
@@ -202,7 +186,7 @@ def deepsrq_path_mcp_pool_training_dir(
     repo_root=None,
 ) -> Path:
     return robust_artifact_dir(
-        DEEPSRQ_PATH_MCP_NPLAYER_POOL_FAMILY,
+        DEEPSRQ_PATH_LCP_FOLDER_NAME,
         "training",
         scenario_key,
         epsilon,
@@ -233,7 +217,7 @@ def deepsrq_path_mcp_pool_evaluation_dir(
     repo_root=None,
 ) -> Path:
     return robust_artifact_dir(
-        DEEPSRQ_PATH_MCP_NPLAYER_POOL_FAMILY,
+        DEEPSRQ_PATH_LCP_FOLDER_NAME,
         "evaluation",
         scenario_key,
         epsilon,
@@ -269,19 +253,6 @@ def _json_safe(value):
     if isinstance(value, np.generic):
         return value.item()
     return value
-
-
-def probe_lbf(config: dict, *, seed: int = BASE_SEED) -> tuple[int, int, int, list[str]]:
-    env = LBFParallelEnv(**config)
-    try:
-        obs_dict, _ = env.reset(seed=seed)
-        agent_order = list(env.possible_agents)
-        obs_dim = int(canonical_lbf_state(env, agent_order).shape[0])
-        num_agents = len(agent_order)
-        num_actions = int(env.action_space(agent_order[0]).n)
-        return obs_dim, num_agents, num_actions, agent_order
-    finally:
-        env.close()
 
 
 def write_training_reward_plots(stats: dict, output_dir: str | Path) -> dict:
@@ -410,7 +381,7 @@ def _existing_deepsrq_path_mcp_pool_training_record(
         {
             "status": "skipped_existing",
             "skip_reason": "training directory already exists",
-            "algorithm": DEEPSRQ_PATH_MCP_NPLAYER_POOL_FAMILY,
+            "algorithm": DEEPSRQ_PATH_LCP_FOLDER_NAME,
             "scenario_key": scenario.key,
             "scenario_name": scenario.name,
             "gym_id": scenario.gym_id,
@@ -457,10 +428,10 @@ def train_deepsrq_path_mcp_pool_for_epsilon(
     use_gpu: bool = True,
     eval_interval: int | None = 100,
     eval_episodes: int = 5,
-    sre_solver_workers: int = DEFAULT_PATH_MCP_NPLAYER_POOL_WORKERS,
+    sre_solver_workers: int = DEFAULT_PATH_C_POOL_WORKERS,
     num_envs: int = 2,
     eval_num_envs: int | None = None,
-    nplayer_solver_name: str = DEFAULT_PATH_POOL_NPLAYER_SOLVER,
+    nplayer_solver_name: str = PATH_C_POOL_SOLVER,
     hyperparameter_overrides: dict | None = None,
     repo_root: str | Path | None = None,
     skip_existing: bool = False,
@@ -500,12 +471,12 @@ def train_deepsrq_path_mcp_pool_for_epsilon(
             continue
         hp = _merge_hyperparameter_overrides(
             (
-                DEEPSRQ_PATH_MCP_POOL_HYPERPARAMETER_OVERRIDES
+                DEEPSRQ_PATH_C_POOL_HYPERPARAMETER_OVERRIDES
                 if hyperparameter_overrides is None
                 else hyperparameter_overrides
             ),
             {
-                "path_mcp_pool": {
+                "path_c_pool": {
                     "max_workers": int(sre_solver_workers),
                 }
             },
@@ -534,7 +505,7 @@ def train_deepsrq_path_mcp_pool_for_epsilon(
         )
         stats.update(
             {
-                "algorithm": DEEPSRQ_PATH_MCP_NPLAYER_POOL_FAMILY,
+                "algorithm": DEEPSRQ_PATH_LCP_FOLDER_NAME,
                 "scenario_key": scenario.key,
                 "scenario_name": scenario.name,
                 "gym_id": scenario.gym_id,
@@ -563,11 +534,8 @@ def train_deepsrq_path_mcp_pool_for_epsilon(
         )
         results[scenario.key] = stats
     manifest = {
-        "algorithm": DEEPSRQ_PATH_MCP_NPLAYER_POOL_FAMILY,
-        "solver_selection": {
-            "2_player": PATH_C_POOL_SOLVER,
-            "n_player": str(nplayer_solver_name),
-        },
+        "algorithm": DEEPSRQ_PATH_LCP_FOLDER_NAME,
+        "solver_name": PATH_C_POOL_SOLVER,
         "sre_solver_workers": int(sre_solver_workers),
         "num_envs": int(num_envs),
         "eval_num_envs": int(eval_num_envs or num_envs),
@@ -578,7 +546,7 @@ def train_deepsrq_path_mcp_pool_for_epsilon(
     }
     save_training_stats(
         lbf_grid_dir(repo_root)
-        / DEEPSRQ_PATH_MCP_NPLAYER_POOL_FAMILY
+        / DEEPSRQ_PATH_LCP_FOLDER_NAME
         / "training"
         / f"manifest_eps_{epsilon_slug(epsilon)}.json",
         manifest,
@@ -615,146 +583,6 @@ def _existing_deepsrq_solver_training_record(
     )
     stats["algorithm"] = str(family)
     return stats
-
-
-def train_deepsrq_solver_for_epsilon(
-    epsilon: float,
-    *,
-    family: str,
-    solver_name: str,
-    n_episodes: int,
-    scenarios: tuple[LbfNotebookScenario, ...] | None = None,
-    base_seed: int = BASE_SEED,
-    use_gpu: bool = True,
-    eval_interval: int | None = 100,
-    eval_episodes: int = 5,
-    num_envs: int = 2,
-    eval_num_envs: int | None = None,
-    hyperparameter_overrides: dict | None = None,
-    default_hyperparameter_overrides: dict | None = None,
-    repo_root: str | Path | None = None,
-    skip_existing: bool = False,
-    sre_solver_workers: int | None = None,
-    use_action_masks: bool = True,
-) -> dict[str, dict]:
-    scenarios = scenarios or robust_lbf_scenarios()
-    results = {}
-    for scenario_index, scenario in enumerate(scenarios):
-        run_dir = deepsrq_solver_training_dir(
-            family,
-            scenario.key,
-            epsilon,
-            repo_root=repo_root,
-        )
-        eval_env_count = int(eval_num_envs or num_envs)
-        if skip_existing and run_dir.exists():
-            stats = _existing_deepsrq_solver_training_record(
-                run_dir,
-                family=family,
-                scenario=scenario,
-                epsilon=epsilon,
-                solver_name=solver_name,
-                sre_solver_workers=sre_solver_workers,
-                num_envs=num_envs,
-                eval_num_envs=eval_env_count,
-                requested_n_episodes=n_episodes,
-                use_action_masks=use_action_masks,
-            )
-            print(
-                f"{family} {scenario.key} eps={epsilon_slug(epsilon)}: "
-                f"skipped existing training at {run_dir}"
-            )
-            results[scenario.key] = stats
-            continue
-
-        hp = (
-            default_hyperparameter_overrides
-            if hyperparameter_overrides is None
-            else hyperparameter_overrides
-        )
-        if sre_solver_workers is not None:
-            hp = _merge_hyperparameter_overrides(
-                hp,
-                {"path_mcp_pool": {"max_workers": int(sre_solver_workers)}},
-            )
-        seed = int(base_seed + scenario_index)
-        stats = train_lbf_deep_srq_vectorized(
-            n_episodes=n_episodes,
-            solver_name=str(solver_name),
-            epsilon_robust_initial=float(epsilon),
-            epsilon_schedule="constant",
-            seed=seed,
-            run_dir=run_dir,
-            lbf_config_overrides=scenario.config,
-            hyperparameter_overrides=hp,
-            use_gpu=use_gpu,
-            write_plots=False,
-            include_replay_buffer=True,
-            eval_interval=eval_interval,
-            eval_episodes=eval_episodes,
-            num_envs=int(num_envs),
-            eval_num_envs=eval_env_count,
-            use_action_masks=use_action_masks,
-            print_full_stats=False,
-            scenario_key=scenario.key,
-            scenario_name=scenario.name,
-        )
-        stats.update(
-            {
-                "algorithm": str(family),
-                "scenario_key": scenario.key,
-                "scenario_name": scenario.name,
-                "gym_id": scenario.gym_id,
-                "time_limit": scenario.time_limit,
-                "epsilon_schedule": "constant",
-                "solver_name": str(solver_name),
-                "num_envs": int(num_envs),
-                "eval_num_envs": eval_env_count,
-                "use_action_masks": bool(use_action_masks),
-            }
-        )
-        if sre_solver_workers is not None:
-            stats["sre_solver_workers"] = int(sre_solver_workers)
-        stats["training_reward_plot_paths"] = write_training_reward_plots(stats, run_dir)
-        stats["summary_path"] = str(write_training_summary(stats, run_dir))
-        save_training_stats(
-            run_dir / "training_stats.json",
-            stats,
-            drop_reward_histories=True,
-            drop_lbf_episode_details=True,
-            drop_episode_lengths=True,
-        )
-        _print_live_training_status(
-            f"{family} {scenario.key} solver={solver_name} eps={epsilon_slug(epsilon)}",
-            n_episodes,
-            stats,
-        )
-        results[scenario.key] = stats
-
-    manifest = {
-        "algorithm": str(family),
-        "solver_name": str(solver_name),
-        "num_envs": int(num_envs),
-        "eval_num_envs": int(eval_num_envs or num_envs),
-        "use_action_masks": bool(use_action_masks),
-        "skip_existing": bool(skip_existing),
-        "epsilon": float(epsilon),
-        "results": results,
-    }
-    if sre_solver_workers is not None:
-        manifest["sre_solver_workers"] = int(sre_solver_workers)
-    save_training_stats(
-        lbf_grid_dir(repo_root)
-        / str(family)
-        / "training"
-        / f"manifest_eps_{epsilon_slug(epsilon)}.json",
-        manifest,
-        drop_reward_histories=True,
-        drop_lbf_episode_details=True,
-        drop_episode_lengths=True,
-    )
-    return results
-
 
 class DeepSrqPolicyAdapter:
     label = "deep_srq"
@@ -951,7 +779,7 @@ def resolve_epymarl_checkpoint(
     return max(checkpoint_dirs, key=lambda path: (int(path.name), path.stat().st_mtime))
 
 
-def load_deepsrq_path_mcp_pool_policy(
+def load_deepsrq_path_lcp_pool_policy(
     scenario: LbfNotebookScenario,
     epsilon: float,
     *,
@@ -959,7 +787,7 @@ def load_deepsrq_path_mcp_pool_policy(
     use_gpu: bool = True,
     sre_solver_workers: int | None = None,
     hyperparameter_overrides: dict | None = None,
-    nplayer_solver_name: str = DEFAULT_PATH_POOL_NPLAYER_SOLVER,
+    nplayer_solver_name: str = PATH_C_POOL_SOLVER,
 ) -> DeepSrqPolicyAdapter:
     run_dir = deepsrq_path_mcp_pool_training_dir(
         scenario.key,
@@ -979,17 +807,17 @@ def load_deepsrq_path_mcp_pool_policy(
     workers = int(
         sre_solver_workers
         if sre_solver_workers is not None
-        else DEFAULT_PATH_MCP_NPLAYER_POOL_WORKERS
+        else DEFAULT_PATH_C_POOL_WORKERS
     )
     current_hp = deep_srq_lbf_hyperparams(
         _merge_hyperparameter_overrides(
             (
-                DEEPSRQ_PATH_MCP_POOL_HYPERPARAMETER_OVERRIDES
+                DEEPSRQ_PATH_C_POOL_HYPERPARAMETER_OVERRIDES
                 if hyperparameter_overrides is None
                 else hyperparameter_overrides
             ),
             {
-                "path_mcp_pool": {
+                "path_c_pool": {
                     "max_workers": workers,
                 }
             },
@@ -1052,10 +880,12 @@ def load_deepsrq_path_mcp_pool_policy(
             "sre_solver_name": solver_name,
             **eval_config_overrides,
         }
-        solver = make_sre_solver(
-            solver_name,
-            random_seed=BASE_SEED,
-            max_workers=workers,
+        solver = ProcessPoolPathCBimatrixSreSolver(
+            config=ProcessPoolPathCBimatrixSreSolverConfig(
+                max_workers=workers,
+                start_method=current_hp.path_c_pool.start_method,
+                random_seed=BASE_SEED,
+            )
         )
         return DuelingDoubleDqnSreAgent(
             DuelingDoubleDqnSreAgentConfig(
@@ -1105,164 +935,6 @@ def load_deepsrq_path_mcp_pool_policy(
         setattr(agent.config, key, value)
     agent.config.sre_solver_workers = workers
     return DeepSrqPolicyAdapter(agent)
-
-
-def _make_deepsrq_eval_solver(
-    solver_name: str,
-    current_hp,
-    *,
-    seed: int = BASE_SEED,
-    sre_solver_workers: int | None = None,
-):
-    if solver_name in {"path_mcp_nplayer_pool", "path_nplayer_pool", "path_mcp_pool"}:
-        kwargs = {}
-        if sre_solver_workers is not None:
-            kwargs["max_workers"] = int(sre_solver_workers)
-        return make_sre_solver(solver_name, random_seed=seed, **kwargs)
-    return make_sre_solver(solver_name, random_seed=seed)
-
-
-def load_deepsrq_solver_policy(
-    scenario: LbfNotebookScenario,
-    epsilon: float,
-    *,
-    family: str,
-    solver_name: str,
-    repo_root: str | Path | None = None,
-    use_gpu: bool = True,
-    hyperparameter_overrides: dict | None = None,
-    default_hyperparameter_overrides: dict | None = None,
-    sre_solver_workers: int | None = None,
-) -> DeepSrqPolicyAdapter:
-    run_dir = deepsrq_solver_training_dir(
-        family,
-        scenario.key,
-        epsilon,
-        repo_root=repo_root,
-    )
-    checkpoints = [
-        run_dir / "shared_deepsrq_best.pt",
-        run_dir / "shared_deepsrq_final.pt",
-    ]
-    checkpoints = [path for path in checkpoints if path.exists()]
-    if not checkpoints:
-        raise FileNotFoundError(
-            f"Deep SRQ checkpoint not found under {run_dir}. "
-            "Expected shared_deepsrq_best.pt or shared_deepsrq_final.pt."
-        )
-
-    current_hp = deep_srq_lbf_hyperparams(
-        default_hyperparameter_overrides
-        if hyperparameter_overrides is None
-        else hyperparameter_overrides
-    )
-    current_agent_hp = current_hp.agent
-    eval_config_overrides = {
-        "epsilon_robust": float(epsilon),
-        "epsilon_explore": 0.0,
-        "lr": current_agent_hp.lr,
-        "gamma": current_agent_hp.gamma,
-        "buffer_size": current_agent_hp.buffer_size,
-        "learning_starts": current_agent_hp.learning_starts,
-        "grad_clip_norm": current_agent_hp.grad_clip_norm,
-        "sre_num_random_starts": current_agent_hp.sre_num_random_starts,
-        "sre_num_pure_starts": current_agent_hp.sre_num_pure_starts,
-        "train_every": current_agent_hp.train_every,
-        "target_equilibrium_update_steps": current_agent_hp.target_equilibrium_update_steps,
-        "sre_policy_cache_enabled": current_agent_hp.sre_policy_cache_enabled,
-        "sre_policy_cache_size": current_agent_hp.sre_policy_cache_size,
-        "sre_policy_cache_round_digits": current_agent_hp.sre_policy_cache_round_digits,
-        "sre_state_cache_round_digits": current_agent_hp.sre_state_cache_round_digits,
-    }
-
-    def checkpoint_config(path: Path) -> dict:
-        try:
-            payload = torch.load(path, map_location="cpu", weights_only=False)
-        except TypeError:
-            payload = torch.load(path, map_location="cpu")
-        if not isinstance(payload, dict):
-            raise ValueError(f"Deep SRQ checkpoint at {path} is not a checkpoint payload.")
-        config = payload.get("config")
-        if not isinstance(config, dict):
-            raise ValueError(
-                f"Deep SRQ checkpoint at {path} is missing config metadata; "
-                "retrain or load a checkpoint written by save_checkpoint()."
-            )
-        return config
-
-    def make_agent(model_config: dict):
-        config_overrides = {
-            "agent_id": 0,
-            "obs_dim": int(model_config["obs_dim"]),
-            "num_agents": int(model_config["num_agents"]),
-            "num_actions": int(model_config["num_actions"]),
-            "network_type": (
-                model_config.get("network_type") or current_agent_hp.network_type
-            ),
-            "q_hidden_dims": tuple(
-                model_config.get(
-                    "q_hidden_dims",
-                    current_agent_hp.q_hidden_dims,
-                )
-            ),
-            "use_gpu": use_gpu,
-            "sre_solver_name": str(solver_name),
-            **eval_config_overrides,
-        }
-        solver = _make_deepsrq_eval_solver(
-            str(solver_name),
-            current_hp,
-            seed=BASE_SEED,
-            sre_solver_workers=sre_solver_workers,
-        )
-        return DuelingDoubleDqnSreAgent(
-            DuelingDoubleDqnSreAgentConfig(
-                **config_overrides,
-                sre_solver=solver,
-            )
-        ), config_overrides
-
-    load_errors = []
-    agent = None
-    selected_config_overrides = None
-    for checkpoint in checkpoints:
-        try:
-            model_config = checkpoint_config(checkpoint)
-        except (RuntimeError, ValueError) as exc:
-            load_errors.append(f"{checkpoint.name}: {exc}")
-            continue
-        candidate_agent, config_overrides = make_agent(model_config)
-        try:
-            candidate_agent.load_checkpoint(
-                checkpoint,
-                map_location=None if use_gpu else "cpu",
-            )
-        except (KeyError, RuntimeError, ValueError) as exc:
-            load_errors.append(f"{checkpoint.name}: {exc}")
-            try:
-                candidate_agent.close()
-            except Exception:
-                pass
-            continue
-        agent = candidate_agent
-        selected_config_overrides = config_overrides
-        if checkpoint.name != "shared_deepsrq_best.pt":
-            print(
-                f"Deep SRQ eval loaded {checkpoint.name} for {scenario.key} "
-                f"epsilon={epsilon:g}; best checkpoint was unavailable or incompatible."
-            )
-        break
-    if agent is None:
-        joined = "\n".join(f"- {message}" for message in load_errors)
-        raise RuntimeError(
-            f"No compatible Deep SRQ checkpoint found under {run_dir}.\n{joined}"
-        )
-    for key, value in selected_config_overrides.items():
-        setattr(agent.config, key, value)
-    if sre_solver_workers is not None:
-        agent.config.sre_solver_workers = int(sre_solver_workers)
-    return DeepSrqPolicyAdapter(agent)
-
 
 def load_baseline_policy(
     algorithm: str,
@@ -1359,7 +1031,6 @@ def evaluate_policy_matchup(
 ) -> dict:
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    _, num_agents, _, _ = probe_lbf(scenario.config, seed=seed)
     all_episode_rewards = []
     all_joint_rewards = []
     video_frames = []
@@ -1380,7 +1051,7 @@ def evaluate_policy_matchup(
         primary_label=primary_display,
         opponent_label=None if opponent_label is None else opponent_display,
         total_episodes=n_episodes,
-        num_agents=num_agents,
+        num_agents=NUM_AGENTS,
     )
 
     def policy_fn(**kwargs):
@@ -1528,21 +1199,21 @@ def evaluate_deepsrq_path_mcp_pool_suite_for_epsilon(
     n_episodes: int = DEFAULT_EVAL_EPISODES,
     repo_root: str | Path | None = None,
     use_gpu: bool = True,
-    sre_solver_workers: int = DEFAULT_PATH_MCP_NPLAYER_POOL_WORKERS,
+    sre_solver_workers: int = DEFAULT_PATH_C_POOL_WORKERS,
     num_envs: int = 1,
     hyperparameter_overrides: dict | None = None,
-    nplayer_solver_name: str = DEFAULT_PATH_POOL_NPLAYER_SOLVER,
+    nplayer_solver_name: str = PATH_C_POOL_SOLVER,
 ) -> dict[str, dict]:
     scenarios = scenarios or robust_lbf_scenarios()
     results = {}
-    primary_label = DEEPSRQ_PATH_MCP_NPLAYER_POOL_FAMILY
+    primary_label = DEEPSRQ_PATH_LCP_FOLDER_NAME
     for scenario in scenarios:
         base_dir = deepsrq_path_mcp_pool_evaluation_dir(
             scenario.key,
             epsilon,
             repo_root=repo_root,
         )
-        primary = load_deepsrq_path_mcp_pool_policy(
+        primary = load_deepsrq_path_lcp_pool_policy(
             scenario,
             epsilon,
             repo_root=repo_root,
@@ -1592,15 +1263,12 @@ def evaluate_deepsrq_path_mcp_pool_suite_for_epsilon(
             primary.close()
     save_training_stats(
         lbf_grid_dir(repo_root)
-        / DEEPSRQ_PATH_MCP_NPLAYER_POOL_FAMILY
+        / DEEPSRQ_PATH_LCP_FOLDER_NAME
         / "evaluation"
         / f"manifest_eps_{epsilon_slug(epsilon)}.json",
         {
-            "algorithm": DEEPSRQ_PATH_MCP_NPLAYER_POOL_FAMILY,
-            "solver_selection": {
-                "2_player": PATH_C_POOL_SOLVER,
-                "n_player": PATH_MCP_NPLAYER_POOL_SOLVER,
-            },
+            "algorithm": DEEPSRQ_PATH_LCP_FOLDER_NAME,
+            "solver_name": PATH_C_POOL_SOLVER,
             "sre_solver_workers": int(sre_solver_workers),
             "num_envs": int(num_envs),
             "epsilon": float(epsilon),
@@ -1611,104 +1279,6 @@ def evaluate_deepsrq_path_mcp_pool_suite_for_epsilon(
         drop_episode_lengths=True,
     )
     return results
-
-
-def evaluate_deepsrq_solver_suite_for_epsilon(
-    epsilon: float,
-    *,
-    family: str,
-    solver_name: str,
-    scenarios: tuple[LbfNotebookScenario, ...] | None = None,
-    n_episodes: int = DEFAULT_EVAL_EPISODES,
-    repo_root: str | Path | None = None,
-    use_gpu: bool = True,
-    num_envs: int = 1,
-    hyperparameter_overrides: dict | None = None,
-    default_hyperparameter_overrides: dict | None = None,
-    sre_solver_workers: int | None = None,
-) -> dict[str, dict]:
-    scenarios = scenarios or robust_lbf_scenarios()
-    results = {}
-    primary_label = str(family)
-    for scenario in scenarios:
-        base_dir = deepsrq_solver_evaluation_dir(
-            family,
-            scenario.key,
-            epsilon,
-            repo_root=repo_root,
-        )
-        primary = load_deepsrq_solver_policy(
-            scenario,
-            epsilon,
-            family=family,
-            solver_name=solver_name,
-            repo_root=repo_root,
-            use_gpu=use_gpu,
-            hyperparameter_overrides=hyperparameter_overrides,
-            default_hyperparameter_overrides=default_hyperparameter_overrides,
-            sre_solver_workers=sre_solver_workers,
-        )
-        try:
-            scenario_results = {
-                "self_play": evaluate_policy_matchup(
-                    scenario=scenario,
-                    primary_policy=primary,
-                    output_dir=base_dir / "self_play",
-                    primary_label=primary_label,
-                    n_episodes=n_episodes,
-                    num_envs=num_envs,
-                )
-            }
-            for baseline in BASELINE_ALGORITHMS:
-                out_dir = base_dir / f"vs_{baseline}"
-                try:
-                    opponent = load_baseline_policy(baseline, scenario, use_gpu=use_gpu)
-                    try:
-                        scenario_results[f"vs_{baseline}"] = evaluate_policy_matchup(
-                            scenario=scenario,
-                            primary_policy=primary,
-                            opponent_policy=opponent,
-                            output_dir=out_dir,
-                            primary_label=primary_label,
-                            opponent_label=baseline,
-                            n_episodes=n_episodes,
-                            num_envs=num_envs,
-                        )
-                    finally:
-                        opponent.close()
-                except Exception as exc:
-                    scenario_results[f"vs_{baseline}"] = _skip_record(
-                        out_dir,
-                        scenario=scenario,
-                        primary_label=primary_label,
-                        opponent_label=baseline,
-                        exc=exc,
-                    )
-            results[scenario.key] = scenario_results
-        finally:
-            primary.close()
-
-    manifest = {
-        "algorithm": str(family),
-        "solver_name": str(solver_name),
-        "num_envs": int(num_envs),
-        "epsilon": float(epsilon),
-        "results": results,
-    }
-    if sre_solver_workers is not None:
-        manifest["sre_solver_workers"] = int(sre_solver_workers)
-    save_training_stats(
-        lbf_grid_dir(repo_root)
-        / str(family)
-        / "evaluation"
-        / f"manifest_eps_{epsilon_slug(epsilon)}.json",
-        manifest,
-        drop_reward_histories=True,
-        drop_lbf_episode_details=True,
-        drop_episode_lengths=True,
-    )
-    return results
-
 
 def display_evaluation_boxplots(results: dict) -> None:
     """Display saved evaluation boxplots from a nested suite result."""
@@ -1742,4 +1312,3 @@ def display_evaluation_boxplots(results: dict) -> None:
                         f"{record.get('error_message')}"
                     )
                 )
-

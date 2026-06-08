@@ -75,48 +75,6 @@ EPYMARL_LBF_SCENARIOS = {
             "simple_food_rewards": True,
         },
     ),
-    "lbf_10x10_3p_8f_levels123": LbfEpymarlScenario(
-        key="lbf_10x10_3p_8f_levels123",
-        gym_id="SREDQNForaging-10x10-3p-8f-levels123-v0",
-        description=(
-            "3 agents with levels 1, 2, and 3, 10x10 grid, 18 foods "
-            "(3 each for levels 1-6), full sight, 100-step episodes"
-        ),
-        time_limit=100,
-        kwargs={
-            "players": 3,
-            "player_levels": [1, 2, 3],
-            "field_size": (10, 10),
-            "food_levels": [
-                1,
-                1,
-                1,
-                2,
-                2,
-                2,
-                3,
-                3,
-                3,
-                4,
-                4,
-                4,
-                5,
-                5,
-                5,
-                6,
-                6,
-                6,
-            ],
-            "max_num_food": 18,
-            "sight": 10,
-            "max_episode_steps": 100,
-            "force_coop": False,
-            "normalize_reward": False,
-            "penalty": 0.0,
-            "empty_load_penalty": 0.0,
-            "simple_food_rewards": True,
-        },
-    ),
 }
 
 

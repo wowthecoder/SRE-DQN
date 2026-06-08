@@ -1,424 +1,365 @@
-# LBF Grid — Basic Level-Based Foraging
+# LBF Grid Experiments
 
-PettingZoo-style wrapper around the upstream
-[uoe-agents/lb-foraging](https://github.com/uoe-agents/lb-foraging) package.
-The environment is intentionally basic: no custom walls, traps, fixed starts,
-or collision penalties. The default helper keeps the package's native reward
-rules; the denser benchmark scenarios opt into the simple food-level reward
-mode described below.
+This folder adapts Level-Based Foraging (LBF) to the discrete-action Deep SRQ
+stack. It contains:
+
+- a PettingZoo parallel wrapper around `lb-foraging`;
+- exact player/food-level controls for reproducible scenarios;
+- canonical global state and action-mask helpers for Deep SRQ;
+- Deep SRQ training/evaluation notebooks;
+- EPyMARL baseline training and checkpoint-evaluation notebooks.
+
+The active Deep SRQ scenarios are two-player games, so the SRE stage game is a
+bimatrix LCP and the current helper resolves to `path_c_pool`. Some function
+names still contain `mcp` or `nplayer` because the notebook family was originally
+written to share naming with the more general N-player path.
+
+## Files
+
+| File | Role |
+|---|---|
+| `pz_wrapper.py` | PettingZoo `ParallelEnv` wrapper, `LBFParallelEnv` |
+| `exact_level_env.py` | `lb-foraging` subclass with fixed player/food levels and optional simple rewards |
+| `state_action_encoding.py` | Canonical global state vectors and Deep SRQ action masks |
+| `deep_srq_lbf.py` | Deep SRQ vectorized self-play trainer |
+| `robust_notebook_utils.py` | Split training/evaluation notebook helpers, checkpoint loading, matchup evaluation |
+| `epymarl_lbf_env.py` | Gymnasium scenario registrations for EPyMARL |
+| `epymarl_baselines.py` | EPyMARL command builder, training wrapper, and reward/checkpoint artifact helpers |
 
 ## Installation
 
 ```bash
+source venv/bin/activate
 pip install lbforaging
 ```
 
-## Quick start
+EPyMARL baseline runs also need a local EPyMARL checkout; set `EPYMARL_ROOT` in
+`lbf_epymarl_baselines.ipynb`.
+
+## Quick Start
 
 ```python
-import sys; sys.path.insert(0, "../..")
 from discrete_action_space.lbf_grid.pz_wrapper import LBFParallelEnv
 
 env = LBFParallelEnv()
-
 obs, infos = env.reset(seed=2025)
+
 while env.agents:
-    actions = {a: env.action_space(a).sample() for a in env.agents}
+    actions = {agent: env.action_space(agent).sample() for agent in env.agents}
     obs, rewards, terms, truncs, infos = env.step(actions)
+
 env.close()
 ```
 
-## Default Scenario
+## Environment
 
-`LBFParallelEnv()` creates:
-
-- 3 agents.
-- 10x10 grid.
-- Full observability (`sight=None` resolves to the largest grid dimension).
-- Random agent and food positions controlled by `reset(seed=...)`.
-- 3 food items with levels sampled from 1 to 3.
-- Fixed player levels `[1, 1, 1]` by default.
-- Native normalized lb-foraging rewards.
-
-## Parameters
+`LBFParallelEnv` wraps `ExactLevelForagingEnv`, which extends upstream
+`lb-foraging` with exact level controls and optional reward shaping.
 
 | Argument | Default | Description |
 |---|---:|---|
-| `players` | 3 | Number of agents |
+| `players` | `2` | Number of agents |
 | `field_size` | `(10, 10)` | Grid dimensions |
-| `sight` | `None` | Observation radius; `None` gives full observability for the grid |
-| `max_food` | 3 | Number of food items spawned by lb-foraging |
-| `max_episode_steps` | 75 | Episode length cap |
-| `player_levels` | `[1, 1, 1]` in preset | Fixed per-agent levels; overrides min/max player levels |
-| `min_player_level` | 1 | Minimum random player level when `player_levels` is not set |
-| `max_player_level` | 1 | Maximum random player level when `player_levels` is not set |
-| `food_levels` | `None` | Exact per-food levels; positions remain random |
-| `min_food_level` | 1 | Minimum random food level when `food_levels` is not set |
-| `max_food_level` | 3 | Maximum random food level when `food_levels` is not set |
-| `force_coop` | `False` | Native lb-foraging cooperative loading constraint |
-| `normalize_reward` | `True` | Use native normalized lb-foraging rewards |
-| `penalty` | `0.0` in wrapper | Penalty subtracted from each failed loader |
-| `empty_load_penalty` | `0.0` in wrapper | Penalty subtracted only when an agent loads with no adjacent food |
-| `simple_food_rewards` | `False` | Replace native collection rewards with food-level rewards split evenly across participating loaders |
+| `sight` | `None` | Wrapper resolves this to full-grid sight |
+| `max_food` | `3` | Number of food items |
+| `max_episode_steps` | `75` | Episode length cap |
+| `player_levels` | `None` | Exact per-agent levels; when set, overrides min/max player levels |
+| `min_player_level` | `1` | Minimum random player level when exact levels are absent |
+| `max_player_level` | `1` | Maximum random player level when exact levels are absent |
+| `food_levels` | `None` | Exact food-level multiset; positions remain random |
+| `min_food_level` | `1` | Minimum random food level |
+| `max_food_level` | `3` | Maximum random food level |
+| `force_coop` | `False` | Upstream cooperative loading constraint |
+| `normalize_reward` | `True` | Use upstream normalized rewards |
+| `penalty` | `0.0` | Penalty for failed loaders when upstream applies it |
+| `empty_load_penalty` | `0.0` | Extra penalty when an agent loads with no adjacent food |
+| `simple_food_rewards` | `False` | Replace native rewards with food-level rewards split across successful loaders |
 
-`food_levels` must have length `max_food`. For example, `max_food=5,
-food_levels=[1, 1, 2, 2, 3]` keeps food positions random but fixes the spawned
-food-level multiset.
+`BASIC_LBF_CONFIG` in `deep_srq_lbf.py` sets a smaller default benchmark-like
+configuration: 2 players, `8x8`, 3 foods, full sight, 75-step cap, fixed player
+levels `[1, 1]`, native normalized rewards, and no empty-load penalty.
 
-## Action Space
+## Observations and State
+
+The wrapper exposes the upstream per-agent LBF observation through
+`observation_space(agent)`. Deep SRQ does not use that raw per-agent observation
+directly. Instead, `canonical_lbf_state(env, agent_order)` builds one stable
+global state vector:
+
+```text
+[agent_0_row, agent_0_col, agent_0_level,
+ ...,
+ food_0_row, food_0_col, food_0_level,
+ ...]
+```
+
+Food records are sorted by `(row, col)` and padded to `max_food` entries with
+`[-1, -1, 0]` after food is collected. The state dimension is therefore:
+
+```text
+obs_dim = 3 * players + 3 * max_food
+```
+
+For the active 2-player, 10-food scenarios, `obs_dim = 36`.
+
+## Actions
+
+The action space is the upstream LBF discrete action space:
 
 | ID | Action |
 |---:|---|
-| 0 | NONE |
-| 1 | NORTH |
-| 2 | SOUTH |
-| 3 | WEST |
-| 4 | EAST |
-| 5 | LOAD |
+| `0` | `NONE` |
+| `1` | `NORTH` |
+| `2` | `SOUTH` |
+| `3` | `WEST` |
+| `4` | `EAST` |
+| `5` | `LOAD` |
 
-## Rewards and Penalties
+## Rewards
 
-The default wrapper uses the upstream `lb-foraging` reward rules plus an
-optional empty-load penalty. The three configured benchmark scenarios set
-`simple_food_rewards=True`, `normalize_reward=False`, `penalty=0.0`, and
-`empty_load_penalty=0.01`.
+The wrapper supports two reward modes.
 
-- Movement actions, `NONE`, invalid movement actions converted to `NONE`, and
-  movement collisions have reward `0`.
-- Empty loads have reward `-empty_load_penalty`; the denser benchmark
-  scenarios subtract `0.01` from the offending agent.
-- A load is considered with the set of loading agents adjacent to the same food.
-  If their summed player level is less than the food level, the load fails.
-- Failed loaders receive `-penalty`; the benchmark scenarios keep
-  `penalty=0.0`, so insufficient-level failed loads have no reward penalty.
-- With `simple_food_rewards=True`, a successful collection grants reward equal
-  to the collected food level, divided evenly across participating loaders.
-  Non-participating agents receive `0` for that load event.
-- With `simple_food_rewards=False`, successful collection follows the native
-  `lb-foraging` reward formula. If `normalize_reward=True`, that native reward
-  is normalized by the total spawned food level as upstream defines it.
-- The food is removed after a successful load. An episode ends when all food is
-  collected or `max_episode_steps` is reached.
+Native mode is the upstream `lb-foraging` reward logic, optionally normalized by
+the total spawned food level. This is the default for `LBFParallelEnv()`.
 
-For example, in the benchmark reward mode, if two agents load a level-2 food
-together, each participating loader gets `1.0`; if one level-3 agent collects a
-level-3 food alone, that agent gets `3.0`.
+Simple food-level mode is used by the active registered benchmark scenarios:
 
-## Deep SRQ PATH Pool Training Metrics
+- `simple_food_rewards=True`;
+- `normalize_reward=False`;
+- `penalty=0.0`;
+- `empty_load_penalty=0.0`.
 
-`deepsrq_path_pool_training.ipynb` trains Deep SRQ for each configured
-scenario and robust epsilon through `train_deepsrq_path_mcp_pool_for_epsilon`.
-Artifacts are persisted under:
+In simple mode:
 
-```text
-discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/training/<scenario_key>/<epsilon>/
-```
+- movement actions, invalid movement converted by the environment, and `NONE`
+  produce `0` reward;
+- a load attempt succeeds when loading agents adjacent to the same food have
+  enough combined level;
+- successful food collection grants reward equal to the food level, divided
+  evenly among participating loaders;
+- failed insufficient-level loads have no extra penalty in the active scenarios;
+- food is removed after successful loading;
+- an episode ends when all food is collected or the time limit is reached.
 
-The notebook writes the following files for each scenario/epsilon run:
+## Action Masking
 
-- `training_stats.json`: JSON stats emitted by `train_lbf_deep_srq_vectorized`
-  and then overwritten by the notebook wrapper after it adds scenario/family
-  metadata and plot paths.
-- `training_rewards.json`: per-episode reward history kept outside the compact
-  stats payload.
-- `training_summary.txt`: compact human-readable summary.
-- `agent_<n>_training_reward.png`,
-  `agent_<n>_training_reward_max_100.png`,
-  `combined_agent_training_rewards.png`,
-  `combined_agent_training_rewards_max_100.png`, and
-  `periodic_eval_reward.png`.
-- `shared_deepsrq_best.pt` and `shared_deepsrq_final.pt`.
+`lbf_action_masks(...)` is the game-specific Deep SRQ masking layer. It returns
+one Boolean mask per agent:
 
-It also writes an epsilon-level manifest at:
+- `LOAD` is legal only when the agent is adjacent to at least one food item.
+- `NONE` is legal only when the agent is adjacent to at least one food item.
+- Movement actions are illegal only when they would leave the grid.
+- If a mask would contain no valid action, `NONE` is restored as a fallback.
 
-```text
-discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/training/manifest_eps_<epsilon>.json
-```
+When masks are supplied to `DuelingDoubleDqnSreAgent`, the Q tensor is sliced to
+the legal subgame before the SRE solve. If `sre_remove_fixed_players=True`,
+players with only one legal action are removed from the PATH game and then
+expanded back to deterministic full-action policies. This is the main
+LBF-specific algorithmic change relative to the bimatrix grid-world.
 
-The manifest stores `algorithm`, `solver_name`, `sre_solver_workers`,
-`epsilon`, and a `results` map keyed by scenario. The persisted
-`training_stats.json` payload is compact: per-episode reward histories are
-stored in `training_rewards.json`, while the stats file keeps summary,
-evaluation, checkpoint, timing, and artifact metadata.
+The current `deepsrq_path_pool_training.ipynb` sets `USE_ACTION_MASKS = False`,
+so the training cells run the full 6-action game unless that notebook-visible
+flag is changed.
 
-The full top-level stats payload persisted in `training_stats.json` contains:
+## Active Scenarios
 
-```text
-environment
-scenario_key
-scenario_name
-pairing
-pair_label
-pair_slug
-training_mode
-num_envs
-eval_num_envs
-completed_episodes
-vectorized_collection_steps
-reward_summary
-n_episodes
-seed
-solver_name
-epsilon_robust_initial
-epsilon_schedule
-hyperparameters
-lbf_config
-num_agents
-num_actions
-obs_dim
-agent_device
-sre_solver_device
-total_environment_steps
-gradient_steps
-best_loss
-latest_loss
-periodic_eval
-best_joint_reward
-best_eval_joint_reward
-best_checkpoint_source
-checkpoint_paths
-include_replay_buffer
-agent_labels
-artifact_dir
-stats_path
-reward_history_path
-timing
-solver_usage
-algorithm
-gym_id
-time_limit
-sre_solver_workers
-training_reward_plot_paths
-summary_path
-```
+The active scenario registry lives in `EPYMARL_LBF_SCENARIOS` in
+`epymarl_lbf_env.py`. `robust_lbf_scenarios()` converts these Gymnasium
+registrations into the Deep SRQ notebook scenario objects.
 
-The nested fields inside the stats payload are:
+| Scenario key | Description | Time limit |
+|---|---|---:|
+| `lbf_8x8_2p_2f_levels12` | 2 agents with levels `[1, 2]`, `8x8` grid, 10 foods with levels `[3, 3, 3, 2, 2, 1, 1, 1, 1, 1]`, full sight, no forced cooperation | `50` |
+| `lbf_8x8_2p_2f_force_coop` | 2 level-1 agents, `8x8` grid, 10 foods with levels `[1, 1, 1, 1, 1, 2, 2, 2, 2, 2]`, full sight, forced cooperation | `50` |
 
-```text
-reward_summary
-  episodes
-  per_agent[]
-    agent
-    mean
-    std
-    min
-    max
-  joint
-    mean
-    std
-    min
-    max
+Both scenarios use exact levels, simple food-level rewards, no reward
+normalization, and no failed-load or empty-load shaping penalty.
 
-hyperparameters
-  agent
-    agent_id
-    obs_dim
-    num_agents
-    num_actions
-    pathwrap_path
-    epsilon_robust
-    epsilon_explore
-    lr
-    gamma
-    decay_rate
-    batch_size
-    buffer_size
-    learning_starts
-    grad_clip_norm
-    use_gpu
-    sre_num_random_starts
-    sre_num_pure_starts
-    train_every
-    network_type
-    target_tau
-    target_update_steps
-    target_equilibrium_update_steps
-    action_epsilon_start
-    action_epsilon_end
-    action_epsilon_decay_fraction
-    sre_solver_name
-    sre_solver_workers
-    sre_solver_start_method
-    q_hidden_dims
-    epsilon_robust_initial
-    epsilon_schedule
-    sre_policy_cache_enabled
-    sre_policy_cache_size
-    sre_policy_cache_round_digits
-    sre_state_cache_round_digits
-    sre_remove_fixed_players
-  path_mcp
-    pathwrap_path
-    random_seed
-  path_mcp_pool
-    pathwrap_path
-    max_workers
-    start_method
-    random_seed
+Older output folders may contain additional historical scenarios, but the two
+above are the current code-registered scenarios.
 
-lbf_config
-  players
-  field_size
-  sight
-  max_food
-  max_episode_steps
-  player_levels
-  min_food_level
-  max_food_level
-  normalize_reward
-  food_levels
-  force_coop
-  penalty
-  empty_load_penalty
-  simple_food_rewards
+## Deep SRQ Training
 
-periodic_eval[]
-  n_eval_episodes
-  mean_agent_rewards
-  mean_joint_reward
-  episode
-  global_step
-  gradient_step
+`deepsrq_path_pool_training.ipynb` is the current Deep SRQ training notebook. It
+calls `train_deepsrq_path_mcp_pool_for_epsilon(...)`, which in turn calls
+`train_lbf_deep_srq_vectorized(...)`.
 
-checkpoint_paths
-  best
-  final
+The training loop:
 
-timing
-  wall_clock_seconds
-  episode_time
-    count
-    mean_milliseconds
-    min_milliseconds
-    max_milliseconds
-    std_milliseconds
-  sre_solve_time
-    count
-    mean_milliseconds
-    min_milliseconds
-    max_milliseconds
-    std_milliseconds
-  backend_solve_time
-    count
-    mean_milliseconds
-    min_milliseconds
-    max_milliseconds
-    std_milliseconds
-  agents[]
-    agent_index
-    algorithm
-    sre_solve_time
-      count
-      mean_milliseconds
-      min_milliseconds
-      max_milliseconds
-      std_milliseconds
-    backend_solve_time
-      count
-      mean_milliseconds
-      min_milliseconds
-      max_milliseconds
-      std_milliseconds
-    sre_policy_cache
-      enabled
-      config_enabled
-      approx_enabled
-      entries
-      max_entries
-      requests
-      exact_hits
-      approx_hits
-      misses
-      hit_rate
-      path_solves_avoided
-      evictions
-      candidate_returned
-      cache_round_digits
-      state_round_digits
-      target_equilibrium_update_steps
-    update_time
-      count
-      mean_milliseconds
-      min_milliseconds
-      max_milliseconds
-      std_milliseconds
-  sre_policy_cache
-    requests
-    exact_hits
-    approx_hits
-    misses
-    path_solves_avoided
-    evictions
-    hit_rate
+1. Builds `LBFParallelEnv` slots up to `NUM_ENVS`.
+2. Converts each live environment to the canonical global state vector.
+3. Optionally computes action masks.
+4. Calls `agent.act_joint_batch(states, action_masks_batch=...)`.
+5. Steps each environment and records vector rewards, done masks, next states,
+   and next action masks.
+6. Pushes transitions to replay.
+7. Runs the due number of `agent.train_step(...)` updates according to
+   `train_every`.
+8. Periodically evaluates the current policy when `eval_interval` is set.
+9. Saves best and final checkpoints plus compact stats and reward histories.
 
-solver_usage
-  solve_time
-    count
-    mean_milliseconds
-    min_milliseconds
-    max_milliseconds
-    std_milliseconds
+Notebook-visible training settings are:
 
-training_reward_plot_paths
-  agent_<n>
-  agent_<n>_max_100
-  combined
-  combined_max_100
-  periodic_eval
-```
+| Setting | Value |
+|---|---:|
+| `N_EPISODES` | `3000` |
+| Robust epsilons | `0.01`, `0.1`, `0.5`, `1.0` |
+| Robust epsilon schedule | `"constant"` |
+| `BASE_SEED` | `2025`, offset per epsilon/scenario |
+| `EVAL_INTERVAL` | `100` |
+| `EVAL_EPISODES_DURING_TRAINING` | `30` |
+| `NUM_ENVS` | `32` |
+| `EVAL_NUM_ENVS` | `8` |
+| `SRE_SOLVER_WORKERS` | `16` |
+| `PATH_POOL_SOLVER` | `"path_c_pool"` |
+| `SKIP_EXISTING_TRAINING` | `True` |
+| `USE_ACTION_MASKS` | `False` |
 
-The recorded training metrics are:
+The notebook overrides Deep SRQ hyperparameters with:
 
-- Reward metrics: `reward_summary` stores per-agent and joint summary
-  statistics; `total_environment_steps` stores the total number of environment
-  transitions; `best_joint_reward` stores the best training joint reward when
-  no periodic eval checkpoint has taken over.
-- Optimisation metrics: `gradient_steps`, `best_loss`, and `latest_loss`.
-- Periodic evaluation metrics: `periodic_eval` stores one record per evaluation
-  point when `eval_interval` is enabled. Each record contains compact
-  `mean_agent_rewards`, `mean_joint_reward`, `n_eval_episodes`, `episode`,
-  `global_step`, and `gradient_step`.
-- Checkpoint metrics: `best_eval_joint_reward`, `best_checkpoint_source`, and
-  `checkpoint_paths.best` / `checkpoint_paths.final`.
-- Timing metrics: `timing.wall_clock_seconds`, `timing.episode_time`,
-  `timing.sre_solve_time`, `timing.backend_solve_time`, and per-agent entries
-  under `timing.agents`.
-  Duration summaries use `count`, `mean_milliseconds`, `min_milliseconds`,
-  `max_milliseconds`, and `std_milliseconds`.
-- Per-agent timing/cache metrics: each `timing.agents` entry stores
-  `agent_index`, `algorithm`, `sre_solve_time`, `backend_solve_time`,
-  `sre_policy_cache`, and `update_time`.
-- Aggregated cache metrics: `timing.sre_policy_cache` stores `requests`,
-  `exact_hits`, `approx_hits`, `misses`, `path_solves_avoided`,
-  `evictions`, and `hit_rate`.
-- Solver metrics: `solver_usage.solve_time` records backend solve duration
-  summaries.
+| Field | Value |
+|---|---:|
+| `sre_num_random_starts` | `5` |
+| `sre_num_pure_starts` | `10` |
+| `train_every` | `4` |
+| `target_equilibrium_update_steps` | `1` |
+| `sre_policy_cache_enabled` | `False` |
 
-`training_summary.txt` persists the most useful headline values:
-`scenario`, `algorithm`, `epsilon`, `episodes`, `best_loss`, `latest_loss`,
-best/final checkpoint paths, and each agent's reward mean and standard
-deviation.
+The base LBF Deep SRQ hyperparameters in `DeepSrqLbfHyperparams` are:
+
+| Field | Default |
+|---|---:|
+| `lr` | `3e-4` |
+| `gamma` | `0.99` |
+| `buffer_size` | `20000` |
+| `batch_size` | `32` |
+| `learning_starts` | `500` |
+| `sre_num_random_starts` | `10` |
+| `sre_num_pure_starts` | `0` |
+| `train_every` | `4` |
+| `target_update_steps` | `250` |
+| `target_equilibrium_update_steps` | `4` |
+| `action_epsilon_start/end` | `1.0 / 0.05` |
+| `action_epsilon_decay_fraction` | `1.0` |
+| `sre_policy_cache_enabled` | `True` |
+| `path_c_pool.max_workers` | `8` |
+
+## Deep SRQ Evaluation
+
+`deepsrq_path_pool_evaluation.ipynb` evaluates trained Deep SRQ checkpoints.
+
+Notebook-visible evaluation settings are:
+
+| Setting | Value |
+|---|---:|
+| `EVAL_EPISODES` | `500` |
+| Robust epsilons | `0.01`, `0.1`, `0.5`, `1.0` |
+| `SRE_SOLVER_WORKERS` | `16` |
+| `EVAL_NUM_ENVS` | `16` |
+| `PATH_POOL_SOLVER` | `"path_c_pool"` |
+
+For each scenario and robust epsilon, the evaluation suite runs:
+
+- Deep SRQ self-play;
+- Deep SRQ as Agent 1 against IQL;
+- Deep SRQ as Agent 1 against IPPO;
+- Deep SRQ as Agent 1 against MAPPO;
+- Deep SRQ as Agent 1 against MAA2C.
+
+The mixed-matchup logic is intentionally asymmetric: the primary Deep SRQ policy
+selects a full joint action, the opponent policy also selects a full joint
+action, and the evaluator uses only Deep SRQ's Agent 1 action while Agents
+2..N come from the baseline policy. This keeps the focal Deep SRQ role fixed.
+
+Checkpoint loading tries `shared_deepsrq_best.pt` first and falls back to
+`shared_deepsrq_final.pt` if the best checkpoint is missing or incompatible.
+Evaluation writes `evaluation_rewards.json`, `evaluation_boxplot.png`, and a
+`sample_rollout.gif` for the best-joint-reward rollout when rendering is
+available.
+
+The evaluation notebook also writes rolling mean and rolling max training reward
+comparison plots that combine Deep SRQ training rewards with EPyMARL baseline
+reward curves.
 
 ## EPyMARL Baselines
 
-`lbf_epymarl_baselines.ipynb` runs:
-- IQL, IPPO, MAPPO, and MAA2C through an external EPyMARL checkout.
+`lbf_epymarl_baselines.ipynb` trains and evaluates:
 
-The notebook registers three local Gymnasium IDs for the requested scenarios:
+- IQL;
+- IPPO;
+- MAPPO;
+- MAA2C.
 
-| Scenario | Episode length | EPyMARL `t_max` for 1000 episodes |
-|---|---:|---:|
-| 2 agents with levels 1 and 2, 8x8, 10 foods: 3 level-3, 2 level-2, 5 level-1 | 50 | 50000 |
-| 2 level-1 agents, 8x8, 10 foods: 5 level-1, 5 level-2, forced cooperation | 50 | 50000 |
-| 3 agents with levels 1, 2, and 3, 10x10, 18 foods: 3 each for levels 1-6 | 100 | 100000 |
+It uses the same two registered scenarios as the Deep SRQ notebooks.
 
-All three registered scenarios use simple food-level collection rewards, no
-reward normalization, `-0.01` empty-load shaping, and no penalty for
-insufficient-level failed loads.
+Notebook-visible settings:
 
-Set `EPYMARL_ROOT` in the notebook to a local clone of
-`https://github.com/uoe-agents/epymarl` before running the EPyMARL algorithms.
+| Setting | Value |
+|---|---:|
+| `N_EPISODES` | `3000` |
+| `EVAL_EPISODES` | `100` |
+| `EVAL_ROLLOUT_SEED_OFFSET` | `10000` |
+| `PARALLEL_BATCH_SIZE` | `128` |
+| `MINIBATCH_SIZE` | `32` |
+| `SEED` | `2025` |
 
-## See Also
+The helper converts an episode budget to EPyMARL timesteps with:
 
-`lbf_example.ipynb` — random rollout and partial-observation demo.
+```text
+t_max = N_EPISODES * scenario.time_limit
+```
+
+For these 50-step scenarios, 3000 episodes means `t_max = 150000`.
+
+The EPyMARL wrapper uses `runner="parallel"`, `batch_size_run=128`,
+`batch_size=32`, CUDA when available, and a small patch that trains over the
+collected parallel batch before collecting again. It also saves deterministic
+`best` and `final` model roots so the evaluation cells can load checkpoints
+without relying on timestamped Sacred paths.
+
+## Artifacts
+
+Current helper code writes new Deep SRQ PATH-C pool runs under:
+
+```text
+discrete_action_space/lbf_grid/deepsrq_path_lcp_pool/training/<scenario_key>/<epsilon>/
+discrete_action_space/lbf_grid/deepsrq_path_lcp_pool/evaluation/<scenario_key>/<epsilon>/
+```
+
+Older existing artifacts and some notebook output cells may still reference the
+historical folder:
+
+```text
+discrete_action_space/lbf_grid/deepsrq_path_mcp_nplayer_pool/
+```
+
+For each Deep SRQ training run, the important files are:
+
+- `training_stats.json`: compact run metadata, summaries, timings, solver
+  usage, checkpoint paths, and plot paths.
+- `training_rewards.json`: full per-episode reward history used for interrupted
+  or partial-run plotting.
+- `training_summary.txt`: human-readable summary.
+- `shared_deepsrq_best.pt` and `shared_deepsrq_final.pt`.
+- `agent_<n>_training_reward.png`,
+  `agent_<n>_training_reward_max_100.png`,
+  `combined_agent_training_rewards.png`,
+  `combined_agent_training_rewards_max_100.png`,
+  and `periodic_eval_reward.png`.
+
+Each epsilon also gets a manifest:
+
+```text
+deepsrq_path_lcp_pool/training/manifest_eps_<epsilon>.json
+deepsrq_path_lcp_pool/evaluation/manifest_eps_<epsilon>.json
+```
+
+EPyMARL artifacts are under:
+
+```text
+discrete_action_space/lbf_grid/baseline_runs/epymarl/<scenario_key>/<algorithm>/
+discrete_action_space/lbf_grid/baseline_runs/epymarl/models/<scenario_key>/<seed>/<algorithm>/
+```
+
+They include `reward_stats.json`, reward-curve images, checkpoint-evaluation
+JSON, evaluation boxplots, rollout GIFs, and model checkpoints.

@@ -1,150 +1,269 @@
-# Bimatrix Game — Implementation Notes
+# Bimatrix Grid-World Experiments
 
-This folder implements three multi-agent reinforcement learning algorithms — **NashQ**, **SRQ**, and **Deep SRQ** — and evaluates them on a stochastic grid-world environment. All three share the same joint-Q structure: each agent models every other agent's Q-values and computes a stage-game equilibrium at each step.
+This folder is the two-player finite-action benchmark for the discrete-action
+stack. It compares tabular NashQ, tabular SRQ, and Deep SRQ on small stochastic
+grid worlds where both agents must cross the map and avoid collisions.
 
----
+The folder name is `bimatrix_game` because every state induces a two-player
+bimatrix stage game: each player has 4 actions, so the stage-game Q tensor has
+shape `(4, 4, 2)`.
 
-## Algorithms
+## Environment
 
-### NashQ (`NashQagent.py`)
-
-`NashQAgent` subclasses `SRQAgent` and replaces the SRE solver with a Nash equilibrium solver. Nash equilibria are computed with **pygambit** (`gambit.Game.from_arrays` + `gambit.nash.enummixed_solve`), which enumerates all mixed-strategy Nash equilibria of the 2-player bimatrix stage game formed from the current Q-values.
-
-**Key details:**
-
-- Each agent maintains a joint Q-table `Q_i^j(s, a1, a2)` for both agents `j ∈ {1, 2}`.
-- At each state, the Q-values are extracted as two payoff matrices `U1`, `U2` of shape `(|A|, |A|)` and passed to pygambit as a `Game` object.
-- `enummixed_solve` returns all Nash equilibria. When multiple exist, the one with the highest expected joint reward (`p1 @ U1 @ p2 + p1 @ U2 @ p2`) is selected — matching Jack Brand's design choice.
-- Action selection is `ε_explore`-greedy over the Nash equilibrium probabilities.
-- The Bellman target uses the Nash value of the next state (same update formula as SRQ, just with a different equilibrium operator).
-- No PATH solver is required; the `pathwrap_path` argument is accepted but discarded.
-
----
-
-### SRQ (`SRQagent.py`)
-
-`SRQAgent` implements Strategically Robust Q-Learning (Brand, 2025). It replaces the Nash operator with the SRE operator, parameterised by a robustness level `ε_robust ∈ [0, 1]` under the total-variation-cost Wasserstein distance.
-
-**Q-table structure:**
-
-The Q-table is a Python dictionary mapping state keys to NumPy tensors of shape `(|A|, |A|, num_agents)`. State keys are string representations of the joint position list.
-
-**SRE computation — PATH solver integration:**
-
-SRE computation is the core of SRQ. The SRE of the bimatrix stage game is formulated as a **Linear Complementarity Problem (LCP)** and solved using the **PATH solver** — a C library (`libpath50`) accessed through a thin C wrapper (`pathwrap.c`) that is compiled to `pathwrap.so`.
-
-The Python layer (`path_solver.py`) connects to this compiled library via `ctypes`:
-
-1. `PathSolverWrapper` loads `pathwrap.so` with `ctypes.CDLL`, sets up function signatures for `path_create`, `path_solve`, and `path_destroy`, and manages the solver context lifetime.
-2. `solve_strategically_robust_bimatrix_game_path_lcp` constructs the LCP matrix, vector, bounds, and sparse column data, then passes them to the PATH solver.
-3. The LCP variables include the mixed strategies `p1`, `p2`, dual Lagrange multipliers `λ1`, `λ2`, transport coupling variables `η1`, `η2`, and auxiliary equality variables `ξ1`, `ξ2`, `κ1`, `κ2`.
-4. To find multiple equilibria (the LCP may have more than one solution), the solver is run from multiple starting points: all `|A|² = 16` pure-strategy profiles are tried first, then `num_repeats = 20` random restarts with `p1`, `p2` drawn uniformly and dual variables drawn uniformly from `[−50, 50]`. Duplicate solutions (rounded to 4 decimal places) are discarded.
-5. Among the solutions found, the one with highest expected joint reward is selected — matching Jack's MATLAB setup.
-
-**Parameter decay:**
-
-`ε_robust`, `ε_explore`, and `α` are all decayed multiplicatively by `decay_rate = 0.998` after each episode, down to configurable minimums. High robustness early (policies uncertain) decays toward Nash as the Q-table stabilises.
-
----
-
-### Deep SRQ (`dueling_double_dqn_sre.py`)
-
-`DuelingDoubleDqnSreAgent` extends the SRQ principle to continuous (or high-dimensional) state spaces using a **Dueling Double DQN** backbone, replacing the tabular Q-table with a neural network.
-
-**Network architecture — `DuelingJointQNetwork`:**
-
-The network takes the flattened joint observation (both agents' positions, shape `obs_dim = 4`) and outputs Q-values for all joint actions:
-
-```
-Input (obs_dim)
-  → Shared feature layers: Linear(obs_dim, 128) → ReLU → Linear(128, 128) → ReLU
-  → Value head:     Linear(128, num_agents)                     → V [B, N]
-  → Advantage head: Linear(128, |A|² × num_agents) → reshape   → Adv [B, |A|², N]
-  → Q = V + (Adv − mean(Adv))                                  → [B, |A|, |A|, N]
-```
-
-The output has shape `(batch, |A|, |A|, num_agents)` — a Q-value for every joint action pair for every agent.
-
-**Training — Double DQN with SRE targets:**
-
-- Transitions `(s, (a1, a2), (r1, r2), s', done)` are stored in an experience replay buffer (capacity 10,000).
-- At each update step a minibatch of 32 transitions is sampled.
-- **Double DQN**: the SRE policy is computed from the **online network's** Q-tensor at `s'`; the expected value under that policy is evaluated using the **target network's** Q-tensor at `s'`. This decouples action selection from value estimation.
-- The target network is synchronised from the online network every `target_update = 10` episodes.
-- Loss: MSE between `Q_online(s, a1, a2)` and `r + γ · V_target(s')`, where `V_target(s')` is the SRE expected value under the target network.
-
-**SRE in the deep setting:**
-
-At each forward pass during action selection and at each training step, the Q-tensor produced by the network is treated exactly like the tabular Q-tensor in SRQ — it is passed to `solve_strategically_robust_bimatrix_game_path_lcp` (via the same `PathSolverWrapper` / PATH solver pipeline) to compute the SRE policy. This means the PATH solver is called once per environment step (for action selection) and once per sample in the training minibatch.
-
----
-
-## Experimental Setup
-
-### Environment (`GridWorld.py`)
-
-A 2-agent stochastic grid-world with the following properties:
+`GridWorld.py` defines the serial environment used by tabular and mixed
+pairing runs. `batched_gridworld.py` defines the vectorized equivalent used by
+Deep SRQ self-play runs.
 
 | Property | Value |
 |---|---|
-| Actions | 4: Up (0), Right (1), Down (2), Left (3) |
-| Transition probability | `p = 0.8` (success); `(1−p)/3` for each other direction |
-| Boundary | Out-of-bounds moves leave the agent in place |
-| Goal reward | +100 |
-| Step penalty | −1 |
-| Collision penalty | −100 (both agents bounce back to previous position) |
-| Termination | Both agents at their goals, or 100 steps exceeded |
+| Agents | 2 |
+| Actions | 4: `0=Up`, `1=Right`, `2=Down`, `3=Left` |
+| Transition model | Intended action succeeds with probability `p`; with probability `1 - p`, one of the other three directions is sampled uniformly |
+| Default stochasticity in experiments | `p_env = 0.8` |
+| Boundary handling | Out-of-bounds moves leave the agent in place |
+| Observation | Joint position state. Serial env returns `[(r1, c1), (r2, c2)]`; vectorized env returns flat `[r1, c1, r2, c2]` |
+| Episode cap | 100 steps |
+| Terminal condition | Both agents reach their goals, or the step cap is reached in the batched env |
 
-The environment accepts custom `start_positions` and `goal_positions` so the same class supports all three scenarios.
+### Rewards
+
+Rewards are per-agent:
+
+- `+100` when an unfinished agent reaches its own goal.
+- `-1` for a non-goal transition by an unfinished agent.
+- `-100` for both agents when their proposed next positions collide; both
+  agents bounce back to their previous positions.
+- `0` for agents that have already reached their goal and remain finished.
+
+The collision rule is the main strategic pressure. A Nash policy can be brittle
+when the other player deviates near crossing points; SRQ and Deep SRQ use the
+SRE operator to hedge against nearby opponent-policy deviations.
 
 ### Scenarios
 
-| | Grid | Agent 1 start → goal | Agent 2 start → goal |
+The live scenario definitions are in `SCENARIO_CONFIGS` in
+`experiment_harness.py`.
+
+| Scenario | Grid | Agent 1 start -> goal | Agent 2 start -> goal |
 |---|---|---|---|
-| **Scenario 1** | 3×3 | Bottom-left `(2,0)` → Top-right `(0,2)` | Bottom-right `(2,2)` → Top-left `(0,0)` |
-| **Scenario 2** | 3×3 | Top-left `(0,0)` → Bottom-right `(2,2)` | Bottom-right `(2,2)` → Top-left `(0,0)` |
-| **Scenario 3** | 4×4 | Bottom-left `(3,0)` → Top-right `(0,3)` | Bottom-right `(3,3)` → Top-left `(0,0)` |
+| `scenario1` | `3x3` | `(2, 0) -> (0, 2)` | `(2, 2) -> (0, 0)` |
+| `scenario2` | `3x3` | `(0, 0) -> (2, 2)` | `(2, 2) -> (0, 0)` |
+| `scenario3` | `4x4` | `(3, 0) -> (0, 3)` | `(3, 3) -> (0, 0)` |
 
-In all scenarios the agents' paths cross, creating frequent collision opportunities that stress-test the equilibrium concepts.
+## Algorithm Behavior in This Game
 
-### Comparison harness (`bimatrix_game.ipynb`)
+### Tabular NashQ
 
-`bimatrix_game.ipynb` embeds the unified training loop that runs all algorithm pairings across all scenarios:
+`NashQAgent` is implemented in `../NashQagent.py`. It inherits the joint-Q table
+and update mechanics from `SRQAgent`, but overrides the stage-game solve:
 
-| Pairing |
-|---|
-| NashQ vs NashQ |
-| SRQ vs SRQ |
-| Deep SRQ vs Deep SRQ |
-| NashQ vs SRQ |
-| NashQ vs Deep SRQ |
-| SRQ vs Deep SRQ |
+- each state stores a tensor `Q(s)` with shape `(4, 4, 2)`;
+- the two payoff matrices are passed to pygambit with
+  `gambit.Game.from_arrays(U1, U2)`;
+- `gambit.nash.enummixed_solve(...)` enumerates mixed Nash equilibria;
+- if multiple equilibria are returned, the one with highest nominal joint
+  payoff is selected;
+- epsilon-greedy exploration samples uniformly instead of from the equilibrium
+  policy.
 
-Each run trains for 3,000 episodes and saves/displays:
-- Best and final checkpoints (`.pkl` for tabular, `.pt` for deep)
-- A compact `training_stats.txt` file with reward summaries, scenario config, and timing
-- A `training_plot.png` plot, also displayed in the notebook
+### Tabular SRQ
 
-Results are organised under `scenario_runs/<scenario_key>/<algorithm_vs_algorithm>/`.
+`SRQAgent` is implemented in `../SRQagent.py`. It uses the same table shape and
+Bellman update as NashQ, but the stage-game policy is an SRE:
 
-### Training notebook (`bimatrix_game.ipynb`)
+- `Q(s)[:, :, 0]` and `Q(s)[:, :, 1]` become the bimatrix payoffs;
+- `solve_strategically_robust_bimatrix_game_path_lcp(...)` builds the SRE LCP;
+- `PathSolverWrapper` calls the compiled PATH wrapper;
+- all pure starts are tried when `num_pure_starts=None`, then random starts are
+  added;
+- returned candidates are deduplicated and the highest nominal joint payoff
+  candidate is used.
 
-The notebook is now the primary training/reporting surface for both the full comparison suite and the Deep SRQ epsilon sweep.
+Robust epsilon is scheduled per run. Under the total-variation cost used here,
+`epsilon_robust = 0` recovers Nash behavior and larger values increase
+strategic robustness.
 
----
+### Deep SRQ
 
-## Evaluation and Visualisation (`bimatrix_game_eval.ipynb`)
+Deep SRQ uses `DuelingDoubleDqnSreAgent` from `../dueling_double_dqn_sre.py`.
+For this two-player game:
 
-The evaluation notebook is separate from training. It:
+- the observation dimension is `4` (`r1, c1, r2, c2`);
+- the default network is `DuelingJointQNetwork`;
+- the output tensor is `[batch, 4, 4, 2]`;
+- the two-player SRE solve goes through `PathCBimatrixSreSolver`;
+- full-pair experiments inject the process-pool solver `path_c_pool`;
+- self-play uses one shared Deep SRQ agent object for both agent slots, so one
+  network learns the whole joint game.
 
-1. **Loads the best checkpoints** (`srq_agent{0,1}_best.pkl`) for each scenario from the corresponding checkpoint directory. Agents are initialised with `ε_robust = 0`, `ε_explore = 0`, `α = 0` — pure SRE policy, no exploration, no Q-table updates.
-2. **Runs 200 evaluation episodes** per scenario. At each step the shared SRE policy is computed from the loaded Q-table and agents act greedily under it.
-3. **Reports** mean and standard deviation of episode reward for each agent.
-4. **Plots** for each scenario:
-   - Raw episode rewards (not shown separately)
-   - Rolling average over a 50-episode window (blue line)
-   - Final-100-episode mean (red dashed line)
-   - Saved to `eval_results_scenario{1,2,3}.png`
+The current full-pair notebook sets Deep SRQ to:
 
-## Notes
-The `full_pair_comparison_runs_old` stores the runs of the old Deep SRQ algorithm with robust exploitability gap filter and uniform fallback policy.
+| Field | Value |
+|---|---:|
+| `network_type` | `"joint_output"` |
+| `num_envs` for vectorized self-play | `32` |
+| `batch_size` | `16` |
+| `gamma` | `0.9` |
+| `train_every` | `4` |
+| `target_update_steps` | `100` |
+| `target_equilibrium_update_steps` | `1` |
+| `sre_solver_name` | `"path_c_pool"` |
+| `sre_solver_workers` | `8` |
+| `sre_num_random_starts` | `5` |
+| `sre_num_pure_starts` | `16` |
+| `sre_policy_cache_enabled` | `False` |
+
+`sre_num_pure_starts=16` corresponds to all `4 x 4` pure joint-action profiles.
+
+## Training Loop
+
+`experiment_harness.py` is the shared training harness.
+
+For serial tabular or mixed pairings, `train_pairing(...)`:
+
+1. Builds `GridWorldEnv` for the selected scenario.
+2. Builds the requested two-agent pairing.
+3. For each episode, solves a shared equilibrium when both agents are the same
+   tabular algorithm; otherwise each agent acts through its own adapter.
+4. Steps the environment, updates each agent, and tracks per-agent episode
+   rewards.
+5. Saves best checkpoints whenever the episode joint reward improves.
+6. Saves final checkpoints, `training_stats.txt`, and `training_plot.png`.
+
+For Deep SRQ self-play, `full_pair_comparison.ipynb` routes to
+`train_vectorized_deep_srq_experiment(...)` in `vectorized_deep_srq.py`:
+
+1. Builds `BatchedGridWorldEnv` with `num_envs=32`.
+2. Solves SRE policies in batches from the online Q tensor.
+3. Pushes vectorized transitions into replay.
+4. Runs the due number of minibatch updates according to `train_every`.
+5. Updates the target network every `target_update_steps` gradient steps.
+6. Saves `shared_deepsrq_final.pt`, compact stats, and reward plots.
+
+## Evaluation Logic
+
+There is no current standalone bimatrix evaluation notebook in this folder.
+Evaluation is mostly training-time comparison:
+
+- per-episode rewards are stored in each run's stats payload;
+- `training_plot.png` visualizes training curves;
+- best checkpoints are selected by highest observed training joint reward;
+- ablation notebooks compute summary tables from last-window reward and timing
+  statistics with `summarize_ablation_timing_rows(...)`.
+
+Older docs referred to `bimatrix_game.ipynb` and `bimatrix_game_eval.ipynb`;
+those files are not present in the current checkout.
+
+## Experiments in This Folder
+
+### Full Pair Comparison
+
+`full_pair_comparison.ipynb` is the current main experiment surface. It runs 81
+variants:
+
+- Pairings:
+  - `deep_srq` vs `deep_srq`
+  - `deep_srq` vs `srq`
+  - `deep_srq` vs `nashq`
+- Scenarios: `scenario1`, `scenario2`, `scenario3`.
+- Robust epsilon starts: `0.25`, `0.5`, `1.0`.
+- Robust epsilon schedules: `linear`, `exponential`, `constant`.
+- Episode budget: `3000` per run.
+
+Outputs are written under `full_pair_comparison_runs/<case>/<scenario>/<run>/`.
+The run folder convention is `{schedule}_eps{epsilon}_{seed}`. Manifests are
+stored at:
+
+- `full_pair_comparison_runs/deep_srq_vs_deep_srq_manifest.txt`
+- `full_pair_comparison_runs/deep_srq_vs_tabular_srq_manifest.txt`
+- `full_pair_comparison_runs/deep_srq_vs_nash_q_manifest.txt`
+
+The notebook skips a run when the expected `training_stats.txt` already exists.
+
+### Solver Backend Ablation
+
+`deep_srq_solver_ablation.ipynb` compares SRE solver backends for Deep
+SRQ-vs-Deep-SRQ:
+
+- Scenarios: `scenario1`, `scenario3`.
+- Epsilon: `0.5`.
+- Schedule: `linear`.
+- Episode budget: `3000`.
+- Variants: `path_c`, `path_c_pool`, `lemkelcp`, `lemkelcp_pool`.
+
+The output root is `ablation_runs/solver_ablation/`.
+
+### Vectorized SRE Batch Ablation
+
+`deep_srq_vectorized_sre_batch_ablation.ipynb` compares serial collection and
+vectorized collection:
+
+- Scenarios: `scenario1`, `scenario3`.
+- Epsilon: `0.5`.
+- Schedule: `linear`.
+- Episode budget: `3000`.
+- Variants:
+  - serial `path_c`;
+  - serial `path_c_pool` with 4 workers;
+  - vectorized 16 environments with `path_c_pool`;
+  - vectorized 32 environments with `path_c_pool`.
+
+The output root is `ablation_runs/vectorized_sre_batch/`.
+
+### Network-Type Ablation
+
+`deep_srq_network_architecture_ablation.ipynb` compares the three network
+families exposed by `make_q_network(...)`:
+
+- `joint_output`;
+- `per_agent_independent`;
+- `shared_trunk_separate_heads`.
+
+It uses `scenario1` and `scenario3`, epsilon start `0.5`, linear epsilon
+schedule, and 3000 episodes. The output root is
+`ablation_runs/network_architecture/`.
+
+### Joint-Q Hidden-Width Tuning
+
+`deep_srq_joint_q_architecture_tuning.ipynb` keeps `network_type="joint_output"`
+and compares hidden dimensions:
+
+- `(64, 64)`
+- `(128, 64)`
+- `(128, 128)`
+- `(256, 128)`
+- `(256, 256)`
+- `(128, 128, 128)`
+
+It uses `scenario1` and `scenario3`, epsilon start `0.5`, linear schedule, PATH
+pool with 8 workers, and 3000 episodes. The output root is
+`ablation_runs/joint_q_architecture_tuning/`.
+
+### PATH Restart Ablation
+
+`deep_srq_restart_ablation.ipynb` explores PATH start budgets:
+
+- pure starts plus 20 random starts;
+- pure starts plus 10 random starts;
+- pure starts only;
+- 10 random starts only;
+- 5 random starts only.
+
+It uses `scenario1` and `scenario3`, epsilon start `0.5`, linear schedule, PATH
+pool with 8 workers, and 3000 episodes. The output root is
+`ablation_runs/path_restarts/`.
+
+## Current Status Note
+
+`full_pair_comparison.ipynb` uses the current
+`DuelingDoubleDqnSreAgentConfig` field names:
+
+- `sre_num_random_starts`;
+- `sre_num_pure_starts`.
+
+Several older ablation notebooks in this folder still show legacy visible-cell
+names such as `sre_num_repeats` and `sre_include_pure_starts`. The corresponding
+experiment families and saved artifacts are still useful for interpreting the
+folder, but rerunning those notebooks against the current agent config requires
+migrating those fields. For this 4-by-4 bimatrix game, `sre_include_pure_starts=True`
+maps to `sre_num_pure_starts=16`; `False` maps to `0`.

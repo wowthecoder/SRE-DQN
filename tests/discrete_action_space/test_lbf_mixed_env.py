@@ -67,15 +67,15 @@ def _make_invalid_load_env():
     return env
 
 
-def test_basic_lbf_defaults_are_three_agent_full_observation():
+def test_basic_lbf_defaults_are_two_agent_full_observation():
     env = make_pz_env()
     try:
         obs, _ = env.reset(seed=0)
 
-        assert env.possible_agents == ["player_0", "player_1", "player_2"]
+        assert env.possible_agents == ["player_0", "player_1"]
         assert env._inner.field_size == (10, 10)
         assert env._inner.sight == 10
-        assert len(obs) == 3
+        assert len(obs) == 2
         assert len(_food_positions(env)) == 3
     finally:
         env.close()
@@ -99,11 +99,11 @@ def test_seed_controls_random_food_positions():
 
 
 def test_player_levels_can_be_fixed_per_agent():
-    env = make_pz_env(players=3, player_levels=[1, 2, 3])
+    env = make_pz_env(players=2, player_levels=[1, 2])
     try:
         env.reset(seed=7)
 
-        assert [player.level for player in env._inner.players] == [1, 2, 3]
+        assert [player.level for player in env._inner.players] == [1, 2]
     finally:
         env.close()
 
@@ -124,26 +124,6 @@ def test_dense_epymarl_scenarios_spawn_requested_food_multisets():
     expected_levels = {
         "lbf_8x8_2p_2f_levels12": [1, 1, 1, 1, 1, 2, 2, 3, 3, 3],
         "lbf_8x8_2p_2f_force_coop": [1, 1, 1, 1, 1, 2, 2, 2, 2, 2],
-        "lbf_10x10_3p_8f_levels123": [
-            1,
-            1,
-            1,
-            2,
-            2,
-            2,
-            3,
-            3,
-            3,
-            4,
-            4,
-            4,
-            5,
-            5,
-            5,
-            6,
-            6,
-            6,
-        ],
     }
 
     for key, scenario in EPYMARL_LBF_SCENARIOS.items():
@@ -166,34 +146,15 @@ def test_dense_epymarl_scenarios_spawn_requested_food_multisets():
 
 
 def test_dense_epymarl_gym_env_spawns_requested_food_count():
-    scenario = EPYMARL_LBF_SCENARIOS["lbf_10x10_3p_8f_levels123"]
+    scenario = EPYMARL_LBF_SCENARIOS["lbf_8x8_2p_2f_levels12"]
     assert scenario.kwargs["normalize_reward"] is False
     assert scenario.kwargs["simple_food_rewards"] is True
     env = ExactLevelForagingEnv(**scenario.kwargs)
     try:
         env.reset(seed=0)
 
-        assert len(np.argwhere(env.field > 0)) == 18
-        assert _food_levels_from_field(env.field) == [
-            1,
-            1,
-            1,
-            2,
-            2,
-            2,
-            3,
-            3,
-            3,
-            4,
-            4,
-            4,
-            5,
-            5,
-            5,
-            6,
-            6,
-            6,
-        ]
+        assert len(np.argwhere(env.field > 0)) == 10
+        assert _food_levels_from_field(env.field) == [1, 1, 1, 1, 1, 2, 2, 3, 3, 3]
     finally:
         env.close()
 
@@ -401,7 +362,7 @@ def test_pettingzoo_wrapper_uses_basic_lbf_defaults():
         actions = {agent: env.action_space(agent).sample() for agent in env.agents}
         next_obs, rewards, terms, truncs, step_infos = env.step(actions)
 
-        assert list(obs) == ["player_0", "player_1", "player_2"]
+        assert list(obs) == ["player_0", "player_1"]
         assert set(infos) == set(obs)
         assert set(next_obs) == set(obs)
         assert set(rewards) == set(obs)

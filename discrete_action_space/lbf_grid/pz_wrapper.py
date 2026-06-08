@@ -24,7 +24,7 @@ class LBFParallelEnv(ParallelEnv):
 
     def __init__(
         self,
-        players: int = 3,
+        players: int = 2,
         field_size: Tuple[int, int] = (10, 10),
         sight: Optional[int] = None,
         max_food: int = 3,
