@@ -1,0 +1,10 @@
+scenario=lbf_8x8_2p_2f_force_coop
+algorithm=deepsrq_path_lcp_pool
+epsilon=0.5
+episodes=3000
+best_loss=8.97944573807763e-06
+latest_loss=0.00030354346381500363
+best_checkpoint=/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_lcp_pool/training/lbf_8x8_2p_2f_force_coop/0.5/shared_deepsrq_best.pt
+final_checkpoint=/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_lcp_pool/training/lbf_8x8_2p_2f_force_coop/0.5/shared_deepsrq_final.pt
+agent_1_reward_mean=0.102389 std=0.079809
+agent_2_reward_mean=0.104256 std=0.080967

@@ -1,0 +1,74 @@
+{
+  "episode_reward_summary": {
+    "episodes": 500,
+    "per_agent": [
+      {
+        "agent": "Agent 1\nDeep SRQ",
+        "mean": 0.04648148148148148,
+        "std": 0.052449923861065326,
+        "median": 0.05555555555555555,
+        "lower_quartile": 0.0,
+        "upper_quartile": 0.05555555555555555,
+        "min": 0.0,
+        "max": 0.3703703703703704
+      },
+      {
+        "agent": "Agent 2\nDeep SRQ",
+        "mean": 0.11451851851851853,
+        "std": 0.11629002106211977,
+        "median": 0.1111111111111111,
+        "lower_quartile": 0.0,
+        "upper_quartile": 0.16666666666666666,
+        "min": 0.0,
+        "max": 0.6111111111111112
+      }
+    ],
+    "joint": {
+      "mean": 0.161,
+      "std": 0.13881771509678206,
+      "median": 0.1111111111111111,
+      "lower_quartile": 0.05555555555555555,
+      "upper_quartile": 0.2222222222222222,
+      "min": 0.0,
+      "max": 0.7222222222222222
+    }
+  },
+  "mean_agent_rewards": [
+    0.04648148148148148,
+    0.11451851851851853
+  ],
+  "mean_joint_reward": 0.161,
+  "scenario_key": "lbf_8x8_2p_2f_levels12",
+  "scenario_name": "2 agents with levels 1 and 2, 8x8 grid, 10 foods (3 level-3, 2 level-2, 5 level-1), full sight, 50-step episodes",
+  "primary_label": "deepsrq_path_lcp_pool",
+  "opponent_label": null,
+  "matchup_label": "deepsrq_path_lcp_pool",
+  "pair_label": "Deep SRQ",
+  "plot_title": "Scenario 1, Deep SRQ vs Deep SRQ",
+  "matchup_note": "All agent slots use Deep SRQ.",
+  "n_episodes": 500,
+  "fixed_primary_agent": null,
+  "primary_agent_schedule": null,
+  "primary_agent_by_episode": null,
+  "agent_labels": [
+    "Agent 1\nDeep SRQ",
+    "Agent 2\nDeep SRQ"
+  ],
+  "agent_algorithm_counts": [
+    {
+      "agent": 1,
+      "Deep SRQ": 500
+    },
+    {
+      "agent": 2,
+      "Deep SRQ": 500
+    }
+  ],
+  "video_episode_index": 362,
+  "video_joint_reward": 0.7222222222222222,
+  "render_error": null,
+  "artifact_dir": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_lcp_pool/evaluation/lbf_8x8_2p_2f_levels12/0.1/self_play",
+  "rewards_path": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_lcp_pool/evaluation/lbf_8x8_2p_2f_levels12/0.1/self_play/evaluation_rewards.json",
+  "boxplot_path": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_lcp_pool/evaluation/lbf_8x8_2p_2f_levels12/0.1/self_play/evaluation_boxplot.png",
+  "video_path": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_lcp_pool/evaluation/lbf_8x8_2p_2f_levels12/0.1/self_play/sample_rollout.gif"
+}

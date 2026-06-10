@@ -194,6 +194,21 @@ def deepsrq_path_mcp_pool_training_dir(
     )
 
 
+def deepsrq_path_mcp_pool_named_training_dir(
+    scenario_key: str,
+    run_name: str,
+    *,
+    repo_root=None,
+) -> Path:
+    return (
+        lbf_grid_dir(repo_root)
+        / DEEPSRQ_PATH_LCP_FOLDER_NAME
+        / "training"
+        / str(scenario_key)
+        / str(run_name)
+    )
+
+
 def deepsrq_solver_training_dir(
     family: str,
     scenario_key: str,
@@ -222,6 +237,21 @@ def deepsrq_path_mcp_pool_evaluation_dir(
         scenario_key,
         epsilon,
         repo_root=repo_root,
+    )
+
+
+def deepsrq_path_mcp_pool_named_evaluation_dir(
+    scenario_key: str,
+    run_name: str,
+    *,
+    repo_root=None,
+) -> Path:
+    return (
+        lbf_grid_dir(repo_root)
+        / DEEPSRQ_PATH_LCP_FOLDER_NAME
+        / "evaluation"
+        / str(scenario_key)
+        / str(run_name)
     )
 
 
@@ -359,6 +389,8 @@ def _existing_deepsrq_path_mcp_pool_training_record(
     *,
     scenario: LbfNotebookScenario,
     epsilon: float,
+    epsilon_schedule: str,
+    run_name: str,
     solver_name: str,
     sre_solver_workers: int,
     num_envs: int,
@@ -386,8 +418,12 @@ def _existing_deepsrq_path_mcp_pool_training_record(
             "scenario_name": scenario.name,
             "gym_id": scenario.gym_id,
             "time_limit": scenario.time_limit,
-            "epsilon_schedule": "constant",
+            "epsilon_schedule": str(epsilon_schedule),
             "epsilon_robust_initial": float(epsilon),
+            "epsilon_robust_final": (
+                0.0 if str(epsilon_schedule) == "linear" else float(epsilon)
+            ),
+            "run_name": str(run_name),
             "solver_name": solver_name,
             "sre_solver_workers": int(sre_solver_workers),
             "num_envs": int(num_envs),
@@ -436,15 +472,44 @@ def train_deepsrq_path_mcp_pool_for_epsilon(
     repo_root: str | Path | None = None,
     skip_existing: bool = False,
     use_action_masks: bool = True,
+    epsilon_schedule: str = "constant",
+    run_name: str | None = None,
+    manifest_name: str | None = None,
 ) -> dict[str, dict]:
     scenarios = scenarios or robust_lbf_scenarios()
     results = {}
-    for scenario_index, scenario in enumerate(scenarios):
-        run_dir = deepsrq_path_mcp_pool_training_dir(
-            scenario.key,
-            epsilon,
-            repo_root=repo_root,
+    epsilon_schedule = str(epsilon_schedule)
+    run_name = (
+        str(run_name)
+        if run_name is not None
+        else (
+            epsilon_slug(epsilon)
+            if epsilon_schedule == "constant"
+            else f"{epsilon_schedule}_{epsilon_slug(epsilon)}_to_0"
         )
+    )
+    manifest_name = (
+        str(manifest_name)
+        if manifest_name is not None
+        else (
+            f"manifest_eps_{epsilon_slug(epsilon)}.json"
+            if epsilon_schedule == "constant"
+            else f"manifest_{run_name}.json"
+        )
+    )
+    for scenario_index, scenario in enumerate(scenarios):
+        if epsilon_schedule == "constant" and run_name == epsilon_slug(epsilon):
+            run_dir = deepsrq_path_mcp_pool_training_dir(
+                scenario.key,
+                epsilon,
+                repo_root=repo_root,
+            )
+        else:
+            run_dir = deepsrq_path_mcp_pool_named_training_dir(
+                scenario.key,
+                run_name,
+                repo_root=repo_root,
+            )
         solver_name = deepsrq_path_pool_solver_for_scenario(
             scenario,
             nplayer_solver_name=nplayer_solver_name,
@@ -455,6 +520,8 @@ def train_deepsrq_path_mcp_pool_for_epsilon(
                 run_dir,
                 scenario=scenario,
                 epsilon=epsilon,
+                epsilon_schedule=epsilon_schedule,
+                run_name=run_name,
                 solver_name=solver_name,
                 sre_solver_workers=sre_solver_workers,
                 num_envs=num_envs,
@@ -464,7 +531,7 @@ def train_deepsrq_path_mcp_pool_for_epsilon(
             )
             print(
                 "DeepSRQ PATH pool "
-                f"{scenario.key} eps={epsilon_slug(epsilon)}: "
+                f"{scenario.key} run={run_name}: "
                 f"skipped existing training at {run_dir}"
             )
             results[scenario.key] = stats
@@ -486,7 +553,7 @@ def train_deepsrq_path_mcp_pool_for_epsilon(
             n_episodes=n_episodes,
             solver_name=solver_name,
             epsilon_robust_initial=float(epsilon),
-            epsilon_schedule="constant",
+            epsilon_schedule=epsilon_schedule,
             seed=seed,
             run_dir=run_dir,
             lbf_config_overrides=scenario.config,
@@ -510,7 +577,11 @@ def train_deepsrq_path_mcp_pool_for_epsilon(
                 "scenario_name": scenario.name,
                 "gym_id": scenario.gym_id,
                 "time_limit": scenario.time_limit,
-                "epsilon_schedule": "constant",
+                "epsilon_schedule": epsilon_schedule,
+                "epsilon_robust_final": (
+                    0.0 if epsilon_schedule == "linear" else float(epsilon)
+                ),
+                "run_name": run_name,
                 "solver_name": solver_name,
                 "sre_solver_workers": int(sre_solver_workers),
                 "num_envs": int(num_envs),
@@ -528,7 +599,7 @@ def train_deepsrq_path_mcp_pool_for_epsilon(
             drop_episode_lengths=True,
         )
         _print_live_training_status(
-            f"DeepSRQ PATH pool {scenario.key} solver={solver_name} eps={epsilon_slug(epsilon)}",
+            f"DeepSRQ PATH pool {scenario.key} solver={solver_name} run={run_name}",
             n_episodes,
             stats,
         )
@@ -542,13 +613,19 @@ def train_deepsrq_path_mcp_pool_for_epsilon(
         "use_action_masks": bool(use_action_masks),
         "skip_existing": bool(skip_existing),
         "epsilon": float(epsilon),
+        "epsilon_schedule": epsilon_schedule,
+        "epsilon_robust_initial": float(epsilon),
+        "epsilon_robust_final": (
+            0.0 if epsilon_schedule == "linear" else float(epsilon)
+        ),
+        "run_name": run_name,
         "results": results,
     }
     save_training_stats(
         lbf_grid_dir(repo_root)
         / DEEPSRQ_PATH_LCP_FOLDER_NAME
         / "training"
-        / f"manifest_eps_{epsilon_slug(epsilon)}.json",
+        / manifest_name,
         manifest,
         drop_reward_histories=True,
         drop_lbf_episode_details=True,
@@ -783,17 +860,25 @@ def load_deepsrq_path_lcp_pool_policy(
     scenario: LbfNotebookScenario,
     epsilon: float,
     *,
+    run_name: str | None = None,
     repo_root: str | Path | None = None,
     use_gpu: bool = True,
     sre_solver_workers: int | None = None,
     hyperparameter_overrides: dict | None = None,
     nplayer_solver_name: str = PATH_C_POOL_SOLVER,
 ) -> DeepSrqPolicyAdapter:
-    run_dir = deepsrq_path_mcp_pool_training_dir(
-        scenario.key,
-        epsilon,
-        repo_root=repo_root,
-    )
+    if run_name is None:
+        run_dir = deepsrq_path_mcp_pool_training_dir(
+            scenario.key,
+            epsilon,
+            repo_root=repo_root,
+        )
+    else:
+        run_dir = deepsrq_path_mcp_pool_named_training_dir(
+            scenario.key,
+            run_name,
+            repo_root=repo_root,
+        )
     checkpoints = [
         run_dir / "shared_deepsrq_best.pt",
         run_dir / "shared_deepsrq_final.pt",
@@ -985,6 +1070,7 @@ def _evaluation_agent_labels(
     opponent_label: str | None,
     total_episodes: int,
     num_agents: int,
+    primary_agent_by_episode=None,
 ) -> tuple[list[str], list[dict], str]:
     if opponent_label is None:
         return (
@@ -997,6 +1083,44 @@ def _evaluation_agent_labels(
                 for idx in range(num_agents)
             ],
             f"All agent slots use {primary_label}.",
+        )
+
+    if primary_agent_by_episode:
+        primary_counts = {
+            int(agent_id): int(primary_agent_by_episode.count(int(agent_id)))
+            for agent_id in range(1, num_agents + 1)
+        }
+        labels = []
+        counts = []
+        for idx in range(num_agents):
+            agent_id = idx + 1
+            primary_count = int(primary_counts.get(agent_id, 0))
+            opponent_count = int(total_episodes) - primary_count
+            labels.append(
+                f"Agent {agent_id}\n"
+                f"{primary_label}: {primary_count}\n"
+                f"{opponent_label}: {opponent_count}"
+            )
+            counts.append(
+                {
+                    "agent": int(agent_id),
+                    primary_label: primary_count,
+                    str(opponent_label): opponent_count,
+                }
+            )
+        active_primary_agents = [
+            f"Agent {agent_id} ({count} episodes)"
+            for agent_id, count in primary_counts.items()
+            if count
+        ]
+        return (
+            labels,
+            counts,
+            (
+                f"{primary_label} controls "
+                f"{', '.join(active_primary_agents)}; other slots use "
+                f"{opponent_label}."
+            ),
         )
 
     labels = []
@@ -1015,6 +1139,93 @@ def _evaluation_agent_labels(
     )
 
 
+def _primary_agent_schedule_slots(primary_agent_schedule, *, num_agents: int):
+    if primary_agent_schedule is None:
+        return None
+    slots = []
+    for agent_id in primary_agent_schedule:
+        agent_id = int(agent_id)
+        if agent_id < 1 or agent_id > int(num_agents):
+            raise ValueError(
+                "primary_agent_schedule must contain 1-based agent ids in "
+                f"[1, {int(num_agents)}], got {agent_id}"
+            )
+        slots.append(agent_id - 1)
+    if not slots:
+        return None
+    return tuple(slots)
+
+
+def _role_split_boxplot(record: dict, *, title: str):
+    if record.get("primary_agent_schedule") is None:
+        return None
+    primary_by_episode = list(record.get("primary_agent_by_episode") or [])
+    opponent_label = record.get("opponent_label")
+    if not primary_by_episode or opponent_label is None:
+        return None
+
+    rewards = np.asarray(record.get("episode_rewards") or [], dtype=np.float64)
+    if rewards.ndim != 2 or rewards.size == 0:
+        return None
+
+    import matplotlib.pyplot as plt
+
+    primary_label = _algorithm_display_label(record.get("primary_label", "Primary"))
+    opponent_display = _algorithm_display_label(opponent_label)
+    slots = np.asarray(primary_by_episode[: rewards.shape[0]], dtype=np.int64) - 1
+    unique_slots = [slot for slot in range(rewards.shape[1]) if np.any(slots == slot)]
+
+    series = []
+    labels = []
+    colors = []
+    for slot in unique_slots:
+        mask = slots == slot
+        values = rewards[mask, slot]
+        if values.size:
+            series.append(values)
+            labels.append(
+                f"{primary_label}\nas Agent {slot + 1}\n(n={int(mask.sum())})"
+            )
+            colors.append("#4C78A8")
+    for slot in unique_slots:
+        mask = slots != slot
+        values = rewards[mask, slot]
+        if values.size:
+            series.append(values)
+            labels.append(
+                f"{opponent_display}\nas Agent {slot + 1}\n(n={int(mask.sum())})"
+            )
+            colors.append("#F58518")
+
+    if not series:
+        return None
+
+    fig, ax = plt.subplots(figsize=(max(8, 2.4 * len(series)), 4.8))
+    try:
+        boxplot = ax.boxplot(
+            series,
+            tick_labels=labels,
+            showmeans=True,
+            patch_artist=True,
+        )
+    except TypeError:  # matplotlib<3.9
+        boxplot = ax.boxplot(
+            series,
+            labels=labels,
+            showmeans=True,
+            patch_artist=True,
+        )
+    for box, color in zip(boxplot.get("boxes", []), colors):
+        box.set_facecolor(color)
+        box.set_alpha(0.55)
+        box.set_edgecolor("#333333")
+    ax.set_title(title)
+    ax.set_ylabel("Evaluation episode reward")
+    ax.grid(axis="y", alpha=0.25)
+    fig.tight_layout()
+    return fig
+
+
 def evaluate_policy_matchup(
     *,
     scenario: LbfNotebookScenario,
@@ -1028,6 +1239,7 @@ def evaluate_policy_matchup(
     video_fps: int = DEFAULT_EVAL_VIDEO_FPS,
     show_progress: bool = True,
     num_envs: int = 1,
+    primary_agent_schedule=None,
 ) -> dict:
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1047,11 +1259,32 @@ def evaluate_policy_matchup(
         else f"{primary_display} vs {opponent_display}"
     )
     plot_title = f"{_scenario_display_label(scenario)}, {primary_display} vs {opponent_display}"
+    primary_schedule_slots = _primary_agent_schedule_slots(
+        primary_agent_schedule,
+        num_agents=NUM_AGENTS,
+    )
+
+    def primary_slot_for_episode(episode_idx: int):
+        if opponent_policy is None:
+            return None
+        if primary_schedule_slots is None:
+            return 0
+        return primary_schedule_slots[int(episode_idx) % len(primary_schedule_slots)]
+
+    primary_agent_by_episode = (
+        [
+            int(primary_slot_for_episode(episode_idx)) + 1
+            for episode_idx in range(int(n_episodes))
+        ]
+        if opponent_policy is not None and primary_schedule_slots is not None
+        else None
+    )
     agent_labels, agent_algorithm_counts, matchup_note = _evaluation_agent_labels(
         primary_label=primary_display,
         opponent_label=None if opponent_label is None else opponent_display,
         total_episodes=n_episodes,
         num_agents=NUM_AGENTS,
+        primary_agent_by_episode=primary_agent_by_episode,
     )
 
     def policy_fn(**kwargs):
@@ -1060,7 +1293,8 @@ def evaluate_policy_matchup(
             return primary_actions
         opponent_actions = _policy_actions(opponent_policy, **kwargs)
         actions = list(opponent_actions)
-        actions[0] = int(primary_actions[0])
+        primary_slot = primary_slot_for_episode(kwargs.get("episode_idx", 0))
+        actions[primary_slot] = int(primary_actions[primary_slot])
         return actions
 
     def policy_batch_fn(contexts):
@@ -1069,12 +1303,14 @@ def evaluate_policy_matchup(
             return primary_actions_batch
         opponent_actions_batch = _policy_actions_batch(opponent_policy, contexts)
         actions_batch = []
-        for primary_actions, opponent_actions in zip(
+        for primary_actions, opponent_actions, context in zip(
             primary_actions_batch,
             opponent_actions_batch,
+            contexts,
         ):
             actions = list(opponent_actions)
-            actions[0] = int(primary_actions[0])
+            primary_slot = primary_slot_for_episode(context.get("episode_idx", 0))
+            actions[primary_slot] = int(primary_actions[primary_slot])
             actions_batch.append(actions)
         return actions_batch
 
@@ -1098,6 +1334,8 @@ def evaluate_policy_matchup(
     )
     all_episode_rewards.extend(rollouts["episode_rewards"])
     all_joint_rewards.extend(rollouts["joint_rewards"])
+    if primary_agent_by_episode is not None:
+        primary_agent_by_episode = primary_agent_by_episode[: len(all_episode_rewards)]
     render_error = render_error or rollouts.get("render_error")
     best_idx = best_joint_reward_rollout_index(rollouts)
     if best_idx is not None and best_idx < len(rollouts.get("rollouts", [])):
@@ -1124,7 +1362,17 @@ def evaluate_policy_matchup(
         "plot_title": plot_title,
         "matchup_note": matchup_note,
         "n_episodes": int(n_episodes),
-        "fixed_primary_agent": 1 if opponent_policy is not None else None,
+        "fixed_primary_agent": (
+            None
+            if opponent_policy is None or primary_schedule_slots is not None
+            else 1
+        ),
+        "primary_agent_schedule": (
+            None
+            if primary_schedule_slots is None
+            else [int(slot) + 1 for slot in primary_schedule_slots]
+        ),
+        "primary_agent_by_episode": primary_agent_by_episode,
         "episode_rewards": all_episode_rewards,
         "joint_rewards": all_joint_rewards,
         "agent_labels": agent_labels,
@@ -1154,6 +1402,15 @@ def evaluate_policy_matchup(
         fig.savefig(boxplot_path, dpi=150)
         record["boxplot_path"] = str(boxplot_path)
         saved_record["boxplot_path"] = str(boxplot_path)
+    role_fig = _role_split_boxplot(
+        record,
+        title=f"{plot_title} - {primary_display} role split",
+    )
+    if role_fig is not None:
+        role_boxplot_path = output_dir / "evaluation_role_boxplot.png"
+        role_fig.savefig(role_boxplot_path, dpi=150)
+        record["role_boxplot_path"] = str(role_boxplot_path)
+        saved_record["role_boxplot_path"] = str(role_boxplot_path)
     if video_frames:
         try:
             video_path = save_rollout_video(
@@ -1195,6 +1452,8 @@ def _skip_record(output_dir: Path, *, scenario, primary_label, opponent_label, e
 def evaluate_deepsrq_path_mcp_pool_suite_for_epsilon(
     epsilon: float,
     *,
+    run_name: str | None = None,
+    manifest_name: str | None = None,
     scenarios: tuple[LbfNotebookScenario, ...] | None = None,
     n_episodes: int = DEFAULT_EVAL_EPISODES,
     repo_root: str | Path | None = None,
@@ -1203,19 +1462,29 @@ def evaluate_deepsrq_path_mcp_pool_suite_for_epsilon(
     num_envs: int = 1,
     hyperparameter_overrides: dict | None = None,
     nplayer_solver_name: str = PATH_C_POOL_SOLVER,
+    primary_agent_schedules: dict | None = None,
 ) -> dict[str, dict]:
     scenarios = scenarios or robust_lbf_scenarios()
+    primary_agent_schedules = dict(primary_agent_schedules or {})
     results = {}
     primary_label = DEEPSRQ_PATH_LCP_FOLDER_NAME
     for scenario in scenarios:
-        base_dir = deepsrq_path_mcp_pool_evaluation_dir(
-            scenario.key,
-            epsilon,
-            repo_root=repo_root,
-        )
+        if run_name is None:
+            base_dir = deepsrq_path_mcp_pool_evaluation_dir(
+                scenario.key,
+                epsilon,
+                repo_root=repo_root,
+            )
+        else:
+            base_dir = deepsrq_path_mcp_pool_named_evaluation_dir(
+                scenario.key,
+                run_name,
+                repo_root=repo_root,
+            )
         primary = load_deepsrq_path_lcp_pool_policy(
             scenario,
             epsilon,
+            run_name=run_name,
             repo_root=repo_root,
             use_gpu=use_gpu,
             sre_solver_workers=sre_solver_workers,
@@ -1235,6 +1504,7 @@ def evaluate_deepsrq_path_mcp_pool_suite_for_epsilon(
             }
             for baseline in BASELINE_ALGORITHMS:
                 out_dir = base_dir / f"vs_{baseline}"
+                primary_agent_schedule = primary_agent_schedules.get(scenario.key)
                 try:
                     opponent = load_baseline_policy(baseline, scenario, use_gpu=use_gpu)
                     try:
@@ -1247,6 +1517,7 @@ def evaluate_deepsrq_path_mcp_pool_suite_for_epsilon(
                             opponent_label=baseline,
                             n_episodes=n_episodes,
                             num_envs=num_envs,
+                            primary_agent_schedule=primary_agent_schedule,
                         )
                     finally:
                         opponent.close()
@@ -1265,13 +1536,25 @@ def evaluate_deepsrq_path_mcp_pool_suite_for_epsilon(
         lbf_grid_dir(repo_root)
         / DEEPSRQ_PATH_LCP_FOLDER_NAME
         / "evaluation"
-        / f"manifest_eps_{epsilon_slug(epsilon)}.json",
+        / (
+            manifest_name
+            or (
+                f"manifest_eps_{epsilon_slug(epsilon)}.json"
+                if run_name is None
+                else f"manifest_{run_name}.json"
+            )
+        ),
         {
             "algorithm": DEEPSRQ_PATH_LCP_FOLDER_NAME,
             "solver_name": PATH_C_POOL_SOLVER,
             "sre_solver_workers": int(sre_solver_workers),
             "num_envs": int(num_envs),
             "epsilon": float(epsilon),
+            "run_name": run_name,
+            "primary_agent_schedules": {
+                str(key): [int(agent_id) for agent_id in value]
+                for key, value in primary_agent_schedules.items()
+            },
             "results": results,
         },
         drop_reward_histories=True,
@@ -1287,10 +1570,15 @@ def display_evaluation_boxplots(results: dict) -> None:
     except Exception:
         for scenario_key, scenario_results in dict(results or {}).items():
             for matchup_key, record in dict(scenario_results or {}).items():
-                boxplot_path = dict(record or {}).get("boxplot_path")
+                boxplot_paths = [
+                    dict(record or {}).get("boxplot_path"),
+                    dict(record or {}).get("role_boxplot_path"),
+                ]
                 status = dict(record or {}).get("status")
-                if boxplot_path:
-                    print(f"{scenario_key} / {matchup_key}: {boxplot_path}")
+                if any(boxplot_paths):
+                    for boxplot_path in boxplot_paths:
+                        if boxplot_path:
+                            print(f"{scenario_key} / {matchup_key}: {boxplot_path}")
                 elif status == "skipped":
                     print(
                         f"{scenario_key} / {matchup_key}: skipped - "
@@ -1301,9 +1589,15 @@ def display_evaluation_boxplots(results: dict) -> None:
     for scenario_key, scenario_results in dict(results or {}).items():
         for matchup_key, record in dict(scenario_results or {}).items():
             record = dict(record or {})
-            boxplot_path = record.get("boxplot_path")
-            if boxplot_path:
-                display(Image(filename=str(boxplot_path)))
+            boxplot_paths = [
+                record.get("boxplot_path"),
+                record.get("role_boxplot_path"),
+            ]
+            if any(boxplot_paths):
+                display(Markdown(f"**{scenario_key} / {matchup_key}**"))
+                for boxplot_path in boxplot_paths:
+                    if boxplot_path:
+                        display(Image(filename=str(boxplot_path)))
                 continue
             if record.get("status") == "skipped":
                 display(

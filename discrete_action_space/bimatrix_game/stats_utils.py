@@ -180,24 +180,28 @@ def _reward_summary(rows, *, agent_first, labels=None):
     if labels is None or len(labels) != agent_values.shape[0]:
         labels = [f"Agent {idx + 1}" for idx in range(agent_values.shape[0])]
     joint = agent_values.sum(axis=0)
+
+    def series_summary(values):
+        return {
+            "mean": float(np.mean(values)),
+            "std": float(np.std(values)),
+            "median": float(np.median(values)),
+            "lower_quartile": float(np.percentile(values, 25)),
+            "upper_quartile": float(np.percentile(values, 75)),
+            "min": float(np.min(values)),
+            "max": float(np.max(values)),
+        }
+
     return {
         "episodes": int(agent_values.shape[1]),
         "per_agent": [
             {
                 "agent": str(labels[idx]),
-                "mean": float(np.mean(agent_values[idx])),
-                "std": float(np.std(agent_values[idx])),
-                "min": float(np.min(agent_values[idx])),
-                "max": float(np.max(agent_values[idx])),
+                **series_summary(agent_values[idx]),
             }
             for idx in range(agent_values.shape[0])
         ],
-        "joint": {
-            "mean": float(np.mean(joint)),
-            "std": float(np.std(joint)),
-            "min": float(np.min(joint)),
-            "max": float(np.max(joint)),
-        },
+        "joint": series_summary(joint),
     }
 
 

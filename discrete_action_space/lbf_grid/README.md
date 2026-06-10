@@ -122,21 +122,22 @@ The wrapper supports two reward modes.
 Native mode is the upstream `lb-foraging` reward logic, optionally normalized by
 the total spawned food level. This is the default for `LBFParallelEnv()`.
 
-Simple food-level mode is used by the active registered benchmark scenarios:
+Native normalized mode is used by the active registered benchmark scenarios:
 
-- `simple_food_rewards=True`;
-- `normalize_reward=False`;
+- `simple_food_rewards=False`;
+- `normalize_reward=True`;
 - `penalty=0.0`;
 - `empty_load_penalty=0.0`.
 
-In simple mode:
+In native normalized mode:
 
 - movement actions, invalid movement converted by the environment, and `NONE`
   produce `0` reward;
 - a load attempt succeeds when loading agents adjacent to the same food have
   enough combined level;
-- successful food collection grants reward equal to the food level, divided
-  evenly among participating loaders;
+- successful food collection grants each participating loader its upstream
+  normalized reward, proportional to `player.level * food_level` and divided by
+  the adjacent loaders' combined level and the total spawned food level;
 - failed insufficient-level loads have no extra penalty in the active scenarios;
 - food is removed after successful loading;
 - an episode ends when all food is collected or the time limit is reached.
@@ -172,8 +173,8 @@ registrations into the Deep SRQ notebook scenario objects.
 | `lbf_8x8_2p_2f_levels12` | 2 agents with levels `[1, 2]`, `8x8` grid, 10 foods with levels `[3, 3, 3, 2, 2, 1, 1, 1, 1, 1]`, full sight, no forced cooperation | `50` |
 | `lbf_8x8_2p_2f_force_coop` | 2 level-1 agents, `8x8` grid, 10 foods with levels `[1, 1, 1, 1, 1, 2, 2, 2, 2, 2]`, full sight, forced cooperation | `50` |
 
-Both scenarios use exact levels, simple food-level rewards, no reward
-normalization, and no failed-load or empty-load shaping penalty.
+Both scenarios use exact levels, native upstream rewards with
+`normalize_reward=True`, and no failed-load or empty-load shaping penalty.
 
 Older output folders may contain additional historical scenarios, but the two
 above are the current code-registered scenarios.

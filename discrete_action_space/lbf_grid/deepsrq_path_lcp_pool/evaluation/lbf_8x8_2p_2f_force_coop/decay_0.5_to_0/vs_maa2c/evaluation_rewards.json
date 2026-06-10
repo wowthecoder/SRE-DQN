@@ -1,0 +1,74 @@
+{
+  "episode_reward_summary": {
+    "episodes": 500,
+    "per_agent": [
+      {
+        "agent": "Agent 1\nDeep SRQ",
+        "mean": 0.05246666666666667,
+        "std": 0.06265003325351606,
+        "median": 0.06666666666666667,
+        "lower_quartile": 0.0,
+        "upper_quartile": 0.06666666666666667,
+        "min": 0.0,
+        "max": 0.3333333333333333
+      },
+      {
+        "agent": "Agent 2\nMAA2C",
+        "mean": 0.022066666666666665,
+        "std": 0.035083329374504924,
+        "median": 0.0,
+        "lower_quartile": 0.0,
+        "upper_quartile": 0.06666666666666667,
+        "min": 0.0,
+        "max": 0.2
+      }
+    ],
+    "joint": {
+      "mean": 0.07453333333333333,
+      "std": 0.07254350418886586,
+      "median": 0.06666666666666667,
+      "lower_quartile": 0.0,
+      "upper_quartile": 0.13333333333333333,
+      "min": 0.0,
+      "max": 0.39999999999999997
+    }
+  },
+  "mean_agent_rewards": [
+    0.05246666666666667,
+    0.022066666666666665
+  ],
+  "mean_joint_reward": 0.07453333333333333,
+  "scenario_key": "lbf_8x8_2p_2f_force_coop",
+  "scenario_name": "2 level-1 agents, 8x8 grid, 10 foods (5 level-1, 5 level-2), full sight, forced cooperation, 50-step episodes",
+  "primary_label": "deepsrq_path_lcp_pool",
+  "opponent_label": "maa2c",
+  "matchup_label": "deepsrq_path_lcp_pool_vs_maa2c",
+  "pair_label": "Deep SRQ vs MAA2C",
+  "plot_title": "Scenario 2, Deep SRQ vs MAA2C",
+  "matchup_note": "Agent 1 uses Deep SRQ; Agents 2-2 use MAA2C.",
+  "n_episodes": 500,
+  "fixed_primary_agent": 1,
+  "primary_agent_schedule": null,
+  "primary_agent_by_episode": null,
+  "agent_labels": [
+    "Agent 1\nDeep SRQ",
+    "Agent 2\nMAA2C"
+  ],
+  "agent_algorithm_counts": [
+    {
+      "agent": 1,
+      "Deep SRQ": 500
+    },
+    {
+      "agent": 2,
+      "MAA2C": 500
+    }
+  ],
+  "video_episode_index": 477,
+  "video_joint_reward": 0.39999999999999997,
+  "render_error": null,
+  "artifact_dir": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_lcp_pool/evaluation/lbf_8x8_2p_2f_force_coop/decay_0.5_to_0/vs_maa2c",
+  "rewards_path": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_lcp_pool/evaluation/lbf_8x8_2p_2f_force_coop/decay_0.5_to_0/vs_maa2c/evaluation_rewards.json",
+  "boxplot_path": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_lcp_pool/evaluation/lbf_8x8_2p_2f_force_coop/decay_0.5_to_0/vs_maa2c/evaluation_boxplot.png",
+  "video_path": "/home/wowthecoder/SRE-DQN/discrete_action_space/lbf_grid/deepsrq_path_lcp_pool/evaluation/lbf_8x8_2p_2f_force_coop/decay_0.5_to_0/vs_maa2c/sample_rollout.gif"
+}
