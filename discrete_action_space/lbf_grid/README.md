@@ -158,9 +158,10 @@ players with only one legal action are removed from the PATH game and then
 expanded back to deterministic full-action policies. This is the main
 LBF-specific algorithmic change relative to the bimatrix grid-world.
 
-The current `deepsrq_path_pool_training.ipynb` sets `USE_ACTION_MASKS = False`,
-so the training cells run the full 6-action game unless that notebook-visible
-flag is changed.
+The current `deepsrq_path_pool_training.ipynb` sets `USE_ACTION_MASKS = True`,
+so the training cells use the reduced legal-action subgames described above.
+Set that notebook-visible flag to `False` to force all solves onto the full
+6-action game.
 
 ## Active Scenarios
 
@@ -204,8 +205,8 @@ Notebook-visible training settings are:
 | Setting | Value |
 |---|---:|
 | `N_EPISODES` | `3000` |
-| Robust epsilons | `0.01`, `0.1`, `0.5`, `1.0` |
-| Robust epsilon schedule | `"constant"` |
+| Constant robust epsilons | `0.01`, `0.1`, `0.5`, `1.0` |
+| Decay robust schedules | `0.5 -> 0.0`, `1.0 -> 0.0` via `epsilon_schedule="linear"` |
 | `BASE_SEED` | `2025`, offset per epsilon/scenario |
 | `EVAL_INTERVAL` | `100` |
 | `EVAL_EPISODES_DURING_TRAINING` | `30` |
@@ -214,7 +215,7 @@ Notebook-visible training settings are:
 | `SRE_SOLVER_WORKERS` | `16` |
 | `PATH_POOL_SOLVER` | `"path_c_pool"` |
 | `SKIP_EXISTING_TRAINING` | `True` |
-| `USE_ACTION_MASKS` | `False` |
+| `USE_ACTION_MASKS` | `True` |
 
 The notebook overrides Deep SRQ hyperparameters with:
 
@@ -223,8 +224,11 @@ The notebook overrides Deep SRQ hyperparameters with:
 | `sre_num_random_starts` | `5` |
 | `sre_num_pure_starts` | `10` |
 | `train_every` | `4` |
-| `target_equilibrium_update_steps` | `1` |
-| `sre_policy_cache_enabled` | `False` |
+| `target_equilibrium_update_steps` | `4` |
+| `sre_policy_cache_enabled` | `True` |
+
+Training does not override `sre_policy_cache_size`, so it uses the
+`DuelingDoubleDqnSreAgentConfig` default of `4096` entries.
 
 The base LBF Deep SRQ hyperparameters in `DeepSrqLbfHyperparams` are:
 
@@ -254,23 +258,29 @@ Notebook-visible evaluation settings are:
 | Setting | Value |
 |---|---:|
 | `EVAL_EPISODES` | `500` |
-| Robust epsilons | `0.01`, `0.1`, `0.5`, `1.0` |
+| Constant robust epsilons | `0.01`, `0.1`, `0.5`, `1.0` |
+| Decay robust schedules | `0.5 -> 0.0`, `1.0 -> 0.0` |
 | `SRE_SOLVER_WORKERS` | `16` |
 | `EVAL_NUM_ENVS` | `16` |
 | `PATH_POOL_SOLVER` | `"path_c_pool"` |
+| `DEEPSRQ_PRIMARY_AGENT_SCHEDULES` | `{"lbf_8x8_2p_2f_levels12": (1, 2)}` |
 
-For each scenario and robust epsilon, the evaluation suite runs:
+For each scenario and run setting, the evaluation suite runs:
 
 - Deep SRQ self-play;
-- Deep SRQ as Agent 1 against IQL;
-- Deep SRQ as Agent 1 against IPPO;
-- Deep SRQ as Agent 1 against MAPPO;
-- Deep SRQ as Agent 1 against MAA2C.
+- Deep SRQ against IQL;
+- Deep SRQ against IPPO;
+- Deep SRQ against MAPPO;
+- Deep SRQ against MAA2C.
 
-The mixed-matchup logic is intentionally asymmetric: the primary Deep SRQ policy
-selects a full joint action, the opponent policy also selects a full joint
-action, and the evaluator uses only Deep SRQ's Agent 1 action while Agents
-2..N come from the baseline policy. This keeps the focal Deep SRQ role fixed.
+The mixed-matchup logic is intentionally asymmetric by default: the primary
+Deep SRQ policy selects a full joint action, the opponent policy also selects a
+full joint action, and the evaluator uses only Deep SRQ's focal-agent action
+while the other slot comes from the baseline policy. With no schedule, the
+focal slot is Agent 1. The current evaluation notebook overrides this for
+`lbf_8x8_2p_2f_levels12` with `DEEPSRQ_PRIMARY_AGENT_SCHEDULES = (1, 2)`, so
+Deep SRQ alternates between the weak and strong roles and writes an additional
+`evaluation_role_boxplot.png`.
 
 Checkpoint loading tries `shared_deepsrq_best.pt` first and falls back to
 `shared_deepsrq_final.pt` if the best checkpoint is missing or incompatible.

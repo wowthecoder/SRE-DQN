@@ -517,15 +517,15 @@ Default YAML hyperparameters:
 | `batch_size` | `64` |
 | `buffer_capacity` | `80_000` |
 | `learning_starts` | `5_000` |
-| `grad_clip` | `10.0`; notebook can pass `None` via `DISABLE_GRAD_CLIPPING=True` |
+| `grad_clip` | `None` |
 | `epsilon_robust_start` | `0.10` |
 | `epsilon_robust_end` | defaults to start if omitted |
 | `epsilon_robust_decay_frac` | `1.0` |
 | `robust_policy_temperature` | `0.1` |
 | `epsilon_explore_start` | `1.0` |
 | `epsilon_explore_mid` | `0.2` |
-| `epsilon_explore_mid_fraction` | `0.8` |
-| `epsilon_explore_end` | `0.1` |
+| `epsilon_explore_mid_fraction` | `0.5` |
+| `epsilon_explore_end` | `0.05` |
 | `mean_field_source` | `opponent` |
 | `target_episodes` | `2_000` |
 | `num_envs` | `16` |

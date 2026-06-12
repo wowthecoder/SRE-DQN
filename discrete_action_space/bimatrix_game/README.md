@@ -223,21 +223,14 @@ It uses `scenario1` and `scenario3`, epsilon start `0.5`, linear epsilon
 schedule, and 3000 episodes. The output root is
 `ablation_runs/network_architecture/`.
 
-### Joint-Q Hidden-Width Tuning
+### Hidden-Width Tuning Status
 
-`deep_srq_joint_q_architecture_tuning.ipynb` keeps `network_type="joint_output"`
-and compares hidden dimensions:
-
-- `(64, 64)`
-- `(128, 64)`
-- `(128, 128)`
-- `(256, 128)`
-- `(256, 256)`
-- `(128, 128, 128)`
-
-It uses `scenario1` and `scenario3`, epsilon start `0.5`, linear schedule, PATH
-pool with 8 workers, and 3000 episodes. The output root is
-`ablation_runs/joint_q_architecture_tuning/`.
+There is no active hidden-width tuning notebook in the current checkout. The
+present notebook-backed architecture ablation is `deep_srq_network_architecture_ablation.ipynb`,
+which compares the three critic layouts listed above while keeping the default
+`q_hidden_dims=(128, 128)`. Do not treat a joint-Q capacity sweep as part of the
+current runnable bimatrix experiment surface unless a new notebook or artifact
+root is added.
 
 ### PATH Restart Ablation
 
